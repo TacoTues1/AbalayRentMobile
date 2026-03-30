@@ -10,16 +10,30 @@ export default function EntryScreen() {
   useEffect(() => {
     const checkSession = async () => {
       try {
+        // First get the locally cached session
         const { data: { session } } = await supabase.auth.getSession();
+
         if (session) {
-          // Already logged in -> go to dashboard
-          router.replace('/(tabs)');
+          // Validate the session against the server (not just local cache)
+          // This prevents stale/expired sessions from auto-logging users in
+          const { data: { user }, error } = await supabase.auth.getUser();
+
+          if (user && !error) {
+            // Session is valid on the server -> go to dashboard
+            router.replace('/(tabs)');
+          } else {
+            // Session is stale/expired -> clear it and show welcome
+            await supabase.auth.signOut();
+            router.replace('/welcome');
+          }
         } else {
-          // Not logged in -> show welcome screen
+          // No session at all -> show welcome screen
           router.replace('/welcome');
         }
       } catch (error) {
         console.log('Session check error:', error);
+        // On any error, clear session and show welcome
+        try { await supabase.auth.signOut(); } catch (e) { /* ignore */ }
         router.replace('/welcome');
       } finally {
         setChecking(false);

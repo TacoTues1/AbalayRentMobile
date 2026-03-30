@@ -4,10 +4,12 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
+import { useTheme } from '../../lib/theme';
 
 
 export default function NotificationsPage() {
   const router = useRouter();
+  const { isDark, colors } = useTheme();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -198,35 +200,55 @@ export default function NotificationsPage() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
+    <SafeAreaView style={[styles.container, { backgroundColor: isDark ? colors.background : '#f9f9f9' }]} edges={['top']}>
+      <View style={[styles.header, { backgroundColor: isDark ? colors.surface : 'white', borderBottomColor: isDark ? colors.border : '#eee' }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)' as any)}>
-            <Ionicons name="arrow-back" size={24} color="black" />
+            <Ionicons name="arrow-back" size={24} color={isDark ? colors.text : 'black'} />
           </TouchableOpacity>
-          <Text style={styles.title}>Notifications</Text>
+          <Text style={[styles.title, { color: isDark ? colors.text : '#000' }]}>Notifications</Text>
         </View>
 
         {notifications.some(n => !n.read) && (
           <TouchableOpacity onPress={markAllAsRead}>
-            <Text style={styles.markReadText}>Mark all read</Text>
+            <Text style={[styles.markReadText, { color: isDark ? colors.accent : 'blue' }]}>Mark all read</Text>
           </TouchableOpacity>
         )}
       </View>
 
       {loading ? (
-        <ActivityIndicator size="large" color="black" style={{ marginTop: 50 }} />
+        <ActivityIndicator size="large" color={isDark ? colors.text : 'black'} style={{ marginTop: 50 }} />
       ) : (
         <FlatList
           data={notifications}
           keyExtractor={item => item.id}
-          renderItem={renderItem}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={[styles.card, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#eee' }, !item.read && (isDark ? { backgroundColor: '#1e2a4a', borderColor: '#2e4070' } : styles.unreadCard)]}
+              onPress={() => handleNotificationClick(item)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.cardContent}>
+                <View style={styles.headerRow}>
+                  <Text style={[styles.typeLabel, getTypeStyle(item.type)]}>
+                    {item.type?.replace('_', ' ') || 'Notification'}
+                  </Text>
+                  {!item.read && <View style={styles.dot} />}
+                </View>
+                <Text style={[styles.message, { color: isDark ? colors.text : '#333' }]}>{item.message}</Text>
+                <Text style={[styles.date, { color: isDark ? colors.textMuted : '#999' }]}>{new Date(item.created_at).toLocaleString()}</Text>
+              </View>
+              <TouchableOpacity onPress={() => confirmDelete(item.id)} style={styles.deleteBtn}>
+                <Ionicons name="trash-outline" size={20} color={isDark ? colors.textMuted : '#999'} />
+              </TouchableOpacity>
+            </TouchableOpacity>
+          )}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           contentContainerStyle={{ padding: 20 }}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Ionicons name="notifications-off-outline" size={50} color="#ccc" />
-              <Text style={styles.emptyText}>No notifications yet</Text>
+              <Ionicons name="notifications-off-outline" size={50} color={isDark ? colors.textMuted : '#ccc'} />
+              <Text style={[styles.emptyText, { color: isDark ? colors.textMuted : '#999' }]}>No notifications yet</Text>
             </View>
           }
         />

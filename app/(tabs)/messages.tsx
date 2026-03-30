@@ -20,10 +20,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
+import { useTheme } from '../../lib/theme';
 
 const { width } = Dimensions.get('window');
 
 export default function Messages() {
+    const { isDark, colors } = useTheme();
     const [session, setSession] = useState<any>(null);
     const [profile, setProfile] = useState<any>(null);
     const [conversations, setConversations] = useState<any[]>([]);
@@ -261,7 +263,7 @@ export default function Messages() {
 
     const pickImage = async () => {
         const res = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            mediaTypes: ['images'],
             base64: true,
             quality: 0.5
         });
@@ -387,147 +389,149 @@ export default function Messages() {
     // ===================== CHAT VIEW =====================
     if (selectedConv) {
         return (
-            <SafeAreaView style={styles.chatContainer} edges={['top']}>
-                {/* Chat Header */}
-                <View style={styles.chatHeader}>
-                    <TouchableOpacity onPress={() => setSelectedConv(null)} style={styles.chatBackBtn}>
-                        <Ionicons name="arrow-back" size={22} color="#111" />
-                    </TouchableOpacity>
-                    <View style={styles.chatHeaderUser}>
-                        {renderAvatar(selectedConv.otherUser, 38)}
-                        <View style={{ flex: 1 }}>
-                            <Text style={styles.chatHeaderName} numberOfLines={1}>
-                                {selectedConv.otherUser?.first_name} {selectedConv.otherUser?.last_name}
-                            </Text>
-                            {selectedConv.propertyTitle && (
-                                <Text style={styles.chatHeaderProp} numberOfLines={1}>
-                                    {selectedConv.propertyTitle}
+            <SafeAreaView style={[styles.chatContainer, { backgroundColor: isDark ? colors.background : '#f9fafb' }]} edges={['top']}>
+                <View style={{ flex: 1, marginBottom: 100 }}>
+                    {/* Chat Header */}
+                    <View style={[styles.chatHeader, { backgroundColor: isDark ? colors.surface : 'white', borderBottomColor: isDark ? colors.border : '#f3f4f6' }]}>
+                        <TouchableOpacity onPress={() => setSelectedConv(null)} style={[styles.chatBackBtn, { backgroundColor: isDark ? colors.card : '#f3f4f6' }]}>
+                            <Ionicons name="arrow-back" size={22} color={isDark ? colors.text : '#111'} />
+                        </TouchableOpacity>
+                        <View style={styles.chatHeaderUser}>
+                            {renderAvatar(selectedConv.otherUser, 38)}
+                            <View style={{ flex: 1 }}>
+                                <Text style={[styles.chatHeaderName, { color: isDark ? colors.text : '#111' }]} numberOfLines={1}>
+                                    {selectedConv.otherUser?.first_name} {selectedConv.otherUser?.last_name}
                                 </Text>
-                            )}
+                                {selectedConv.propertyTitle && (
+                                    <Text style={[styles.chatHeaderProp, { color: isDark ? colors.textMuted : '#9ca3af' }]} numberOfLines={1}>
+                                        {selectedConv.propertyTitle}
+                                    </Text>
+                                )}
+                            </View>
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 4 }}>
+                            <TouchableOpacity onPress={() => loadSharedMedia(selectedConv.id)} style={[styles.chatHeaderAction, { backgroundColor: isDark ? colors.card : '#f3f4f6' }]}>
+                                <Ionicons name="folder-outline" size={20} color={isDark ? colors.textSecondary : '#666'} />
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => deleteConversation(selectedConv.id)} style={[styles.chatHeaderAction, { backgroundColor: isDark ? colors.card : '#f3f4f6' }]}>
+                                <Ionicons name="trash-outline" size={20} color="#ef4444" />
+                            </TouchableOpacity>
                         </View>
                     </View>
-                    <View style={{ flexDirection: 'row', gap: 4 }}>
-                        <TouchableOpacity onPress={() => loadSharedMedia(selectedConv.id)} style={styles.chatHeaderAction}>
-                            <Ionicons name="folder-outline" size={20} color="#666" />
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={() => deleteConversation(selectedConv.id)} style={styles.chatHeaderAction}>
-                            <Ionicons name="trash-outline" size={20} color="#ef4444" />
-                        </TouchableOpacity>
-                    </View>
-                </View>
 
-                {/* Messages */}
-                <FlatList
-                    ref={flatListRef}
-                    data={messages}
-                    keyExtractor={i => i.id}
-                    contentContainerStyle={styles.messageList}
-                    showsVerticalScrollIndicator={false}
-                    renderItem={({ item, index }) => {
-                        const isMe = item.sender_id === session.user.id;
-                        const showDate = index === 0 ||
-                            new Date(item.created_at).toDateString() !==
-                            new Date(messages[index - 1]?.created_at).toDateString();
+                    {/* Messages */}
+                    <FlatList
+                        ref={flatListRef}
+                        data={messages}
+                        keyExtractor={i => i.id}
+                        contentContainerStyle={styles.messageList}
+                        showsVerticalScrollIndicator={false}
+                        renderItem={({ item, index }) => {
+                            const isMe = item.sender_id === session.user.id;
+                            const showDate = index === 0 ||
+                                new Date(item.created_at).toDateString() !==
+                                new Date(messages[index - 1]?.created_at).toDateString();
 
-                        return (
-                            <>
-                                {showDate && (
-                                    <View style={styles.dateSeparator}>
-                                        <View style={styles.dateLine} />
-                                        <Text style={styles.dateText}>
-                                            {new Date(item.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                        </Text>
-                                        <View style={styles.dateLine} />
-                                    </View>
-                                )}
-                                <View style={[styles.msgRow, isMe && { justifyContent: 'flex-end' }]}>
-                                    {!isMe && (
-                                        <View style={{ marginRight: 8 }}>
-                                            {renderAvatar(selectedConv.otherUser, 28)}
+                            return (
+                                <>
+                                    {showDate && (
+                                        <View style={styles.dateSeparator}>
+                                            <View style={styles.dateLine} />
+                                            <Text style={styles.dateText}>
+                                                {new Date(item.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                            </Text>
+                                            <View style={styles.dateLine} />
                                         </View>
                                     )}
-                                    <View style={[styles.msgBubble, isMe ? styles.msgMe : styles.msgOther]}>
-                                        {item.file_url && item.file_type?.startsWith('image') ? (
-                                            <TouchableOpacity onPress={() => downloadFile(item.file_url, 'photo.jpg')}>
-                                                <Image source={{ uri: item.file_url }} style={styles.msgImage} />
-                                                <View style={styles.downloadOverlay}>
-                                                    <Ionicons name="download-outline" size={16} color="white" />
-                                                </View>
-                                            </TouchableOpacity>
-                                        ) : item.file_url ? (
-                                            <TouchableOpacity onPress={() => downloadFile(item.file_url, item.file_name)} style={styles.fileMsg}>
-                                                <View style={styles.fileIconBox}>
-                                                    <Ionicons name="document-outline" size={22} color="#6366f1" />
-                                                </View>
-                                                <View style={{ flex: 1 }}>
-                                                    <Text style={[styles.fileName, isMe && { color: '#e0e7ff' }]} numberOfLines={1}>
-                                                        {item.file_name || 'File'}
-                                                    </Text>
-                                                    <Text style={[styles.fileTap, isMe && { color: 'rgba(255,255,255,0.5)' }]}>Tap to download</Text>
-                                                </View>
-                                                <Ionicons name="download-outline" size={18} color={isMe ? 'rgba(255,255,255,0.7)' : '#6366f1'} />
-                                            </TouchableOpacity>
-                                        ) : (
-                                            <Text style={[styles.msgText, isMe ? styles.textMe : styles.textOther]}>{item.message}</Text>
+                                    <View style={[styles.msgRow, isMe && { justifyContent: 'flex-end' }]}>
+                                        {!isMe && (
+                                            <View style={{ marginRight: 8 }}>
+                                                {renderAvatar(selectedConv.otherUser, 28)}
+                                            </View>
                                         )}
-                                        <Text style={[styles.msgTime, isMe ? styles.timeMe : styles.timeOther]}>
-                                            {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                        </Text>
+                                        <View style={[styles.msgBubble, isMe ? styles.msgMe : [styles.msgOther, isDark && { backgroundColor: colors.card, borderColor: colors.cardBorder }]]}>
+                                            {item.file_url && item.file_type?.startsWith('image') ? (
+                                                <TouchableOpacity onPress={() => downloadFile(item.file_url, 'photo.jpg')}>
+                                                    <Image source={{ uri: item.file_url }} style={styles.msgImage} />
+                                                    <View style={styles.downloadOverlay}>
+                                                        <Ionicons name="download-outline" size={16} color="white" />
+                                                    </View>
+                                                </TouchableOpacity>
+                                            ) : item.file_url ? (
+                                                <TouchableOpacity onPress={() => downloadFile(item.file_url, item.file_name)} style={styles.fileMsg}>
+                                                    <View style={styles.fileIconBox}>
+                                                        <Ionicons name="document-outline" size={22} color="#6366f1" />
+                                                    </View>
+                                                    <View style={{ flex: 1 }}>
+                                                        <Text style={[styles.fileName, isMe && { color: '#e0e7ff' }, !isMe && isDark && { color: colors.text }]} numberOfLines={1}>
+                                                            {item.file_name || 'File'}
+                                                        </Text>
+                                                        <Text style={[styles.fileTap, isMe && { color: 'rgba(255,255,255,0.5)' }]}>Tap to download</Text>
+                                                    </View>
+                                                    <Ionicons name="download-outline" size={18} color={isMe ? 'rgba(255,255,255,0.7)' : '#6366f1'} />
+                                                </TouchableOpacity>
+                                            ) : (
+                                                <Text style={[styles.msgText, isMe ? styles.textMe : [styles.textOther, isDark && { color: colors.text }]]}>{item.message}</Text>
+                                            )}
+                                            <Text style={[styles.msgTime, isMe ? styles.timeMe : styles.timeOther]}>
+                                                {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                            </Text>
+                                        </View>
                                     </View>
-                                </View>
-                            </>
-                        );
-                    }}
-                />
+                                </>
+                            );
+                        }}
+                    />
 
-                {/* Input Bar */}
-                <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
-                    <View style={styles.inputBar}>
-                        <TouchableOpacity onPress={pickFile} style={styles.inputAction}>
-                            <Ionicons name="attach-outline" size={22} color="#9ca3af" />
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={pickImage} style={styles.inputAction}>
-                            <Ionicons name="image-outline" size={22} color="#9ca3af" />
-                        </TouchableOpacity>
-                        <TextInput
-                            style={styles.textInput}
-                            value={text}
-                            onChangeText={setText}
-                            placeholder="Type a message..."
-                            placeholderTextColor="#c4c4c4"
-                            multiline
-                        />
-                        <TouchableOpacity
-                            onPress={() => sendMessage()}
-                            disabled={sending || !text.trim()}
-                            style={[styles.sendBtn, (!text.trim() || sending) && { opacity: 0.4 }]}
-                        >
-                            {sending ? (
-                                <ActivityIndicator color="white" size="small" />
-                            ) : (
-                                <Ionicons name="send" size={18} color="white" />
-                            )}
-                        </TouchableOpacity>
-                    </View>
-                </KeyboardAvoidingView>
+                    {/* Input Bar */}
+                    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
+                        <View style={[styles.inputBar, { backgroundColor: isDark ? colors.surface : 'white', borderTopColor: isDark ? colors.border : '#f3f4f6' }]}>
+                            <TouchableOpacity onPress={pickFile} style={[styles.inputAction, { backgroundColor: isDark ? colors.card : '#f3f4f6' }]}>
+                                <Ionicons name="attach-outline" size={22} color={isDark ? colors.textSecondary : '#9ca3af'} />
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={pickImage} style={[styles.inputAction, { backgroundColor: isDark ? colors.card : '#f3f4f6' }]}>
+                                <Ionicons name="image-outline" size={22} color={isDark ? colors.textSecondary : '#9ca3af'} />
+                            </TouchableOpacity>
+                            <TextInput
+                                style={[styles.textInput, { backgroundColor: isDark ? colors.card : '#f3f4f6', color: isDark ? colors.text : '#111' }]}
+                                value={text}
+                                onChangeText={setText}
+                                placeholder="Type a message..."
+                                placeholderTextColor={isDark ? colors.textMuted : '#c4c4c4'}
+                                multiline
+                            />
+                            <TouchableOpacity
+                                onPress={() => sendMessage()}
+                                disabled={sending || !text.trim()}
+                                style={[styles.sendBtn, (!text.trim() || sending) && { opacity: 0.4 }]}
+                            >
+                                {sending ? (
+                                    <ActivityIndicator color="white" size="small" />
+                                ) : (
+                                    <Ionicons name="send" size={18} color="white" />
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </KeyboardAvoidingView>
+                </View>
 
                 {/* Shared Files Panel */}
                 <Modal visible={showFilesPanel} animationType="slide" presentationStyle="pageSheet">
-                    <SafeAreaView style={styles.filesPanelContainer}>
-                        <View style={styles.filesPanelHeader}>
-                            <Text style={styles.filesPanelTitle}>Shared Files & Photos</Text>
-                            <TouchableOpacity onPress={() => setShowFilesPanel(false)} style={styles.filesPanelClose}>
-                                <Ionicons name="close" size={22} color="#666" />
+                    <SafeAreaView style={[styles.filesPanelContainer, { backgroundColor: isDark ? colors.background : 'white' }]}>
+                        <View style={[styles.filesPanelHeader, { borderBottomColor: isDark ? colors.border : '#f3f4f6' }]}>
+                            <Text style={[styles.filesPanelTitle, { color: isDark ? colors.text : '#111' }]}>Shared Files & Photos</Text>
+                            <TouchableOpacity onPress={() => setShowFilesPanel(false)} style={[styles.filesPanelClose, { backgroundColor: isDark ? colors.card : '#f3f4f6' }]}>
+                                <Ionicons name="close" size={22} color={isDark ? colors.textMuted : '#666'} />
                             </TouchableOpacity>
                         </View>
 
                         {sharedMedia.length === 0 ? (
                             <View style={styles.emptyFiles}>
-                                <View style={styles.emptyFilesIcon}>
-                                    <Ionicons name="folder-open-outline" size={40} color="#d1d5db" />
+                                <View style={[styles.emptyFilesIcon, { backgroundColor: isDark ? colors.card : '#f3f4f6' }]}>
+                                    <Ionicons name="folder-open-outline" size={40} color={isDark ? colors.textMuted : '#d1d5db'} />
                                 </View>
-                                <Text style={styles.emptyFilesTitle}>No shared files yet</Text>
-                                <Text style={styles.emptyFilesSub}>Photos and files shared in this conversation will appear here.</Text>
+                                <Text style={[styles.emptyFilesTitle, { color: isDark ? colors.text : '#111' }]}>No shared files yet</Text>
+                                <Text style={[styles.emptyFilesSub, { color: isDark ? colors.textMuted : '#9ca3af' }]}>Photos and files shared in this conversation will appear here.</Text>
                             </View>
                         ) : (
                             <FlatList
@@ -537,24 +541,24 @@ export default function Messages() {
                                 renderItem={({ item }) => (
                                     <TouchableOpacity
                                         onPress={() => downloadFile(item.file_url, item.file_name)}
-                                        style={styles.sharedFileItem}
+                                        style={[styles.sharedFileItem, { borderBottomColor: isDark ? colors.border : '#f9fafb' }]}
                                     >
                                         {item.file_type?.startsWith('image') ? (
                                             <Image source={{ uri: item.file_url }} style={styles.sharedFileThumb} />
                                         ) : (
-                                            <View style={[styles.sharedFileThumb, styles.sharedFileIcon]}>
+                                            <View style={[styles.sharedFileThumb, styles.sharedFileIcon, isDark && { backgroundColor: 'rgba(99,102,241,0.15)' }]}>
                                                 <Ionicons name="document-outline" size={24} color="#6366f1" />
                                             </View>
                                         )}
                                         <View style={{ flex: 1 }}>
-                                            <Text style={styles.sharedFileName} numberOfLines={1}>
+                                            <Text style={[styles.sharedFileName, { color: isDark ? colors.text : '#111' }]} numberOfLines={1}>
                                                 {item.file_type?.startsWith('image') ? 'Photo' : (item.file_name || 'File')}
                                             </Text>
-                                            <Text style={styles.sharedFileDate}>
+                                            <Text style={[styles.sharedFileDate, { color: isDark ? colors.textMuted : '#9ca3af' }]}>
                                                 {new Date(item.created_at).toLocaleDateString()}
                                             </Text>
                                         </View>
-                                        <View style={styles.sharedFileDownload}>
+                                        <View style={[styles.sharedFileDownload, isDark && { backgroundColor: 'rgba(99,102,241,0.15)' }]}>
                                             <Ionicons name="download-outline" size={18} color="#6366f1" />
                                         </View>
                                     </TouchableOpacity>
@@ -569,12 +573,12 @@ export default function Messages() {
 
     // ===================== CONVERSATION LIST VIEW =====================
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
+        <SafeAreaView style={[styles.container, { backgroundColor: isDark ? colors.background : '#f9fafb' }]} edges={['top']}>
             {/* Page Header */}
-            <View style={styles.header}>
+            <View style={[styles.header, { backgroundColor: isDark ? colors.surface : 'white', borderBottomColor: isDark ? colors.border : '#f3f4f6' }]}>
                 <View>
-                    <Text style={styles.headerTitle}>Messages</Text>
-                    <Text style={styles.headerSub}>
+                    <Text style={[styles.headerTitle, { color: isDark ? colors.text : '#111' }]}>Messages</Text>
+                    <Text style={[styles.headerSub, { color: isDark ? colors.textMuted : '#9ca3af' }]}>
                         {profile?.role === 'tenant'
                             ? 'Chat with your landlord'
                             : `${conversations.length} conversation${conversations.length !== 1 ? 's' : ''}`}
@@ -587,18 +591,18 @@ export default function Messages() {
 
             {loading ? (
                 <View style={styles.loadingBox}>
-                    <ActivityIndicator size="large" color="#111" />
-                    <Text style={styles.loadingText}>Loading conversations...</Text>
+                    <ActivityIndicator size="large" color={isDark ? colors.text : '#111'} />
+                    <Text style={[styles.loadingText, { color: isDark ? colors.textMuted : '#9ca3af' }]}>Loading conversations...</Text>
                 </View>
             ) : conversations.length === 0 ? (
                 <View style={styles.emptyState}>
-                    <View style={styles.emptyIcon}>
-                        <Ionicons name="chatbubble-ellipses-outline" size={48} color="#d1d5db" />
+                    <View style={[styles.emptyIcon, { backgroundColor: isDark ? colors.card : '#f3f4f6' }]}>
+                        <Ionicons name="chatbubble-ellipses-outline" size={48} color={isDark ? colors.textMuted : '#d1d5db'} />
                     </View>
-                    <Text style={styles.emptyTitle}>
+                    <Text style={[styles.emptyTitle, { color: isDark ? colors.text : '#111' }]}>
                         {profile?.role === 'tenant' ? 'No Landlord Found' : 'No Tenants Yet'}
                     </Text>
-                    <Text style={styles.emptySubtitle}>
+                    <Text style={[styles.emptySubtitle, { color: isDark ? colors.textSecondary : '#9ca3af' }]}>
                         {profile?.role === 'tenant'
                             ? "You don't have an active rental yet. Once you're assigned to a property, you can message your landlord here."
                             : "Tenants renting your properties will appear here for messaging."}
@@ -608,16 +612,16 @@ export default function Messages() {
                 <FlatList
                     data={conversations}
                     keyExtractor={i => i.id}
-                    contentContainerStyle={{ paddingBottom: 20 }}
+                    contentContainerStyle={{ paddingBottom: 130 }}
                     renderItem={({ item }) => (
-                        <TouchableOpacity onPress={() => setSelectedConv(item)} style={styles.convItem} activeOpacity={0.7}>
+                        <TouchableOpacity onPress={() => setSelectedConv(item)} style={[styles.convItem, { backgroundColor: isDark ? colors.surface : 'white', borderBottomColor: isDark ? colors.border : '#f9fafb' }]} activeOpacity={0.7}>
                             <View style={styles.convAvatarWrap}>
                                 {renderAvatar(item.otherUser, 52)}
                                 <View style={styles.onlineDot} />
                             </View>
                             <View style={styles.convContent}>
                                 <View style={styles.convTopRow}>
-                                    <Text style={styles.convName} numberOfLines={1}>
+                                    <Text style={[styles.convName, { color: isDark ? colors.text : '#111' }]} numberOfLines={1}>
                                         {item.otherUser?.first_name} {item.otherUser?.last_name}
                                     </Text>
                                     <Text style={styles.convTime}>
@@ -625,12 +629,12 @@ export default function Messages() {
                                     </Text>
                                 </View>
                                 {item.propertyTitle && (
-                                    <View style={styles.convPropertyTag}>
+                                    <View style={[styles.convPropertyTag, isDark && { backgroundColor: 'rgba(99,102,241,0.15)' }]}>
                                         <Ionicons name="home-outline" size={10} color="#6366f1" />
                                         <Text style={styles.convPropertyText}>{item.propertyTitle}</Text>
                                     </View>
                                 )}
-                                <Text style={styles.convPreview} numberOfLines={1}>
+                                <Text style={[styles.convPreview, { color: isDark ? colors.textMuted : '#9ca3af' }]} numberOfLines={1}>
                                     {getMessagePreview(item)}
                                 </Text>
                             </View>

@@ -22,9 +22,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { createNotification } from '../../lib/notifications';
 import { supabase } from '../../lib/supabase';
+import { useTheme } from '../../lib/theme';
 
 export default function MaintenanceScreen() {
   const router = useRouter();
+  const { isDark, colors } = useTheme();
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [requests, setRequests] = useState<any[]>([]);
@@ -535,7 +537,7 @@ export default function MaintenanceScreen() {
 
   const pickImages = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      mediaTypes: ['images', 'videos'],
       allowsMultipleSelection: true,
       quality: 0.5,
       base64: true,
@@ -642,13 +644,13 @@ export default function MaintenanceScreen() {
     const pStyle = priorityStyles[item.priority] || priorityStyles.normal;
 
     return (
-      <View style={styles.card}>
+      <View style={[styles.card, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}>
         {/* Header Strip */}
-        <View style={styles.cardHeaderStrip}>
+        <View style={[styles.cardHeaderStrip, { backgroundColor: isDark ? colors.surface : '#f9fafb', borderBottomColor: isDark ? colors.border : '#f3f4f6' }]}>
           <View style={styles.cardHeaderLeft}>
             <View style={styles.idBadgeWrap}>
-              <Text style={styles.idLabel}>ID:</Text>
-              <Text style={styles.idBadge}>{item.id.substring(0, 8).toUpperCase()}</Text>
+              <Text style={[styles.idLabel, { color: isDark ? colors.textMuted : '#9ca3af' }]}>ID:</Text>
+              <Text style={[styles.idBadge, { color: isDark ? colors.text : '#111' }]}>{item.id.substring(0, 8).toUpperCase()}</Text>
             </View>
             <View style={[styles.statusBadge, { backgroundColor: statusColors[item.status] || '#f3f4f6' }]}>
               <Text style={[styles.statusText, { color: statusTextColors[item.status] || '#1f2937' }]}>
@@ -656,14 +658,14 @@ export default function MaintenanceScreen() {
               </Text>
             </View>
           </View>
-          <Text style={styles.dateText}>
+          <Text style={[styles.dateText, { color: isDark ? colors.textMuted : '#9ca3af' }]}>
             {new Date(item.created_at).toLocaleDateString()} at {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </Text>
         </View>
 
         <View style={styles.cardBody}>
           {/* Title & Info */}
-          <Text style={styles.cardTitle}>{item.title}</Text>
+          <Text style={[styles.cardTitle, { color: isDark ? colors.text : '#111' }]}>{item.title}</Text>
 
           <View style={styles.metaRow}>
             <View style={styles.metaItem}>
@@ -843,12 +845,12 @@ export default function MaintenanceScreen() {
 
   // --- MAIN RENDER ---
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: isDark ? colors.background : '#f9fafb' }]} edges={['top']}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: isDark ? colors.surface : 'white', borderBottomColor: isDark ? colors.border : '#f3f4f6' }]}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.headerTitle}>{profile?.role === 'landlord' ? 'Maintenance Board' : 'My Requests'}</Text>
-          <Text style={styles.headerSubtitle}>
+          <Text style={[styles.headerTitle, { color: isDark ? colors.text : '#111' }]}>{profile?.role === 'landlord' ? 'Maintenance Board' : 'My Requests'}</Text>
+          <Text style={[styles.headerSubtitle, { color: isDark ? colors.textMuted : '#6b7280' }]}>
             {profile?.role === 'landlord'
               ? 'Manage and track requests from your properties.'
               : 'Report issues and track resolution status.'}
@@ -862,19 +864,19 @@ export default function MaintenanceScreen() {
       </View>
 
       {/* Filters */}
-      <View style={styles.filterContainer}>
-        <View style={styles.searchBox}>
-          <Ionicons name="search" size={16} color="#9ca3af" />
+      <View style={[styles.filterContainer, { backgroundColor: isDark ? colors.background : '#f9fafb' }]}>
+        <View style={[styles.searchBox, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}>
+          <Ionicons name="search" size={16} color={isDark ? colors.textMuted : '#9ca3af'} />
           <TextInput
             placeholder="Search by Request ID..."
-            placeholderTextColor="#c4c4c4"
+            placeholderTextColor={isDark ? colors.textMuted : '#c4c4c4'}
             value={searchId}
             onChangeText={setSearchId}
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: isDark ? colors.text : '#111' }]}
           />
           {searchId.length > 0 && (
             <TouchableOpacity onPress={() => setSearchId('')}>
-              <Ionicons name="close-circle" size={18} color="#ccc" />
+              <Ionicons name="close-circle" size={18} color={isDark ? colors.textMuted : '#ccc'} />
             </TouchableOpacity>
           )}
         </View>
@@ -883,9 +885,9 @@ export default function MaintenanceScreen() {
             <TouchableOpacity
               key={status}
               onPress={() => setStatusFilter(status)}
-              style={[styles.filterChip, statusFilter === status && styles.filterChipActive]}
+              style={[styles.filterChip, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }, statusFilter === status && [styles.filterChipActive, { backgroundColor: isDark ? 'white' : '#111' }]]}
             >
-              <Text style={[styles.filterChipText, statusFilter === status && styles.filterChipTextActive]}>
+              <Text style={[styles.filterChipText, { color: isDark ? colors.textMuted : '#6b7280' }, statusFilter === status && [styles.filterChipTextActive, { color: isDark ? '#111' : 'white' }]]}>
                 {status === 'all' ? 'ALL' : status.replace('_', ' ').toUpperCase()}
               </Text>
             </TouchableOpacity>
@@ -904,7 +906,7 @@ export default function MaintenanceScreen() {
           data={filteredRequests}
           renderItem={renderItem}
           keyExtractor={item => item.id}
-          contentContainerStyle={{ padding: 16, paddingBottom: 20 }}
+          contentContainerStyle={{ padding: 16, paddingBottom: 130 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={
             <View style={styles.emptyState}>
@@ -924,11 +926,11 @@ export default function MaintenanceScreen() {
 
       {/* =================== CREATE REQUEST MODAL =================== */}
       <Modal visible={showCreateModal} animationType="slide" presentationStyle="pageSheet">
-        <SafeAreaView style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>New Maintenance Request</Text>
+        <SafeAreaView style={[styles.modalContainer, { backgroundColor: isDark ? colors.background : '#f9fafb' }]}>
+          <View style={[styles.modalHeader, { backgroundColor: isDark ? colors.surface : 'white', borderBottomColor: isDark ? colors.border : '#f3f4f6' }]}>
+            <Text style={[styles.modalTitle, { color: isDark ? colors.text : '#111' }]}>New Maintenance Request</Text>
             <TouchableOpacity onPress={() => setShowCreateModal(false)} style={styles.modalClose}>
-              <Ionicons name="close" size={20} color="#666" />
+              <Ionicons name="close" size={20} color={isDark ? colors.textMuted : '#666'} />
             </TouchableOpacity>
           </View>
           <ScrollView style={styles.modalBody} contentContainerStyle={{ paddingBottom: 40 }}>
@@ -941,18 +943,18 @@ export default function MaintenanceScreen() {
             ) : (
               <>
                 {/* Property */}
-                <Text style={styles.label}>PROPERTY</Text>
-                <View style={styles.inputDisabled}>
-                  <Ionicons name="home-outline" size={16} color="#9ca3af" />
-                  <Text style={styles.inputDisabledText}>{occupiedProperty?.title || properties[0]?.title || 'No Property'}</Text>
+                <Text style={[styles.label, { color: isDark ? colors.textMuted : '#6b7280' }]}>PROPERTY</Text>
+                <View style={[styles.inputDisabled, { backgroundColor: isDark ? colors.card : '#f9fafb', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}>
+                  <Ionicons name="home-outline" size={16} color={isDark ? colors.textMuted : '#9ca3af'} />
+                  <Text style={[styles.inputDisabledText, { color: isDark ? colors.text : '#374151' }]}>{occupiedProperty?.title || properties[0]?.title || 'No Property'}</Text>
                 </View>
 
                 {/* Title */}
-                <Text style={styles.label}>ISSUE TITLE</Text>
+                <Text style={[styles.label, { color: isDark ? colors.textMuted : '#6b7280' }]}>ISSUE TITLE</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#e5e7eb', color: isDark ? colors.text : '#111' }]}
                   placeholder="e.g. Leaking faucet in kitchen"
-                  placeholderTextColor="#c4c4c4"
+                  placeholderTextColor={isDark ? colors.textMuted : '#c4c4c4'}
                   value={formData.title}
                   onChangeText={t => setFormData({ ...formData, title: t })}
                 />
@@ -1024,17 +1026,17 @@ export default function MaintenanceScreen() {
       {/* =================== CANCEL CONFIRM MODAL =================== */}
       <Modal visible={showCancelModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+          <View style={[styles.modalCard, { backgroundColor: isDark ? colors.surface : 'white' }]}>
             <View style={styles.modalCardIcon}>
               <Ionicons name="warning-outline" size={28} color="#ef4444" />
             </View>
-            <Text style={styles.modalCardTitle}>Cancel Maintenance Request?</Text>
-            <Text style={styles.modalCardSub}>
+            <Text style={[styles.modalCardTitle, { color: isDark ? colors.text : '#111' }]}>Cancel Maintenance Request?</Text>
+            <Text style={[styles.modalCardSub, { color: isDark ? colors.textMuted : '#6b7280' }]}>
               Are you sure you want to cancel: "{requestToCancel?.title}"?
             </Text>
             <View style={styles.modalActions}>
-              <TouchableOpacity onPress={() => setShowCancelModal(false)} style={styles.secondaryBtn}>
-                <Text style={styles.secondaryBtnText}>No, Keep</Text>
+              <TouchableOpacity onPress={() => setShowCancelModal(false)} style={[styles.secondaryBtn, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#e5e7eb' }]}>
+                <Text style={[styles.secondaryBtnText, { color: isDark ? colors.text : '#374151' }]}>No, Keep</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={confirmCancel} style={[styles.primaryBtnSmall, { backgroundColor: '#ef4444' }]}>
                 <Text style={styles.primaryBtnText}>Yes, Cancel</Text>
@@ -1047,8 +1049,8 @@ export default function MaintenanceScreen() {
       {/* =================== SCHEDULE / START WORK MODAL =================== */}
       <Modal visible={showScheduleModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalCardTitle}>Set Start Date & Assign Repairman</Text>
+          <View style={[styles.modalCard, { backgroundColor: isDark ? colors.surface : 'white' }]}>
+            <Text style={[styles.modalCardTitle, { color: isDark ? colors.text : '#111' }]}>Set Start Date & Assign Repairman</Text>
 
             <Text style={styles.label}>START DATE</Text>
             <TouchableOpacity onPress={() => setShowDatePicker(true)} style={styles.datePickerBtn}>

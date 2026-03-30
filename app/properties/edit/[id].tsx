@@ -177,7 +177,7 @@ export default function EditProperty() {
   // --- IMAGE UPLOAD LOGIC ---
   const pickImage = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       quality: 0.7,
       base64: true,

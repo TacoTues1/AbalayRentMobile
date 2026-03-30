@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
+import { useTheme } from '../../lib/theme';
 
 const { width } = Dimensions.get('window');
 
@@ -22,6 +23,7 @@ export default function LandlordProperties() {
     const [session, setSession] = useState<any>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
+    const { isDark, colors } = useTheme();
 
     useEffect(() => {
         checkAuthAndLoad();
@@ -103,7 +105,7 @@ export default function LandlordProperties() {
         return (
             <TouchableOpacity
                 key={item.id}
-                style={styles.card}
+                style={[styles.card, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}
                 onPress={() => router.push(`/properties/${item.id}` as any)}
                 activeOpacity={0.9}
             >
@@ -127,31 +129,31 @@ export default function LandlordProperties() {
                 </View>
 
                 <View style={styles.cardContent}>
-                    <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
+                    <Text style={[styles.cardTitle, { color: isDark ? colors.text : '#111' }]} numberOfLines={1}>{item.title}</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
-                        <Ionicons name="location-outline" size={12} color="#9ca3af" />
-                        <Text style={styles.cardAddress} numberOfLines={1}>{item.address}, {item.city}</Text>
+                        <Ionicons name="location-outline" size={12} color={isDark ? colors.textMuted : '#9ca3af'} />
+                        <Text style={[styles.cardAddress, { color: isDark ? colors.textMuted : '#9ca3af' }]} numberOfLines={1}>{item.address}, {item.city}</Text>
                     </View>
 
-                    <View style={styles.metaBox}>
-                        <Ionicons name="bed-outline" size={14} color="#666" />
-                        <Text style={styles.metaText}>{item.bedrooms} Beds</Text>
-                        <Text style={{ color: '#ddd' }}>|</Text>
-                        <Ionicons name="water-outline" size={14} color="#666" />
-                        <Text style={styles.metaText}>{item.bathrooms} Bath</Text>
-                        <Text style={{ color: '#ddd' }}>|</Text>
-                        <Ionicons name="resize-outline" size={14} color="#666" />
-                        <Text style={styles.metaText}>{item.area_sqft} sqm</Text>
+                    <View style={[styles.metaBox, { borderTopColor: isDark ? colors.border : '#f3f4f6' }]}>
+                        <Ionicons name="bed-outline" size={14} color={isDark ? colors.textSecondary : '#666'} />
+                        <Text style={[styles.metaText, { color: isDark ? colors.textSecondary : '#666' }]}>{item.bedrooms} Beds</Text>
+                        <Text style={{ color: isDark ? colors.border : '#ddd' }}>|</Text>
+                        <Ionicons name="water-outline" size={14} color={isDark ? colors.textSecondary : '#666'} />
+                        <Text style={[styles.metaText, { color: isDark ? colors.textSecondary : '#666' }]}>{item.bathrooms} Bath</Text>
+                        <Text style={{ color: isDark ? colors.border : '#ddd' }}>|</Text>
+                        <Ionicons name="resize-outline" size={14} color={isDark ? colors.textSecondary : '#666'} />
+                        <Text style={[styles.metaText, { color: isDark ? colors.textSecondary : '#666' }]}>{item.area_sqft} sqm</Text>
                     </View>
 
                     {/* Action Buttons */}
                     <View style={styles.actionRow}>
                         <TouchableOpacity
-                            style={styles.actionBtn}
+                            style={[styles.actionBtn, { backgroundColor: isDark ? colors.surface : 'white', borderColor: isDark ? colors.border : '#e5e7eb' }]}
                             onPress={(e) => { e.stopPropagation(); router.push(`/properties/${item.id}` as any); }}
                         >
-                            <Ionicons name="eye-outline" size={14} color="#111" />
-                            <Text style={styles.actionBtnText}>View</Text>
+                            <Ionicons name="eye-outline" size={14} color={isDark ? colors.text : '#111'} />
+                            <Text style={[styles.actionBtnText, { color: isDark ? colors.text : '#111' }]}>View</Text>
                         </TouchableOpacity>
 
                     </View>
@@ -161,55 +163,55 @@ export default function LandlordProperties() {
     };
 
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
+        <SafeAreaView style={[styles.container, { backgroundColor: isDark ? colors.background : '#f9fafb' }]} edges={['top']}>
             {loading ? (
-                <ActivityIndicator size="large" color="#111" style={{ marginTop: 50 }} />
+                <ActivityIndicator size="large" color={isDark ? 'white' : '#111'} style={{ marginTop: 50 }} />
             ) : (
                 <ScrollView
                     contentContainerStyle={styles.scrollContent}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                 >
                     {/* Header */}
-                    <View style={styles.header}>
-                        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-                            <Ionicons name="arrow-back" size={22} color="#111" />
+                    <View style={[styles.header, { backgroundColor: isDark ? colors.surface : 'white', borderBottomColor: isDark ? colors.border : '#f3f4f6' }]}>
+                        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { backgroundColor: isDark ? colors.card : '#f3f4f6' }]}>
+                            <Ionicons name="arrow-back" size={22} color={isDark ? colors.text : '#111'} />
                         </TouchableOpacity>
                         <View style={{ flex: 1 }}>
-                            <Text style={styles.headerTitle}>My Properties</Text>
-                            <Text style={styles.headerSub}>{totalCount} total properties</Text>
+                            <Text style={[styles.headerTitle, { color: isDark ? colors.text : '#111' }]}>My Properties</Text>
+                            <Text style={[styles.headerSub, { color: isDark ? colors.textMuted : '#9ca3af' }]}>{totalCount} total properties</Text>
                         </View>
                     </View>
 
                     {/* Stats Row */}
-                    <View style={styles.statsRow}>
-                        <View style={[styles.statBox, { borderColor: '#ecfdf5' }]}>
+                    <View style={[styles.statsRow, { backgroundColor: isDark ? colors.surface : 'white' }]}>
+                        <View style={[styles.statBox, { backgroundColor: isDark ? colors.card : '#fafafa', borderColor: isDark ? colors.cardBorder : '#ecfdf5' }]}>
                             <Text style={[styles.statNum, { color: '#059669' }]}>{availableCount}</Text>
-                            <Text style={styles.statLabel}>Available</Text>
+                            <Text style={[styles.statLabel, { color: isDark ? colors.textMuted : '#9ca3af' }]}>Available</Text>
                         </View>
-                        <View style={[styles.statBox, { borderColor: '#fef2f2' }]}>
+                        <View style={[styles.statBox, { backgroundColor: isDark ? colors.card : '#fafafa', borderColor: isDark ? colors.cardBorder : '#fef2f2' }]}>
                             <Text style={[styles.statNum, { color: '#ef4444' }]}>{occupiedCount}</Text>
-                            <Text style={styles.statLabel}>Occupied</Text>
+                            <Text style={[styles.statLabel, { color: isDark ? colors.textMuted : '#9ca3af' }]}>Occupied</Text>
                         </View>
-                        <View style={[styles.statBox, { borderColor: '#f3f4f6' }]}>
-                            <Text style={[styles.statNum, { color: '#111' }]}>{totalCount}</Text>
-                            <Text style={styles.statLabel}>Total</Text>
+                        <View style={[styles.statBox, { backgroundColor: isDark ? colors.card : '#fafafa', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}>
+                            <Text style={[styles.statNum, { color: isDark ? colors.text : '#111' }]}>{totalCount}</Text>
+                            <Text style={[styles.statLabel, { color: isDark ? colors.textMuted : '#9ca3af' }]}>Total</Text>
                         </View>
                     </View>
 
                     {/* Search */}
                     <View style={styles.searchContainer}>
-                        <View style={styles.searchBar}>
-                            <Ionicons name="search" size={18} color="#9ca3af" />
+                        <View style={[styles.searchBar, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#e5e7eb' }]}>
+                            <Ionicons name="search" size={18} color={isDark ? colors.textMuted : '#9ca3af'} />
                             <TextInput
                                 placeholder="Search your properties..."
-                                placeholderTextColor="#c4c4c4"
-                                style={styles.searchInput}
+                                placeholderTextColor={isDark ? colors.textMuted : '#c4c4c4'}
+                                style={[styles.searchInput, { color: isDark ? colors.text : '#111' }]}
                                 value={searchQuery}
                                 onChangeText={setSearchQuery}
                             />
                             {searchQuery.length > 0 && (
                                 <TouchableOpacity onPress={() => setSearchQuery('')}>
-                                    <Ionicons name="close-circle" size={18} color="#ccc" />
+                                    <Ionicons name="close-circle" size={18} color={isDark ? colors.textMuted : '#ccc'} />
                                 </TouchableOpacity>
                             )}
                         </View>
@@ -222,9 +224,9 @@ export default function LandlordProperties() {
                                 <TouchableOpacity
                                     key={f}
                                     onPress={() => setStatusFilter(f)}
-                                    style={[styles.filterChip, statusFilter === f && styles.filterChipActive]}
+                                    style={[styles.filterChip, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#e5e7eb' }, statusFilter === f && [styles.filterChipActive, { backgroundColor: isDark ? 'white' : '#111', borderColor: isDark ? 'white' : '#111' }]]}
                                 >
-                                    <Text style={[styles.filterChipText, statusFilter === f && styles.filterChipTextActive]}>
+                                    <Text style={[styles.filterChipText, { color: isDark ? colors.textMuted : '#666' }, statusFilter === f && [styles.filterChipTextActive, { color: isDark ? '#111' : 'white' }]]}>
                                         {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
                                     </Text>
                                 </TouchableOpacity>
@@ -235,11 +237,11 @@ export default function LandlordProperties() {
                     {/* Property Cards */}
                     {filteredData.length === 0 ? (
                         <View style={styles.emptyState}>
-                            <View style={styles.emptyIcon}>
-                                <Ionicons name="home-outline" size={40} color="#d1d5db" />
+                            <View style={[styles.emptyIcon, { backgroundColor: isDark ? colors.card : '#f3f4f6' }]}>
+                                <Ionicons name="home-outline" size={40} color={isDark ? colors.textMuted : '#d1d5db'} />
                             </View>
-                            <Text style={styles.emptyTitle}>No properties yet</Text>
-                            <Text style={styles.emptySubtitle}>Add your first property from the dashboard.</Text>
+                            <Text style={[styles.emptyTitle, { color: isDark ? colors.text : '#111' }]}>No properties yet</Text>
+                            <Text style={[styles.emptySubtitle, { color: isDark ? colors.textMuted : '#9ca3af' }]}>Add your first property from the dashboard.</Text>
                         </View>
                     ) : (
                         filteredData.map(renderCard)
@@ -283,7 +285,7 @@ const styles = StyleSheet.create({
     filterChipText: { fontSize: 12, fontWeight: '700', color: '#666' },
     filterChipTextActive: { color: 'white' },
 
-    scrollContent: { paddingBottom: 20 },
+    scrollContent: { paddingBottom: 130 },
 
     card: {
         backgroundColor: 'white', borderRadius: 20, overflow: 'hidden',

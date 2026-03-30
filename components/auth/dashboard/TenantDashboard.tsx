@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -26,12 +26,14 @@ import CalendarPicker from '../../../components/ui/CalendarPicker';
 import { useRealtime } from '../../../hooks/useRealtime';
 import { createNotification } from '../../../lib/notifications';
 import { supabase } from '../../../lib/supabase';
+import { useTheme } from '../../../lib/theme';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = width * 0.75;
 
 export default function TenantDashboard({ session, profile }: any) {
     const router = useRouter();
+    const { isDark, colors } = useTheme();
 
     // --- STATE ---
     const [properties, setProperties] = useState<any[]>([]);
@@ -44,6 +46,42 @@ export default function TenantDashboard({ session, profile }: any) {
     const [propertyStats, setPropertyStats] = useState<any>({});
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+
+    // No-occupancy browse state
+    const [noOccupancySearch, setNoOccupancySearch] = useState('');
+    const [noOccupancyCityFilter, setNoOccupancyCityFilter] = useState<string | null>(null);
+    const [noOccupancySortBy, setNoOccupancySortBy] = useState<'newest' | 'price_asc' | 'price_desc' | 'rating'>('newest');
+    const [noOccupancyBedrooms, setNoOccupancyBedrooms] = useState<number | null>(null);
+    const [noOccupancyMaxPrice, setNoOccupancyMaxPrice] = useState<number | null>(null);
+    const [showBrowseFilterModal, setShowBrowseFilterModal] = useState(false);
+    const [noOccupancyPriceRange, setNoOccupancyPriceRange] = useState({ min: '', max: '' });
+    const [noOccupancyMinRating, setNoOccupancyMinRating] = useState(0);
+    const [noOccupancyFilterFavorites, setNoOccupancyFilterFavorites] = useState(false);
+    const [noOccupancySelectedAmenities, setNoOccupancySelectedAmenities] = useState<string[]>([]);
+
+    const browseAvailableAmenities = [
+        'Wifi', 'Air Condition', 'Washing Machine', 'Parking',
+        'Hot Shower', 'Bathroom', 'Smoke Alarm', 'Veranda',
+        'Fire Extinguisher', 'Outside Garden', 'Furnished',
+        'Semi-Furnished', 'Pet Friendly', 'Kitchen', 'Smart TV'
+    ];
+
+    const browseClearFilters = () => {
+        setNoOccupancySortBy('newest');
+        setNoOccupancyBedrooms(null);
+        setNoOccupancyMaxPrice(null);
+        setNoOccupancyPriceRange({ min: '', max: '' });
+        setNoOccupancyMinRating(0);
+        setNoOccupancyFilterFavorites(false);
+        setNoOccupancySelectedAmenities([]);
+        setNoOccupancyCityFilter(null);
+    };
+
+    const browseToggleAmenity = (a: string) => {
+        setNoOccupancySelectedAmenities(prev =>
+            prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a]
+        );
+    };
 
     // Active Property State
     const [activePropertyImageIndex, setActivePropertyImageIndex] = useState(0);
@@ -95,12 +133,15 @@ export default function TenantDashboard({ session, profile }: any) {
     const [endRequestReason, setEndRequestReason] = useState('');
     const [submittingEndRequest, setSubmittingEndRequest] = useState(false);
 
+    // Track if user already skipped the review modal this session
+    const reviewSkippedThisSession = useRef(false);
+
     // --- INITIAL LOAD ---
     useEffect(() => {
-        if (profile) {
+        if (session) {
             loadInitialData();
         }
-    }, [profile]);
+    }, [session, profile]);
 
     useRealtime(
         ['tenant_occupancies', 'payment_requests', 'payments', 'tenant_balances'],
@@ -143,13 +184,18 @@ export default function TenantDashboard({ session, profile }: any) {
     }, []);
 
     async function loadInitialData() {
-        await Promise.all([
-            loadPropertiesData(),
-            loadOccupancyData(),
-            checkPendingReviews()
-        ]);
-        setLoading(false);
-        setRefreshing(false);
+        try {
+            await Promise.all([
+                loadPropertiesData(),
+                loadOccupancyData(),
+                checkPendingReviews()
+            ]);
+        } catch (error) {
+            console.error('Error loading initial data:', error);
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
     }
 
     // --- DATA FETCHING ---
@@ -197,7 +243,11 @@ export default function TenantDashboard({ session, profile }: any) {
             const API_URL = process.env.EXPO_PUBLIC_API_URL;
             if (API_URL) {
                 try {
-                    const fmRes = await fetch(`${API_URL}api/family-members?member_id=${session.user.id}`);
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 8000);
+                    const fmRes = await fetch(`${API_URL}api/family-members?member_id=${session.user.id}`, { signal: controller.signal });
+                    clearTimeout(timeoutId);
+
                     if (fmRes.ok) {
                         const fmData = await fmRes.json();
                         if (fmData.occupancy) {
@@ -932,6 +982,8 @@ export default function TenantDashboard({ session, profile }: any) {
 
     const checkPendingReviews = async () => {
         if (!session?.user) return;
+        // Don't show review modal again if user already skipped it this session
+        if (reviewSkippedThisSession.current) return;
         try {
             const { data: ended } = await supabase.from('tenant_occupancies').select('*, property:properties(title, id, address, city)').eq('tenant_id', session.user.id).eq('status', 'ended');
             const { data: reviews } = await supabase.from('reviews').select('occupancy_id').eq('user_id', session.user.id);
@@ -966,6 +1018,9 @@ export default function TenantDashboard({ session, profile }: any) {
     };
 
     const handleSkipReview = async () => {
+        // Always mark as skipped for this session so it won't reappear on realtime updates
+        reviewSkippedThisSession.current = true;
+
         if (dontShowAgain && reviewTarget) {
             try {
                 const dismissedStr = await AsyncStorage.getItem('dismissedReviews');
@@ -988,12 +1043,17 @@ export default function TenantDashboard({ session, profile }: any) {
 
     // --- RENDERS ---
 
+    // Compute Top Rated & Most Favorite property IDs
+    const statsArray = Object.values(propertyStats) as any[];
+    const mostFavId = statsArray.filter((s: any) => (s.favorite_count || 0) > 0).sort((a: any, b: any) => b.favorite_count - a.favorite_count)[0]?.property_id || null;
+    const topRatedId = statsArray.filter((s: any) => (s.review_count || 0) > 0).sort((a: any, b: any) => (b.avg_rating || 0) - (a.avg_rating || 0) || b.review_count - a.review_count)[0]?.property_id || null;
+
     const renderCard = (item: any) => {
         const isFav = favorites.includes(item.id);
         const isCompare = comparisonList.some(c => c.id === item.id);
         const stats = propertyStats[item.id] || { favorite_count: 0, avg_rating: 0, review_count: 0 };
         return (
-            <TouchableOpacity key={item.id} style={styles.card} activeOpacity={0.9} onPress={() => router.push(`/properties/${item.id}` as any)}>
+            <TouchableOpacity key={item.id} style={[styles.card, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]} activeOpacity={0.9} onPress={() => router.push(`/properties/${item.id}` as any)}>
                 <View style={styles.cardImageContainer}>
                     <Image source={{ uri: item.images?.[0] || 'https://via.placeholder.com/400' }} style={styles.cardImage} />
                     <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)']} style={styles.cardGradient} />
@@ -1002,6 +1062,18 @@ export default function TenantDashboard({ session, profile }: any) {
                             <Text style={[styles.badgeText, item.status === 'available' ? styles.textDark : styles.textWhite]}>{item.status === 'available' ? 'Available' : 'Occupied'}</Text>
                         </View>
                         {stats.favorite_count >= 1 && <View style={[styles.badge, styles.badgeFav]}><Ionicons name="heart" size={10} color="white" /><Text style={[styles.badgeText, styles.textWhite, { marginLeft: 2 }]}>{stats.favorite_count}</Text></View>}
+                        {topRatedId === item.id && (
+                            <View style={[styles.badge, { backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a' }]}>
+                                <Ionicons name="trophy" size={10} color="#d97706" />
+                                <Text style={[styles.badgeText, { color: '#d97706', marginLeft: 3 }]}>Top Rated</Text>
+                            </View>
+                        )}
+                        {mostFavId === item.id && (
+                            <View style={[styles.badge, { backgroundColor: '#fff1f2', borderWidth: 1, borderColor: '#fecdd3' }]}>
+                                <Ionicons name="heart" size={10} color="#e11d48" />
+                                <Text style={[styles.badgeText, { color: '#e11d48', marginLeft: 3 }]}>Most Favorite</Text>
+                            </View>
+                        )}
                     </View>
                     <View style={styles.cardActions}>
                         <TouchableOpacity onPress={(e) => { e.stopPropagation(); toggleFavorite(item.id) }} style={styles.actionBtn}><Ionicons name={isFav ? "heart" : "heart-outline"} size={18} color={isFav ? "#ef4444" : "#666"} /></TouchableOpacity>
@@ -1010,37 +1082,48 @@ export default function TenantDashboard({ session, profile }: any) {
                     <View style={styles.priceOverlay}><Text style={styles.priceText}>₱{Number(item.price).toLocaleString()}</Text><Text style={styles.priceSub}>/mo</Text></View>
                 </View>
                 <View style={styles.cardContent}>
-                    <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
-                    <Text style={styles.cardLocation}>{item.city}, Philippines</Text>
-                    <View style={styles.featureRow}>
-                        <View style={styles.featureItem}><Ionicons name="bed-outline" size={14} color="#666" /><Text style={styles.featureText}>{item.bedrooms}</Text></View>
-                        <View style={styles.divider} />
-                        <View style={styles.featureItem}><Ionicons name="water-outline" size={14} color="#666" /><Text style={styles.featureText}>{item.bathrooms}</Text></View>
-                        <View style={styles.divider} />
-                        <View style={styles.featureItem}><Ionicons name="resize-outline" size={14} color="#666" /><Text style={styles.featureText}>{item.area_sqft} sqm</Text></View>
+                    <Text style={[styles.cardTitle, { color: isDark ? colors.text : '#111' }]} numberOfLines={1}>{item.title}</Text>
+                    <Text style={[styles.cardLocation, { color: isDark ? colors.textMuted : '#9ca3af' }]}>{item.city}, Philippines</Text>
+                    <View style={[styles.featureRow, { borderTopColor: isDark ? colors.border : '#f3f4f6' }]}>
+                        <View style={styles.featureItem}><Ionicons name="bed-outline" size={14} color={isDark ? colors.textSecondary : '#666'} /><Text style={[styles.featureText, { color: isDark ? colors.textSecondary : '#666' }]}>{item.bedrooms}</Text></View>
+                        <View style={[styles.divider, { backgroundColor: isDark ? colors.border : '#e5e7eb' }]} />
+                        <View style={styles.featureItem}><Ionicons name="water-outline" size={14} color={isDark ? colors.textSecondary : '#666'} /><Text style={[styles.featureText, { color: isDark ? colors.textSecondary : '#666' }]}>{item.bathrooms}</Text></View>
+                        <View style={[styles.divider, { backgroundColor: isDark ? colors.border : '#e5e7eb' }]} />
+                        <View style={styles.featureItem}><Ionicons name="resize-outline" size={14} color={isDark ? colors.textSecondary : '#666'} /><Text style={[styles.featureText, { color: isDark ? colors.textSecondary : '#666' }]}>{item.area_sqft} sqm</Text></View>
                     </View>
                 </View>
             </TouchableOpacity>
         );
     };
 
+    if (loading) {
+        return (
+            <View style={[styles.container, { backgroundColor: isDark ? colors.background : '#f8fafc' }]}>
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 60 }}>
+                    <ActivityIndicator size="large" color={isDark ? colors.text : '#111827'} />
+                    <Text style={{ marginTop: 16, fontSize: 15, fontWeight: '600', color: isDark ? colors.textSecondary : '#4b5563' }}>Loading your dashboard...</Text>
+                    <Text style={{ marginTop: 6, fontSize: 12, color: isDark ? colors.textMuted : '#9ca3af' }}>Fetching property & payment data</Text>
+                </View>
+            </View>
+        );
+    }
+
     return (
-        <View style={styles.container}>
-            <ScrollView contentContainerStyle={{ paddingBottom: 100 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+        <View style={[styles.container, { backgroundColor: isDark ? colors.background : '#f8fafc' }]}>
+            <ScrollView contentContainerStyle={{ paddingBottom: 130 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
 
                 {occupancy ? (
                     <View style={styles.dashboardContent}>
                         {/* Header */}
                         <View style={styles.headerRow}>
                             <View>
-                                <Text style={styles.headerTitle}>Your Active Property</Text>
-                                <Text style={styles.headerSubtitle}>Manage your lease & payments.</Text>
+                                <Text style={[styles.headerTitle, { color: isDark ? colors.text : '#111' }]}>Your Active Property</Text>
+                                <Text style={[styles.headerSubtitle, { color: isDark ? colors.textSecondary : '#666' }]}>Manage your lease & payments.</Text>
                             </View>
-                            <TouchableOpacity onPress={() => router.push('/properties' as any)}><Text style={styles.seeMoreLink}>See More Properties</Text></TouchableOpacity>
                         </View>
 
                         {/* 1. Main Property Card */}
-                        <View style={styles.activeCard}>
+                        <View style={[styles.activeCard, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#eee' }]}>
                             <View style={styles.activeImageContainer}>
                                 <Image
                                     source={{ uri: occupancy.property?.images?.[activePropertyImageIndex] || 'https://via.placeholder.com/600' }}
@@ -1069,16 +1152,16 @@ export default function TenantDashboard({ session, profile }: any) {
                                 )}
                             </View>
 
-                            <View style={styles.activeContent}>
-                                <View style={styles.leaseRow}>
+                            <View style={[styles.activeContent, { backgroundColor: isDark ? colors.card : 'white' }]}>
+                                <View style={[styles.leaseRow, { borderBottomColor: isDark ? colors.border : '#f3f4f6' }]}>
                                     <View style={styles.leaseItem}>
-                                        <Text style={styles.leaseLabel}>LEASE START</Text>
-                                        <Text style={styles.leaseValue}>{new Date(occupancy.start_date).toLocaleDateString()}</Text>
+                                        <Text style={[styles.leaseLabel, { color: isDark ? colors.textMuted : '#9ca3af' }]}>LEASE START</Text>
+                                        <Text style={[styles.leaseValue, { color: isDark ? colors.text : '#111' }]}>{new Date(occupancy.start_date).toLocaleDateString()}</Text>
                                     </View>
                                     {occupancy.contract_end_date && (
                                         <View style={[styles.leaseItem, { alignItems: 'flex-end' }]}>
-                                            <Text style={styles.leaseLabel}>LEASE END</Text>
-                                            <Text style={styles.leaseValue}>{new Date(occupancy.contract_end_date).toLocaleDateString()}</Text>
+                                            <Text style={[styles.leaseLabel, { color: isDark ? colors.textMuted : '#9ca3af' }]}>LEASE END</Text>
+                                            <Text style={[styles.leaseValue, { color: isDark ? colors.text : '#111' }]}>{new Date(occupancy.contract_end_date).toLocaleDateString()}</Text>
                                             {daysUntilContractEnd !== null && (
                                                 <Text style={{ fontSize: 10, color: '#ea580c', fontWeight: 'bold', marginTop: 2 }}>
                                                     Ends in {daysUntilContractEnd} days
@@ -1088,17 +1171,18 @@ export default function TenantDashboard({ session, profile }: any) {
                                     )}
                                 </View>
 
-                                <View style={styles.gridActions}>
-                                    <TouchableOpacity style={[styles.gridBtn, styles.btnGray]} onPress={() => router.push(`/properties/${occupancy.property?.id}` as any)}>
-                                        <Text style={styles.btnTextGray}>View Details</Text>
+                                <View style={styles.gridActions}
+                                >
+                                    <TouchableOpacity style={[styles.gridBtn, { backgroundColor: isDark ? colors.surface : '#f3f4f6' }]} onPress={() => router.push(`/properties/${occupancy.property?.id}` as any)}>
+                                        <Text style={[styles.btnTextGray, { color: isDark ? colors.text : '#374151' }]}>View Details</Text>
                                     </TouchableOpacity>
                                     <TouchableOpacity
-                                        style={[styles.gridBtn, occupancy.contract_url ? styles.btnBlack : styles.btnDisabled]}
+                                        style={[styles.gridBtn, occupancy.contract_url ? styles.btnBlack : { backgroundColor: isDark ? colors.surface : '#f3f4f6' }]}
                                         disabled={!occupancy.contract_url}
                                         onPress={() => occupancy.contract_url && Linking.openURL(occupancy.contract_url)}
                                     >
-                                        <Ionicons name="document-text-outline" size={16} color={occupancy.contract_url ? "white" : "#999"} style={{ marginRight: 4 }} />
-                                        <Text style={occupancy.contract_url ? styles.btnTextWhite : styles.btnTextDisabled}>
+                                        <Ionicons name="document-text-outline" size={16} color={occupancy.contract_url ? "white" : (isDark ? colors.textMuted : "#999")} style={{ marginRight: 4 }} />
+                                        <Text style={occupancy.contract_url ? styles.btnTextWhite : [styles.btnTextDisabled, { color: isDark ? colors.textMuted : '#9ca3af' }]}>
                                             {occupancy.contract_url ? "View Contract" : "Contract Pending"}
                                         </Text>
                                     </TouchableOpacity>
@@ -1106,21 +1190,21 @@ export default function TenantDashboard({ session, profile }: any) {
                                 {!isFamilyMember && (
                                     <View style={[styles.gridActions, { marginTop: 8 }]}>
                                         {canRenew ? (
-                                            <TouchableOpacity style={[styles.gridBtn, styles.btnOutline]} onPress={() => setShowRenewalModal(true)}>
-                                                <Ionicons name="refresh" size={16} color="black" style={{ marginRight: 4 }} />
-                                                <Text style={styles.btnTextBlack}>Renew Contract</Text>
+                                            <TouchableOpacity style={[styles.gridBtn, { borderWidth: 1, borderColor: isDark ? colors.cardBorder : '#e5e7eb', backgroundColor: isDark ? colors.surface : 'white' }]} onPress={() => setShowRenewalModal(true)}>
+                                                <Ionicons name="refresh" size={16} color={isDark ? colors.text : 'black'} style={{ marginRight: 4 }} />
+                                                <Text style={[styles.btnTextBlack, { color: isDark ? colors.text : '#111' }]}>Renew Contract</Text>
                                             </TouchableOpacity>
                                         ) : (
-                                            <View style={[styles.gridBtn, styles.btnDisabled]}><Text style={styles.btnTextDisabled}>Renew Unavailable</Text></View>
+                                            <View style={[styles.gridBtn, { backgroundColor: isDark ? colors.surface : '#f3f4f6' }]}><Text style={[styles.btnTextDisabled, { color: isDark ? colors.textMuted : '#9ca3af' }]}>Renew Unavailable</Text></View>
                                         )}
-                                        <TouchableOpacity style={[styles.gridBtn, styles.btnOutlineRed]} onPress={() => setEndRequestModalVisible(true)}>
+                                        <TouchableOpacity style={[styles.gridBtn, { borderWidth: 1, borderColor: isDark ? 'rgba(254,202,202,0.3)' : '#fecaca', backgroundColor: isDark ? 'rgba(254,242,242,0.08)' : '#fef2f2' }]} onPress={() => setEndRequestModalVisible(true)}>
                                             <Text style={styles.btnTextRed}>End Contract</Text>
                                         </TouchableOpacity>
                                     </View>
                                 )}
                                 {occupancy.property?.terms_conditions ? (
                                     <TouchableOpacity
-                                        style={[styles.gridBtn, { marginTop: 8, backgroundColor: '#f3f4f6', borderWidth: 1, borderColor: '#e5e7eb', width: '100%' }]}
+                                        style={[styles.gridBtn, { marginTop: 8, backgroundColor: isDark ? colors.surface : '#f3f4f6', borderWidth: 1, borderColor: isDark ? colors.cardBorder : '#e5e7eb', width: '100%' }]}
                                         onPress={() => {
                                             const terms = occupancy.property.terms_conditions;
                                             if (typeof terms === 'string' && terms.startsWith('http')) {
@@ -1130,32 +1214,32 @@ export default function TenantDashboard({ session, profile }: any) {
                                             }
                                         }}
                                     >
-                                        <Ionicons name="document-text-outline" size={16} color="#333" style={{ marginRight: 6 }} />
-                                        <Text style={styles.btnTextBlack}>View Property Terms</Text>
+                                        <Ionicons name="document-text-outline" size={16} color={isDark ? colors.textSecondary : '#333'} style={{ marginRight: 6 }} />
+                                        <Text style={[styles.btnTextBlack, { color: isDark ? colors.text : '#111' }]}>View Property Terms</Text>
                                     </TouchableOpacity>
                                 ) : null}
                             </View>
                         </View>
 
                         {/* 2. Security Deposit */}
-                        <View style={styles.infoCard}>
+                        <View style={[styles.infoCard, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}>
                             <View style={styles.cardHeaderSmall}>
-                                <View style={styles.iconCircle}><Ionicons name="lock-closed-outline" size={16} color="#333" /></View>
-                                <Text style={styles.cardTitleSmall}>Security Deposit</Text>
+                                <View style={[styles.iconCircle, { backgroundColor: isDark ? colors.badge : '#f3f4f6' }]}><Ionicons name="lock-closed-outline" size={16} color={isDark ? colors.textSecondary : '#333'} /></View>
+                                <Text style={[styles.cardTitleSmall, { color: isDark ? colors.text : '#111' }]}>Security Deposit</Text>
                             </View>
                             {securityDepositPaid ? (
                                 <View>
                                     <View style={styles.rowBetween}>
-                                        <Text style={styles.textLabel}>Total Deposit</Text>
-                                        <Text style={styles.textValueBlack}>₱{Number(occupancy.security_deposit || 0).toLocaleString()}</Text>
+                                        <Text style={[styles.textLabel, { color: isDark ? colors.textMuted : '#6b7280' }]}>Total Deposit</Text>
+                                        <Text style={[styles.textValueBlack, { color: isDark ? colors.text : '#000' }]}>₱{Number(occupancy.security_deposit || 0).toLocaleString()}</Text>
                                     </View>
                                     <View style={styles.rowBetween}>
                                         <Text style={styles.textLabel}>Used</Text>
                                         <Text style={styles.textValueGray}>₱{Number(occupancy.security_deposit_used || 0).toLocaleString()}</Text>
                                     </View>
-                                    <View style={[styles.rowBetween, styles.borderTop, { paddingTop: 8, marginTop: 4 }]}>
-                                        <Text style={styles.textLabelBold}>Remaining Balance</Text>
-                                        <Text style={styles.textValueBig}>₱{Number((occupancy.security_deposit || 0) - (occupancy.security_deposit_used || 0)).toLocaleString()}</Text>
+                                    <View style={[styles.rowBetween, styles.borderTop, { paddingTop: 8, marginTop: 4, borderTopColor: isDark ? colors.border : '#f3f4f6' }]}>
+                                        <Text style={[styles.textLabelBold, { color: isDark ? colors.text : '#374151' }]}>Remaining Balance</Text>
+                                        <Text style={[styles.textValueBig, { color: isDark ? colors.text : '#111' }]}>₱{Number((occupancy.security_deposit || 0) - (occupancy.security_deposit_used || 0)).toLocaleString()}</Text>
                                     </View>
                                     {daysUntilContractEnd !== null && daysUntilContractEnd <= 30 && (
                                         <View style={styles.tipBox}><Text style={styles.tipText}>💡 Deposit can be used for last month.</Text></View>
@@ -1176,29 +1260,29 @@ export default function TenantDashboard({ session, profile }: any) {
                         </View>
 
                         {/* Family Members Section */}
-                        <View style={styles.infoCard}>
+                        <View style={[styles.infoCard, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}>
                             <View style={[styles.rowBetween, { marginBottom: 12 }]}>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                                    <View style={[styles.iconCircle, { backgroundColor: '#f3f4f6' }]}>
-                                        <Ionicons name="people-outline" size={16} color="#374151" />
+                                    <View style={[styles.iconCircle, { backgroundColor: isDark ? colors.badge : '#f3f4f6' }]}>
+                                        <Ionicons name="people-outline" size={16} color={isDark ? colors.textSecondary : '#374151'} />
                                     </View>
                                     <View>
-                                        <Text style={styles.cardTitleSmall}>Family Members</Text>
-                                        <Text style={{ fontSize: 10, color: '#6b7280' }}>{familyMembers.length + 1}/5 members</Text>
+                                        <Text style={[styles.cardTitleSmall, { color: isDark ? colors.text : '#111' }]}>Family Members</Text>
+                                        <Text style={{ fontSize: 10, color: isDark ? colors.textMuted : '#6b7280' }}>{familyMembers.length + 1}/5 members</Text>
                                     </View>
                                 </View>
                                 {!isFamilyMember && familyMembers.length < 4 && (
                                     <TouchableOpacity
                                         onPress={() => setShowFamilyModal(true)}
-                                        style={{ backgroundColor: '#f3f4f6', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb' }}
+                                        style={{ backgroundColor: isDark ? colors.surface : '#f3f4f6', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: isDark ? colors.cardBorder : '#e5e7eb' }}
                                     >
-                                        <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#111827' }}>+ Add Member</Text>
+                                        <Text style={{ fontSize: 10, fontWeight: 'bold', color: isDark ? colors.text : '#111827' }}>+ Add Member</Text>
                                     </TouchableOpacity>
                                 )}
                             </View>
 
                             {/* Primary Tenant (Mother) */}
-                            <View style={{ padding: 10, backgroundColor: '#f9fafb', borderRadius: 12, borderWidth: 1, borderColor: '#f3f4f6', marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                            <View style={{ padding: 10, backgroundColor: isDark ? colors.surface : '#f9fafb', borderRadius: 12, borderWidth: 1, borderColor: isDark ? colors.cardBorder : '#f3f4f6', marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                                 <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#4b5563', alignItems: 'center', justifyContent: 'center' }}>
                                     {isFamilyMember && occupancy?.tenant?.avatar_url ? (
                                         <Image source={{ uri: occupancy.tenant.avatar_url }} style={{ width: 32, height: 32, borderRadius: 16 }} />
@@ -1211,13 +1295,13 @@ export default function TenantDashboard({ session, profile }: any) {
                                     )}
                                 </View>
                                 <View style={{ flex: 1 }}>
-                                    <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#111827' }}>
+                                    <Text style={{ fontSize: 13, fontWeight: 'bold', color: isDark ? colors.text : '#111827' }}>
                                         {isFamilyMember ? `${occupancy?.tenant?.first_name || ''} ${occupancy?.tenant?.last_name || ''}`.trim() || 'Primary Tenant' : `${profile?.first_name} ${profile?.last_name}`}
                                     </Text>
-                                    <Text style={{ fontSize: 10, color: '#6b7280', fontWeight: 'bold' }}>Primary Tenant</Text>
+                                    <Text style={{ fontSize: 10, color: isDark ? colors.textMuted : '#6b7280', fontWeight: 'bold' }}>Primary Tenant</Text>
                                 </View>
-                                <View style={{ backgroundColor: '#e5e7eb', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 }}>
-                                    <Text style={{ fontSize: 9, fontWeight: 'bold', color: '#374151' }}>Owner</Text>
+                                <View style={{ backgroundColor: isDark ? colors.surface : '#e5e7eb', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 }}>
+                                    <Text style={{ fontSize: 9, fontWeight: 'bold', color: isDark ? colors.textSecondary : '#374151' }}>Owner</Text>
                                 </View>
                             </View>
 
@@ -1227,7 +1311,7 @@ export default function TenantDashboard({ session, profile }: any) {
                             ) : familyMembers.length > 0 ? (
                                 <View style={{ gap: 6 }}>
                                     {familyMembers.map((fm) => (
-                                        <View key={fm.id} style={{ padding: 10, backgroundColor: '#f9fafb', borderRadius: 12, borderWidth: 1, borderColor: '#f3f4f6', flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                                        <View key={fm.id} style={{ padding: 10, backgroundColor: isDark ? colors.surface : '#f9fafb', borderRadius: 12, borderWidth: 1, borderColor: isDark ? colors.cardBorder : '#f3f4f6', flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                                             <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center' }}>
                                                 {fm.member_profile?.avatar_url ? (
                                                     <Image source={{ uri: fm.member_profile.avatar_url }} style={{ width: 32, height: 32, borderRadius: 16 }} />
@@ -1238,10 +1322,10 @@ export default function TenantDashboard({ session, profile }: any) {
                                                 )}
                                             </View>
                                             <View style={{ flex: 1 }}>
-                                                <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#111827' }} numberOfLines={1}>
+                                                <Text style={{ fontSize: 12, fontWeight: 'bold', color: isDark ? colors.text : '#111827' }} numberOfLines={1}>
                                                     {fm.member_profile?.first_name} {fm.member_profile?.last_name}
                                                 </Text>
-                                                <Text style={{ fontSize: 10, color: '#9ca3af' }} numberOfLines={1}>{fm.member_profile?.email}</Text>
+                                                <Text style={{ fontSize: 10, color: isDark ? colors.textMuted : '#9ca3af' }} numberOfLines={1}>{fm.member_profile?.email}</Text>
                                             </View>
                                             {!isFamilyMember && (
                                                 confirmRemoveMember === fm.id ? (
@@ -1269,19 +1353,19 @@ export default function TenantDashboard({ session, profile }: any) {
                             )}
 
                             {isFamilyMember && (
-                                <View style={{ marginTop: 12, padding: 10, backgroundColor: '#fffbeb', borderRadius: 12, borderWidth: 1, borderColor: '#fde68a', flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
-                                    <Ionicons name="information-circle-outline" size={16} color="#b45309" />
-                                    <Text style={{ fontSize: 10, color: '#b45309', fontWeight: 'bold', flex: 1 }}>You are a family member. Only the primary tenant can manage family members.</Text>
+                                <View style={{ marginTop: 12, padding: 10, backgroundColor: isDark ? 'rgba(180,83,9,0.12)' : '#fffbeb', borderRadius: 12, borderWidth: 1, borderColor: isDark ? 'rgba(180,83,9,0.25)' : '#fde68a', flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
+                                    <Ionicons name="information-circle-outline" size={16} color={isDark ? '#fbbf24' : '#b45309'} />
+                                    <Text style={{ fontSize: 10, color: isDark ? '#fbbf24' : '#b45309', fontWeight: 'bold', flex: 1 }}>You are a family member. Only the primary tenant can manage family members.</Text>
                                 </View>
                             )}
                         </View>
 
 
-                        {/* 4. Pending Payments */}
-                        <View style={styles.infoCard}>
+                        {/* 4. Recent Payments */}
+                        <View style={[styles.infoCard, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}>
                             <View style={[styles.rowBetween, { marginBottom: 16 }]}>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                                    <Text style={styles.cardTitleSmall}>Recent Payments</Text>
+                                    <Text style={[styles.cardTitleSmall, { color: isDark ? colors.text : '#111' }]}>Recent Payments</Text>
                                     {pendingPayments.length > 0 && <View style={styles.badgeRed}><Text style={styles.badgeRedText}>{pendingPayments.length} Pending</Text></View>}
                                 </View>
                                 <TouchableOpacity onPress={() => router.push('/payments' as any)}><Text style={styles.seeAllText}>See All</Text></TouchableOpacity>
@@ -1291,11 +1375,11 @@ export default function TenantDashboard({ session, profile }: any) {
                                 const total = (Number(bill.rent_amount) || 0) + (Number(bill.water_bill) || 0) + (Number(bill.electrical_bill) || 0) + (Number(bill.other_bills) || 0) + (Number(bill.security_deposit_amount) || 0) + (Number(bill.advance_amount) || 0);
                                 const isMoveIn = bill.is_move_in_payment || (Number(bill.security_deposit_amount) > 0);
                                 return (
-                                    <View key={i} style={styles.billRow}>
+                                    <View key={i} style={[styles.billRow, { backgroundColor: isDark ? colors.surface : '#f8fafc', borderColor: isDark ? colors.cardBorder : '#f1f5f9' }]}>
                                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                                            <View style={styles.billIcon}><Ionicons name={bill.rent_amount > 0 ? "home-outline" : "flash-outline"} size={18} color="#333" /></View>
+                                            <View style={[styles.billIcon, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#e2e8f0' }]}><Ionicons name={bill.rent_amount > 0 ? "home-outline" : "flash-outline"} size={18} color={isDark ? colors.textSecondary : '#333'} /></View>
                                             <View>
-                                                <Text style={styles.billTitle}>{isMoveIn ? 'Move-in Bill' : (bill.rent_amount > 0 ? 'House Rent' : 'Utility Bill')}</Text>
+                                                <Text style={[styles.billTitle, { color: isDark ? colors.text : '#334155' }]}>{isMoveIn ? 'Move-in Bill' : (bill.rent_amount > 0 ? 'House Rent' : 'Utility Bill')}</Text>
                                                 {bill.status === 'pending_confirmation' ? (
                                                     <Text style={[styles.billDate, { color: '#f59e0b', fontWeight: 'bold' }]}>Processing Payment</Text>
                                                 ) : bill.status === 'rejected' ? (
@@ -1306,7 +1390,7 @@ export default function TenantDashboard({ session, profile }: any) {
                                             </View>
                                         </View>
                                         <View style={{ alignItems: 'flex-end' }}>
-                                            <Text style={styles.billAmount}>₱{total.toLocaleString()}</Text>
+                                            <Text style={[styles.billAmount, { color: isDark ? colors.text : '#0f172a' }]}>₱{total.toLocaleString()}</Text>
                                             {bill.status === 'pending_confirmation' ? (
                                                 <View style={[styles.payBtnSmall, { backgroundColor: '#fef3c7' }]}>
                                                     <Text style={[styles.payBtnText, { color: '#d97706' }]}> verifying </Text>
@@ -1329,28 +1413,28 @@ export default function TenantDashboard({ session, profile }: any) {
                         </View>
 
                         {/* 5. Payment Overview */}
-                        <View style={styles.borderCard}>
-                            <Text style={styles.cardTitleSmall}>Payment Overview</Text>
+                        <View style={[styles.borderCard, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}>
+                            <Text style={[styles.cardTitleSmall, { color: isDark ? colors.text : '#111' }]}>Payment Overview</Text>
 
                             {/* Credit */}
-                            <View style={[styles.overviewRow, { backgroundColor: tenantBalance > 0 ? '#f0fdf4' : '#f9fafb' }]}>
+                            <View style={[styles.overviewRow, { backgroundColor: tenantBalance > 0 ? (isDark ? '#16331f' : '#f0fdf4') : (isDark ? colors.surface : '#f9fafb') }]}>
                                 <View>
-                                    <Text style={styles.ovLabel}>CREDIT BALANCE</Text>
-                                    <Text style={styles.ovSub}>{tenantBalance > 0 ? 'Applied to next bill' : 'No credit available'}</Text>
+                                    <Text style={[styles.ovLabel, { color: isDark ? colors.textMuted : '#9ca3af' }]}>CREDIT BALANCE</Text>
+                                    <Text style={[styles.ovSub, { color: isDark ? colors.textSecondary : '#4b5563' }]}>{tenantBalance > 0 ? 'Applied to next bill' : 'No credit available'}</Text>
                                 </View>
-                                <Text style={[styles.ovValue, { color: tenantBalance > 0 ? '#15803d' : '#9ca3af' }]}>₱{tenantBalance.toLocaleString()}</Text>
+                                <Text style={[styles.ovValue, { color: tenantBalance > 0 ? '#15803d' : (isDark ? colors.textMuted : '#9ca3af') }]}>₱{tenantBalance.toLocaleString()}</Text>
                             </View>
 
                             <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-                                <View style={styles.ovBox}>
-                                    <Text style={styles.ovLabel}>NEXT HOUSE DUE DATE</Text>
+                                <View style={[styles.ovBox, { backgroundColor: isDark ? colors.surface : '#f9fafb', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}>
+                                    <Text style={[styles.ovLabel, { color: isDark ? colors.textMuted : '#9ca3af' }]}>NEXT HOUSE DUE DATE</Text>
                                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginVertical: 4 }}>
                                         {/* <Ionicons name="calendar-outline" size={18} color="#000" /> */}
-                                        <Text style={[styles.ovDate, { fontSize: 15 }]}>{nextPaymentDate}</Text>
+                                        <Text style={[styles.ovDate, { fontSize: 15, color: isDark ? colors.text : '#111' }]}>{nextPaymentDate}</Text>
                                     </View>
                                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                                        <Ionicons name="calendar-outline" size={14} color="#333" />
-                                        <Text style={{ fontSize: 11, fontWeight: '600', color: '#333' }}>Expected Bill: ₱{Number(occupancy.property?.price || 0).toLocaleString()}</Text>
+                                        <Ionicons name="calendar-outline" size={14} color={isDark ? colors.textSecondary : '#333'} />
+                                        <Text style={{ fontSize: 11, fontWeight: '600', color: isDark ? colors.textSecondary : '#333' }}>Expected Bill: ₱{Number(occupancy.property?.price || 0).toLocaleString()}</Text>
                                     </View>
                                     {daysUntilContractEnd !== null && daysUntilContractEnd < 90 && (
                                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
@@ -1365,17 +1449,17 @@ export default function TenantDashboard({ session, profile }: any) {
                                         </TouchableOpacity>
                                     )}
                                 </View>
-                                <View style={styles.ovBox}>
-                                    <Text style={styles.ovLabel}>LAST HOUSE DUE DATE</Text>
+                                <View style={[styles.ovBox, { backgroundColor: isDark ? colors.surface : '#f9fafb', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}>
+                                    <Text style={[styles.ovLabel, { color: isDark ? colors.textMuted : '#9ca3af' }]}>LAST HOUSE DUE DATE</Text>
                                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginVertical: 4 }}>
-                                        <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: '#e2e8f0', alignItems: 'center', justifyContent: 'center' }}>
-                                            <Ionicons name="time-outline" size={12} color="#64748b" />
+                                        <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: isDark ? colors.card : '#e2e8f0', alignItems: 'center', justifyContent: 'center' }}>
+                                            <Ionicons name="time-outline" size={12} color={isDark ? colors.textSecondary : '#64748b'} />
                                         </View>
-                                        <Text style={styles.ovDateGray}>
+                                        <Text style={[styles.ovDateGray, { color: isDark ? colors.textSecondary : '#6b7280' }]}>
                                             {lastPayment ? new Date(lastPayment.due_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : 'N/A'}
                                         </Text>
                                     </View>
-                                    <Text style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                                    <Text style={{ fontSize: 11, color: isDark ? colors.textMuted : '#64748b', marginTop: 2 }}>
                                         Total Paid: ₱{lastPayment ? Number(lastPayment.amount_paid || (parseFloat(lastPayment.rent_amount || 0) + parseFloat(lastPayment.security_deposit_amount || 0) + parseFloat(lastPayment.advance_amount || 0) + parseFloat(lastPayment.water_bill || 0) + parseFloat(lastPayment.electrical_bill || 0) + parseFloat(lastPayment.wifi_bill || 0) + parseFloat(lastPayment.other_bills || 0))).toLocaleString() : '0'}
                                     </Text>
                                 </View>
@@ -1383,7 +1467,7 @@ export default function TenantDashboard({ session, profile }: any) {
 
                             {/* Payment History Grid */}
                             <View style={styles.historySection}>
-                                <Text style={[styles.cardTitleSmall, { marginBottom: 10 }]}>Rent Payment History ({new Date().getFullYear()})</Text>
+                                <Text style={[styles.cardTitleSmall, { marginBottom: 10, color: isDark ? colors.text : '#111' }]}>Rent Payment History ({new Date().getFullYear()})</Text>
                                 <View style={styles.historyGrid}>
                                     {(() => {
                                         // Build a Set of all paid month indices for current year
@@ -1411,13 +1495,13 @@ export default function TenantDashboard({ session, profile }: any) {
                                             const isCurrent = new Date().getMonth() === i;
                                             return (
                                                 <View key={m} style={styles.monthCol}>
-                                                    <Text style={[styles.monthText, isPaid ? { color: 'black' } : { color: '#d1d5db' }]}>{m}</Text>
+                                                    <Text style={[styles.monthText, isPaid ? { color: isDark ? '#86efac' : 'black' } : { color: isDark ? colors.textMuted : '#d1d5db' }]}>{m}</Text>
                                                     {isPaid ? (
-                                                        <View style={styles.dotPaid}><Ionicons name="checkmark" size={10} color="black" /></View>
+                                                        <View style={[styles.dotPaid, isDark && { backgroundColor: '#22c55e' }]}><Ionicons name="checkmark" size={10} color={isDark ? 'white' : 'black'} /></View>
                                                     ) : isCurrent ? (
-                                                        <View style={styles.dotCurrent} />
+                                                        <View style={[styles.dotCurrent, { borderColor: isDark ? colors.text : '#000' }]} />
                                                     ) : (
-                                                        <View style={styles.dotEmpty} />
+                                                        <View style={[styles.dotEmpty, { borderColor: isDark ? colors.border : '#e5e7eb' }]} />
                                                     )}
                                                 </View>
                                             )
@@ -1428,32 +1512,297 @@ export default function TenantDashboard({ session, profile }: any) {
                         </View>
                     </View>
                 ) : (
-                    // --- ALL PROPERTIES VIEW (Preserved) ---
-                    <View style={styles.section}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={styles.sectionTitle}>All Properties</Text>
-                            <TouchableOpacity onPress={() => router.push('/properties' as any)}><Text style={styles.seeMore}>See More</Text></TouchableOpacity>
+                    // --- BROWSE PROPERTIES VIEW (Grid Layout) ---
+                    <View>
+                        {/* Search Bar + Filter Button */}
+                        <View style={{ flexDirection: 'row', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4, gap: 10, alignItems: 'center' }}>
+                            <View style={[styles.browseSearchBar, { flex: 1, marginHorizontal: 0, marginTop: 0, marginBottom: 0 }, { backgroundColor: isDark ? colors.card : '#f3f4f6' }]}>
+                                <Ionicons name="search" size={18} color={isDark ? colors.textMuted : '#9ca3af'} />
+                                <TextInput
+                                    placeholder="Search by city or title..."
+                                    placeholderTextColor={isDark ? colors.textMuted : '#c4c4c4'}
+                                    style={[styles.browseSearchInput, { color: isDark ? colors.text : '#111' }]}
+                                    value={noOccupancySearch}
+                                    onChangeText={setNoOccupancySearch}
+                                />
+                                {noOccupancySearch.length > 0 && (
+                                    <TouchableOpacity onPress={() => setNoOccupancySearch('')}>
+                                        <Ionicons name="close-circle" size={18} color={isDark ? colors.textMuted : '#ccc'} />
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                            {/* Filter Button */}
+                            <TouchableOpacity
+                                onPress={() => setShowBrowseFilterModal(true)}
+                                style={[
+                                    { width: 46, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5 },
+                                    { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.border : '#e5e7eb' },
+                                    (noOccupancyBedrooms !== null || noOccupancyMaxPrice !== null || noOccupancySortBy !== 'newest') && { backgroundColor: isDark ? 'white' : '#111', borderColor: isDark ? 'white' : '#111' }
+                                ]}
+                            >
+                                <Ionicons
+                                    name="options-outline"
+                                    size={22}
+                                    color={(noOccupancyBedrooms !== null || noOccupancyMaxPrice !== null || noOccupancySortBy !== 'newest') ? (isDark ? '#111' : 'white') : (isDark ? colors.text : '#111')}
+                                />
+                            </TouchableOpacity>
                         </View>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.listContainer}>
-                            {properties.slice(0, 8).map(renderCard)}
-                        </ScrollView>
 
-                        {guestFavorites.length > 0 && (
-                            <View style={{ marginTop: 24 }}>
-                                <Text style={[styles.sectionTitle, { marginLeft: 20 }]}>Tenant Favorites</Text>
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.listContainer}>
-                                    {guestFavorites.map(renderCard)}
+                        {/* City Chips (location only, sliding) */}
+                        {(() => {
+                            const cities = Array.from(new Set(properties.map((p: any) => p.city).filter(Boolean))) as string[];
+                            if (cities.length === 0) return null;
+                            const chipBase = { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5 };
+                            const activeStyle = { backgroundColor: isDark ? '#fff' : '#111', borderColor: isDark ? '#fff' : '#111' };
+                            const inactiveStyle = { backgroundColor: isDark ? colors.card : '#f3f4f6', borderColor: isDark ? colors.border : '#e5e7eb' };
+                            const activeText = { color: isDark ? '#111' : '#fff', fontWeight: '700' as const, fontSize: 12 };
+                            const inactiveText = { color: isDark ? colors.textMuted : '#555', fontWeight: '600' as const, fontSize: 12 };
+                            return (
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 10, gap: 8, alignItems: 'center' }}>
+                                    <TouchableOpacity onPress={() => setNoOccupancyCityFilter(null)} style={[chipBase, noOccupancyCityFilter === null ? activeStyle : inactiveStyle]}>
+                                        <Text style={noOccupancyCityFilter === null ? activeText : inactiveText}>All</Text>
+                                    </TouchableOpacity>
+                                    {cities.map(city => (
+                                        <TouchableOpacity key={city} onPress={() => setNoOccupancyCityFilter(noOccupancyCityFilter === city ? null : city)} style={[chipBase, noOccupancyCityFilter === city ? activeStyle : inactiveStyle]}>
+                                            <Text style={noOccupancyCityFilter === city ? activeText : inactiveText}>{city}</Text>
+                                        </TouchableOpacity>
+                                    ))}
                                 </ScrollView>
+                            );
+                        })()}
+
+                        {/* Title + Count */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8 }}>
+                            <Text style={[styles.sectionTitle, { fontSize: 16, color: isDark ? colors.text : '#111' }]}>Browse Properties</Text>
+                            <View style={{ backgroundColor: isDark ? colors.text : '#111', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 }}>
+                                <Text style={{ color: isDark ? colors.background : 'white', fontSize: 11, fontWeight: 'bold' }}>
+                                    {properties.filter((p: any) =>
+                                        (!noOccupancySearch || p.title?.toLowerCase().includes(noOccupancySearch.toLowerCase()) || p.city?.toLowerCase().includes(noOccupancySearch.toLowerCase())) &&
+                                        (!noOccupancyCityFilter || p.city === noOccupancyCityFilter) &&
+                                        (noOccupancyBedrooms === null || (noOccupancyBedrooms === 4 ? p.bedrooms >= 4 : p.bedrooms === noOccupancyBedrooms)) &&
+                                        (noOccupancyMaxPrice === null || p.price <= noOccupancyMaxPrice) &&
+                                        (!noOccupancyPriceRange.min || p.price >= parseFloat(noOccupancyPriceRange.min)) &&
+                                        (!noOccupancyPriceRange.max || p.price <= parseFloat(noOccupancyPriceRange.max)) &&
+                                        (noOccupancyMinRating === 0 || (propertyStats[p.id]?.avg_rating || 0) >= noOccupancyMinRating) &&
+                                        (!noOccupancyFilterFavorites || (propertyStats[p.id]?.favorite_count || 0) >= 1) &&
+                                        (noOccupancySelectedAmenities.length === 0 || noOccupancySelectedAmenities.every((a: string) => (p.amenities || []).includes(a)))
+                                    ).length}
+                                </Text>
                             </View>
-                        )}
-                        {topRated.length > 0 && (
-                            <View style={{ marginTop: 24 }}>
-                                <Text style={[styles.sectionTitle, { marginLeft: 20 }]}>Top Rated</Text>
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.listContainer}>
-                                    {topRated.map(renderCard)}
-                                </ScrollView>
+                        </View>
+
+                        {/* 2-Column Grid */}
+                        <View style={styles.browseGrid}>
+                            {properties
+                                .filter((p: any) =>
+                                    (!noOccupancySearch || p.title?.toLowerCase().includes(noOccupancySearch.toLowerCase()) || p.city?.toLowerCase().includes(noOccupancySearch.toLowerCase())) &&
+                                    (!noOccupancyCityFilter || p.city === noOccupancyCityFilter) &&
+                                    (noOccupancyBedrooms === null || (noOccupancyBedrooms === 4 ? p.bedrooms >= 4 : p.bedrooms === noOccupancyBedrooms)) &&
+                                    (noOccupancyMaxPrice === null || p.price <= noOccupancyMaxPrice) &&
+                                    (!noOccupancyPriceRange.min || p.price >= parseFloat(noOccupancyPriceRange.min)) &&
+                                    (!noOccupancyPriceRange.max || p.price <= parseFloat(noOccupancyPriceRange.max)) &&
+                                    (noOccupancyMinRating === 0 || (propertyStats[p.id]?.avg_rating || 0) >= noOccupancyMinRating) &&
+                                    (!noOccupancyFilterFavorites || (propertyStats[p.id]?.favorite_count || 0) >= 1) &&
+                                    (noOccupancySelectedAmenities.length === 0 || noOccupancySelectedAmenities.every((a: string) => (p.amenities || []).includes(a)))
+                                )
+                                .sort((a: any, b: any) => {
+                                    const sa = propertyStats[a.id] || {};
+                                    const sb = propertyStats[b.id] || {};
+                                    if (noOccupancySortBy === 'price_asc') return a.price - b.price;
+                                    if (noOccupancySortBy === 'price_desc') return b.price - a.price;
+                                    if (noOccupancySortBy === 'rating') return (sb.avg_rating || 0) - (sa.avg_rating || 0);
+                                    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+                                })
+                                .map((item: any) => {
+                                    const isFav = favorites.includes(item.id);
+                                    const isCompare = comparisonList.some((c: any) => c.id === item.id);
+                                    const stats = propertyStats[item.id] || { favorite_count: 0, avg_rating: 0, review_count: 0 };
+                                    return (
+                                        <TouchableOpacity
+                                            key={item.id}
+                                            style={[styles.gridCard, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}
+                                            activeOpacity={0.9}
+                                            onPress={() => router.push(`/properties/${item.id}` as any)}
+                                        >
+                                            <View style={styles.gridCardImage}>
+                                                <Image source={{ uri: item.images?.[0] || 'https://via.placeholder.com/400' }} style={{ width: '100%', height: '100%' }} />
+                                                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.7)']} style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 70 }} />
+                                                {/* Badges */}
+                                                <View style={{ position: 'absolute', top: 6, left: 6 }}>
+                                                    {topRatedId === item.id && (
+                                                        <View style={[styles.badge, { backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a', marginBottom: 3 }]}>
+                                                            <Ionicons name="trophy" size={8} color="#d97706" />
+                                                            <Text style={[styles.badgeText, { color: '#d97706', marginLeft: 2 }]}>Top</Text>
+                                                        </View>
+                                                    )}
+                                                    {mostFavId === item.id && (
+                                                        <View style={[styles.badge, { backgroundColor: '#fff1f2', borderWidth: 1, borderColor: '#fecdd3' }]}>
+                                                            <Ionicons name="heart" size={8} color="#e11d48" />
+                                                            <Text style={[styles.badgeText, { color: '#e11d48', marginLeft: 2 }]}>Fav</Text>
+                                                        </View>
+                                                    )}
+                                                </View>
+                                                {/* Heart */}
+                                                <TouchableOpacity
+                                                    onPress={(e) => { e.stopPropagation(); toggleFavorite(item.id); }}
+                                                    style={{ position: 'absolute', top: 6, right: 6, width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.9)', alignItems: 'center', justifyContent: 'center' }}
+                                                >
+                                                    <Ionicons name={isFav ? 'heart' : 'heart-outline'} size={14} color={isFav ? '#ef4444' : '#555'} />
+                                                </TouchableOpacity>
+                                                {/* Price */}
+                                                <View style={{ position: 'absolute', bottom: 6, left: 8 }}>
+                                                    <Text style={{ color: 'white', fontSize: 14, fontWeight: '900', textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 4 }}>₱{Number(item.price).toLocaleString()}<Text style={{ fontSize: 9, fontWeight: '600' }}>/mo</Text></Text>
+                                                </View>
+                                            </View>
+                                            <View style={{ padding: 9 }}>
+                                                <Text style={[styles.cardTitle, { fontSize: 12, color: isDark ? colors.text : '#111' }]} numberOfLines={1}>{item.title}</Text>
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 2 }}>
+                                                    <Ionicons name="location-outline" size={9} color={isDark ? colors.textMuted : '#9ca3af'} />
+                                                    <Text style={{ fontSize: 10, color: isDark ? colors.textMuted : '#9ca3af' }} numberOfLines={1}>{item.city}</Text>
+                                                </View>
+                                                {stats.review_count > 0 && (
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
+                                                        <Ionicons name="star" size={9} color="#fbbf24" />
+                                                        <Text style={{ fontSize: 9, fontWeight: 'bold', marginLeft: 2, color: isDark ? colors.text : '#111' }}>{stats.avg_rating.toFixed(1)}</Text>
+                                                        <Text style={{ fontSize: 9, color: isDark ? colors.textMuted : '#999', marginLeft: 1 }}>({stats.review_count})</Text>
+                                                    </View>
+                                                )}
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: isDark ? colors.border : '#f3f4f6' }}>
+                                                    <Ionicons name="bed-outline" size={10} color={isDark ? colors.textSecondary : '#666'} />
+                                                    <Text style={{ fontSize: 9, color: isDark ? colors.textSecondary : '#666', fontWeight: '500' }}>{item.bedrooms}</Text>
+                                                    <Text style={{ color: isDark ? colors.border : '#ddd', fontSize: 9 }}>|</Text>
+                                                    <Ionicons name="water-outline" size={10} color={isDark ? colors.textSecondary : '#666'} />
+                                                    <Text style={{ fontSize: 9, color: isDark ? colors.textSecondary : '#666', fontWeight: '500' }}>{item.bathrooms}</Text>
+                                                    <Text style={{ color: isDark ? colors.border : '#ddd', fontSize: 9 }}>|</Text>
+                                                    <Ionicons name="resize-outline" size={10} color={isDark ? colors.textSecondary : '#666'} />
+                                                    <Text style={{ fontSize: 9, color: isDark ? colors.textSecondary : '#666', fontWeight: '500' }}>{item.area_sqft}sqm</Text>
+                                                </View>
+                                            </View>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                        </View>
+
+                        {properties.filter((p: any) =>
+                            (!noOccupancySearch || p.title?.toLowerCase().includes(noOccupancySearch.toLowerCase()) || p.city?.toLowerCase().includes(noOccupancySearch.toLowerCase())) &&
+                            (!noOccupancyCityFilter || p.city === noOccupancyCityFilter) &&
+                            (noOccupancyBedrooms === null || (noOccupancyBedrooms === 4 ? p.bedrooms >= 4 : p.bedrooms === noOccupancyBedrooms)) &&
+                            (noOccupancyMaxPrice === null || p.price <= noOccupancyMaxPrice) &&
+                            (!noOccupancyPriceRange.min || p.price >= parseFloat(noOccupancyPriceRange.min)) &&
+                            (!noOccupancyPriceRange.max || p.price <= parseFloat(noOccupancyPriceRange.max)) &&
+                            (noOccupancyMinRating === 0 || (propertyStats[p.id]?.avg_rating || 0) >= noOccupancyMinRating) &&
+                            (!noOccupancyFilterFavorites || (propertyStats[p.id]?.favorite_count || 0) >= 1) &&
+                            (noOccupancySelectedAmenities.length === 0 || noOccupancySelectedAmenities.every((a: string) => (p.amenities || []).includes(a)))
+                        ).length === 0 && (
+                                <View style={{ alignItems: 'center', paddingTop: 40, paddingBottom: 20 }}>
+                                    <View style={[styles.emptyStateBox, { width: 70, height: 70, borderRadius: 35, justifyContent: 'center' }]}>
+                                        <Ionicons name="home-outline" size={30} color={isDark ? colors.textMuted : '#d1d5db'} />
+                                    </View>
+                                    <Text style={[styles.emptyStateText, { color: isDark ? colors.textMuted : '#6b7280', marginTop: 12, fontSize: 14, fontWeight: '700' }]}>No properties found</Text>
+                                    <Text style={{ fontSize: 12, color: isDark ? colors.textMuted : '#9ca3af', marginTop: 4 }}>Try adjusting your search or filter</Text>
+                                </View>
+                            )}
+
+                        {/* Browse Filter Modal */}
+                        <Modal visible={showBrowseFilterModal} animationType="slide" transparent>
+                            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }}>
+                                <View style={{ maxHeight: '80%', borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: isDark ? colors.background : 'white' }}>
+
+                                    {/* Header */}
+                                    <View style={{ padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: isDark ? colors.border : '#f3f4f6' }}>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                                            <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' }}>
+                                                <Ionicons name="filter" size={18} color="white" />
+                                            </View>
+                                            <Text style={{ fontSize: 18, fontWeight: '800', color: isDark ? colors.text : '#000' }}>Filters</Text>
+                                        </View>
+                                        <TouchableOpacity onPress={() => setShowBrowseFilterModal(false)} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: isDark ? colors.card : '#f3f4f6', alignItems: 'center', justifyContent: 'center' }}>
+                                            <Ionicons name="close" size={20} color={isDark ? colors.text : '#666'} />
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    {/* Body */}
+                                    <ScrollView contentContainerStyle={{ padding: 20 }}>
+
+                                        {/* Sort By */}
+                                        <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? colors.textMuted : '#666', textTransform: 'uppercase', marginBottom: 10, marginTop: 4, letterSpacing: 0.5 }}>Sort By</Text>
+                                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+                                            {(['newest', 'price_asc', 'price_desc', 'rating'] as const).map(opt => (
+                                                <TouchableOpacity key={opt} onPress={() => setNoOccupancySortBy(opt)} style={[{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#e5e7eb' }, noOccupancySortBy === opt && { backgroundColor: '#111', borderColor: '#111' }]}>
+                                                    <Text style={[{ fontSize: 12, fontWeight: '600', color: isDark ? colors.text : '#333' }, noOccupancySortBy === opt && { color: 'white' }]}>
+                                                        {opt === 'price_asc' ? 'Price: Low to High' : opt === 'price_desc' ? 'Price: High to Low' : opt.charAt(0).toUpperCase() + opt.slice(1)}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                        </View>
+
+                                        {/* Special */}
+                                        <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? colors.textMuted : '#666', textTransform: 'uppercase', marginBottom: 10, letterSpacing: 0.5 }}>Special</Text>
+                                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+                                            <TouchableOpacity onPress={() => setNoOccupancyFilterFavorites(!noOccupancyFilterFavorites)} style={[{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#e5e7eb' }, noOccupancyFilterFavorites && { backgroundColor: '#111', borderColor: '#111' }]}>
+                                                <Ionicons name="heart" size={14} color={noOccupancyFilterFavorites ? 'white' : (isDark ? colors.text : 'black')} style={{ marginRight: 4 }} />
+                                                <Text style={[{ fontSize: 12, fontWeight: '600', color: isDark ? colors.text : '#333' }, noOccupancyFilterFavorites && { color: 'white' }]}>Guest Favorites</Text>
+                                            </TouchableOpacity>
+                                        </View>
+
+                                        {/* Minimum Rating */}
+                                        <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? colors.textMuted : '#666', textTransform: 'uppercase', marginBottom: 10, letterSpacing: 0.5 }}>Minimum Rating</Text>
+                                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+                                            {[0, 3, 4, 4.5].map(r => (
+                                                <TouchableOpacity key={r} onPress={() => setNoOccupancyMinRating(r)} style={[{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#e5e7eb' }, noOccupancyMinRating === r && { backgroundColor: '#111', borderColor: '#111' }]}>
+                                                    <Text style={[{ fontSize: 12, fontWeight: '600', color: isDark ? colors.text : '#333' }, noOccupancyMinRating === r && { color: 'white' }]}>{r === 0 ? 'Any' : `${r}+ Stars`}</Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                        </View>
+
+                                        {/* Price Range */}
+                                        <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? colors.textMuted : '#666', textTransform: 'uppercase', marginBottom: 10, letterSpacing: 0.5 }}>Price Range (₱)</Text>
+                                        <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
+                                            <TextInput
+                                                style={{ flex: 1, borderWidth: 1.5, borderColor: isDark ? colors.cardBorder : '#e5e7eb', padding: 14, borderRadius: 14, backgroundColor: isDark ? colors.card : '#fafafa', fontSize: 14, color: isDark ? colors.text : '#000' }}
+                                                placeholder="Min price e.g. 5000"
+                                                placeholderTextColor={isDark ? colors.textMuted : '#c4c4c4'}
+                                                keyboardType="numeric"
+                                                value={noOccupancyPriceRange.min}
+                                                onChangeText={t => setNoOccupancyPriceRange(p => ({ ...p, min: t }))}
+                                            />
+                                            <TextInput
+                                                style={{ flex: 1, borderWidth: 1.5, borderColor: isDark ? colors.cardBorder : '#e5e7eb', padding: 14, borderRadius: 14, backgroundColor: isDark ? colors.card : '#fafafa', fontSize: 14, color: isDark ? colors.text : '#000' }}
+                                                placeholder="Max price e.g. 30000"
+                                                placeholderTextColor={isDark ? colors.textMuted : '#c4c4c4'}
+                                                keyboardType="numeric"
+                                                value={noOccupancyPriceRange.max}
+                                                onChangeText={t => setNoOccupancyPriceRange(p => ({ ...p, max: t }))}
+                                            />
+                                        </View>
+
+                                        {/* Amenities */}
+                                        <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? colors.textMuted : '#666', textTransform: 'uppercase', marginBottom: 10, letterSpacing: 0.5 }}>Amenities</Text>
+                                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+                                            {browseAvailableAmenities.map(a => (
+                                                <TouchableOpacity key={a} onPress={() => browseToggleAmenity(a)} style={[{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#e5e7eb' }, noOccupancySelectedAmenities.includes(a) && { backgroundColor: '#111', borderColor: '#111' }]}>
+                                                    <Text style={[{ fontSize: 12, fontWeight: '600', color: isDark ? colors.text : '#333' }, noOccupancySelectedAmenities.includes(a) && { color: 'white' }]}>{a}</Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                        </View>
+
+                                        <View style={{ height: 50 }} />
+                                    </ScrollView>
+
+                                    {/* Footer */}
+                                    <View style={{ padding: 20, borderTopWidth: 1, borderTopColor: isDark ? colors.border : '#f3f4f6', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: isDark ? colors.surface : 'white' }}>
+                                        <TouchableOpacity onPress={browseClearFilters} style={{ flexDirection: 'row', alignItems: 'center', padding: 14 }}>
+                                            <Ionicons name="refresh" size={16} color={isDark ? colors.textSecondary : '#666'} />
+                                            <Text style={{ fontWeight: '600', color: isDark ? colors.textSecondary : '#666', marginLeft: 4 }}>Clear</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity onPress={() => setShowBrowseFilterModal(false)} style={{ backgroundColor: '#111', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14 }}>
+                                            <Text style={{ color: 'white', fontWeight: 'bold' }}>Show Results</Text>
+                                        </TouchableOpacity>
+                                    </View>
+
+                                </View>
                             </View>
-                        )}
+                        </Modal>
                     </View>
                 )}
 
@@ -1847,6 +2196,15 @@ const styles = StyleSheet.create({
     dotPaid: { width: 18, height: 18, borderRadius: 9, backgroundColor: '#86efac', alignItems: 'center', justifyContent: 'center' },
     dotCurrent: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: '#000', alignItems: 'center', justifyContent: 'center' },
     dotEmpty: { width: 18, height: 18, borderRadius: 9, borderWidth: 1, borderColor: '#e5e7eb' },
+
+    // Browse grid (no-occupancy)
+    browseSearchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f3f4f6', paddingHorizontal: 14, height: 46, borderRadius: 14, gap: 8, marginHorizontal: 16, marginTop: 14, marginBottom: 4 },
+    browseSearchInput: { flex: 1, fontSize: 14, color: '#111' },
+    cityChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#f3f4f6' },
+    cityChipText: { fontSize: 12, fontWeight: '700' },
+    browseGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 10 },
+    gridCard: { width: '48.5%', backgroundColor: 'white', borderRadius: 14, marginBottom: 12, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 6, elevation: 3, overflow: 'hidden', borderWidth: 1, borderColor: '#f3f4f6' },
+    gridCardImage: { height: 120, position: 'relative' },
 
     // Existing Card & Modal Styles preserved...
     card: { width: CARD_WIDTH, marginRight: 16, backgroundColor: 'white', borderRadius: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 4, borderWidth: 1, borderColor: '#f3f4f6', overflow: 'hidden' },

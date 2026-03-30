@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
+import { useTheme } from '../../lib/theme';
 
 
 // 4 time slots per day
@@ -29,6 +30,7 @@ const SLOT_KEYS = ['am1', 'am2', 'pm1', 'pm2'];
 
 export default function Schedule() {
     const router = useRouter();
+    const { isDark, colors } = useTheme();
 
     // -- State --
     const [session, setSession] = useState<any>(null);
@@ -232,16 +234,16 @@ export default function Schedule() {
         return (
             <View style={{ marginHorizontal: 16, marginBottom: 6 }}>
                 <TouchableOpacity
-                    style={[styles.dateRow, hasSelection && styles.dateRowSelected, isActive && styles.dateRowActive]}
+                    style={[styles.dateRow, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#e5e7eb' }, hasSelection && [styles.dateRowSelected, { borderColor: isDark ? 'white' : '#111', backgroundColor: isDark ? colors.surface : '#fafafa' }], isActive && [styles.dateRowActive, { borderColor: isDark ? 'white' : '#111' }]]}
                     onPress={() => toggleActiveDate(dateStr)}
                     activeOpacity={0.8}
                 >
                     <View style={styles.dateRowLeft}>
-                        <View style={[styles.dateCircle, hasSelection && { backgroundColor: '#111' }]}>
-                            <Text style={[styles.dateCircleNum, hasSelection && { color: 'white' }]}>{dayNum}</Text>
+                        <View style={[styles.dateCircle, { backgroundColor: isDark ? colors.background : '#f3f4f6' }, hasSelection && { backgroundColor: isDark ? 'white' : '#111' }]}>
+                            <Text style={[styles.dateCircleNum, { color: isDark ? colors.text : '#111' }, hasSelection && { color: isDark ? '#111' : 'white' }]}>{dayNum}</Text>
                         </View>
                         <View>
-                            <Text style={[styles.dateRowDay, isWeekend && { color: '#ef4444' }]}>{dayName}, {monthStr} {dayNum}</Text>
+                            <Text style={[styles.dateRowDay, { color: isDark ? colors.text : '#111' }, isWeekend && { color: isDark ? '#fca5a5' : '#ef4444' }]}>{dayName}, {monthStr} {dayNum}</Text>
                             {hasSelection ? (
                                 <View style={{ flexDirection: 'row', gap: 4, marginTop: 3 }}>
                                     {selected.map(s => (
@@ -251,16 +253,16 @@ export default function Schedule() {
                                     ))}
                                 </View>
                             ) : (
-                                <Text style={styles.dateRowHint}>Tap to select slots</Text>
+                                <Text style={[styles.dateRowHint, { color: isDark ? colors.textMuted : '#d1d5db' }]}>Tap to select slots</Text>
                             )}
                         </View>
                     </View>
-                    <Ionicons name={isActive ? 'chevron-up' : 'chevron-down'} size={18} color={hasSelection ? '#111' : '#d1d5db'} />
+                    <Ionicons name={isActive ? 'chevron-up' : 'chevron-down'} size={18} color={hasSelection ? (isDark ? 'white' : '#111') : (isDark ? colors.textMuted : '#d1d5db')} />
                 </TouchableOpacity>
 
                 {/* Expanded Slot Selection */}
                 {isActive && (
-                    <View style={styles.slotSelectionBox}>
+                    <View style={[styles.slotSelectionBox, { backgroundColor: isDark ? colors.surface : 'white', borderColor: isDark ? colors.border : '#f3f4f6' }]}>
                         {SLOT_KEYS.map(key => {
                             const isSlotSelected = selected.includes(key);
                             const config = TIME_SLOT_CONFIG[key];
@@ -268,15 +270,15 @@ export default function Schedule() {
                                 <TouchableOpacity
                                     key={key}
                                     onPress={() => toggleDateTimeSlot(dateStr, key)}
-                                    style={[styles.slotToggleBtn, isSlotSelected && { backgroundColor: config.color, borderColor: config.color }]}
+                                    style={[styles.slotToggleBtn, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#e5e7eb' }, isSlotSelected && { backgroundColor: config.color, borderColor: config.color }]}
                                     activeOpacity={0.7}
                                 >
-                                    <View style={[styles.slotToggleIcon, { backgroundColor: isSlotSelected ? 'rgba(255,255,255,0.25)' : config.color + '15' }]}>
+                                    <View style={[styles.slotToggleIcon, { backgroundColor: isSlotSelected ? 'rgba(255,255,255,0.25)' : config.color + (isDark ? '25' : '15') }]}>
                                         <Ionicons name={isSlotSelected ? 'checkmark' : config.icon} size={16} color={isSlotSelected ? 'white' : config.color} />
                                     </View>
                                     <View style={{ flex: 1 }}>
-                                        <Text style={[styles.slotToggleLabel, isSlotSelected && { color: 'white' }]}>{config.label}</Text>
-                                        <Text style={[styles.slotToggleTime, isSlotSelected && { color: 'rgba(255,255,255,0.7)' }]}>{config.time}</Text>
+                                        <Text style={[styles.slotToggleLabel, { color: isDark ? colors.text : '#111' }, isSlotSelected && { color: 'white' }]}>{config.label}</Text>
+                                        <Text style={[styles.slotToggleTime, { color: isDark ? colors.textMuted : '#9ca3af' }, isSlotSelected && { color: 'rgba(255,255,255,0.7)' }]}>{config.time}</Text>
                                     </View>
                                 </TouchableOpacity>
                             );
@@ -295,80 +297,80 @@ export default function Schedule() {
         const endStr = endDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 
         return (
-            <View key={slot.id} style={[styles.slotCard, slot.is_booked && styles.slotBooked]}>
-                <View style={[styles.slotIconBox, { backgroundColor: slotInfo.color + '18' }]}>
+            <View key={slot.id} style={[styles.slotCard, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }, slot.is_booked && [styles.slotBooked, { backgroundColor: isDark ? colors.surface : '#fafafa', borderColor: isDark ? colors.border : '#e5e7eb' }]]}>
+                <View style={[styles.slotIconBox, { backgroundColor: slotInfo.color + (isDark ? '25' : '18') }]}>
                     <Ionicons name={slotInfo.icon} size={18} color={slotInfo.color} />
                 </View>
                 <View style={styles.slotInfo}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Text style={styles.slotLabel}>{slotInfo.label}</Text>
+                        <Text style={[styles.slotLabel, { color: isDark ? colors.text : '#111' }]}>{slotInfo.label}</Text>
                         {slot.is_booked && (
-                            <View style={styles.bookedBadge}>
-                                <Text style={styles.bookedBadgeText}>BOOKED</Text>
+                            <View style={[styles.bookedBadge, { backgroundColor: isDark ? 'white' : '#111' }]}>
+                                <Text style={[styles.bookedBadgeText, { color: isDark ? '#111' : 'white' }]}>BOOKED</Text>
                             </View>
                         )}
                     </View>
-                    <Text style={styles.slotTime}>{startStr} – {endStr}</Text>
+                    <Text style={[styles.slotTime, { color: isDark ? colors.textMuted : '#9ca3af' }]}>{startStr} – {endStr}</Text>
                 </View>
                 {!slot.is_booked && (
-                    <TouchableOpacity onPress={() => deleteSlot(slot.id)} style={styles.deleteBtn}>
-                        <Ionicons name="trash-outline" size={16} color="#ef4444" />
+                    <TouchableOpacity onPress={() => deleteSlot(slot.id)} style={[styles.deleteBtn, { backgroundColor: isDark ? '#7f1d1d' : '#fef2f2' }]}>
+                        <Ionicons name="trash-outline" size={16} color={isDark ? '#fca5a5' : '#ef4444'} />
                     </TouchableOpacity>
                 )}
             </View>
         );
     };
 
-    if (loading) return <View style={styles.center}><ActivityIndicator color="black" /></View>;
+    if (loading) return <View style={[styles.center, { backgroundColor: isDark ? colors.background : '#f9fafb' }]}><ActivityIndicator color={isDark ? 'white' : 'black'} /></View>;
 
     const groupedSlots = getGroupedSlots();
     const groupKeys = Object.keys(groupedSlots);
 
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
+        <SafeAreaView style={[styles.container, { backgroundColor: isDark ? colors.background : '#f9fafb' }]} edges={['top']}>
             {/* Header */}
-            <View style={styles.header}>
+            <View style={[styles.header, { backgroundColor: isDark ? colors.surface : 'white', borderBottomColor: isDark ? colors.border : '#f3f4f6' }]}>
                 <View>
-                    <Text style={styles.headerTitle}>Availability</Text>
-                    <Text style={styles.headerSub}>Manage your viewing schedule</Text>
+                    <Text style={[styles.headerTitle, { color: isDark ? colors.text : '#111' }]}>Availability</Text>
+                    <Text style={[styles.headerSub, { color: isDark ? colors.textMuted : '#9ca3af' }]}>Manage your viewing schedule</Text>
                 </View>
-                <TouchableOpacity style={styles.addBtn} onPress={() => setShowAddModal(true)}>
-                    <Ionicons name="add" size={18} color="white" />
-                    <Text style={styles.addBtnText}>Add Slots</Text>
+                <TouchableOpacity style={[styles.addBtn, { backgroundColor: isDark ? 'white' : '#111' }]} onPress={() => setShowAddModal(true)}>
+                    <Ionicons name="add" size={18} color={isDark ? '#111' : 'white'} />
+                    <Text style={[styles.addBtnText, { color: isDark ? '#111' : 'white' }]}>Add Slots</Text>
                 </TouchableOpacity>
             </View>
 
             {/* Stats Row */}
-            <View style={styles.statsRow}>
-                <View style={styles.statBox}>
-                    <Text style={styles.statNum}>{timeSlots.length}</Text>
-                    <Text style={styles.statLabel}>Total Slots</Text>
+            <View style={[styles.statsRow, { backgroundColor: isDark ? colors.surface : 'white' }]}>
+                <View style={[styles.statBox, { backgroundColor: isDark ? colors.card : '#f9fafb', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}>
+                    <Text style={[styles.statNum, { color: isDark ? colors.text : '#111' }]}>{timeSlots.length}</Text>
+                    <Text style={[styles.statLabel, { color: isDark ? colors.textMuted : '#9ca3af' }]}>Total Slots</Text>
                 </View>
-                <View style={styles.statBox}>
+                <View style={[styles.statBox, { backgroundColor: isDark ? colors.card : '#f9fafb', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}>
                     <Text style={[styles.statNum, { color: '#16a34a' }]}>{timeSlots.filter(s => !s.is_booked).length}</Text>
-                    <Text style={styles.statLabel}>Available</Text>
+                    <Text style={[styles.statLabel, { color: isDark ? colors.textMuted : '#9ca3af' }]}>Available</Text>
                 </View>
-                <View style={styles.statBox}>
+                <View style={[styles.statBox, { backgroundColor: isDark ? colors.card : '#f9fafb', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}>
                     <Text style={[styles.statNum, { color: '#f59e0b' }]}>{timeSlots.filter(s => s.is_booked).length}</Text>
-                    <Text style={styles.statLabel}>Booked</Text>
+                    <Text style={[styles.statLabel, { color: isDark ? colors.textMuted : '#9ca3af' }]}>Booked</Text>
                 </View>
             </View>
 
             {/* Search Filter */}
             {timeSlots.length > 0 && (
                 <View style={styles.filterContainer}>
-                    <View style={styles.filterBar}>
-                        <Ionicons name="search" size={16} color="#9ca3af" />
+                    <View style={[styles.filterBar, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#e5e7eb' }]}>
+                        <Ionicons name="search" size={16} color={isDark ? colors.textMuted : '#9ca3af'} />
                         <TextInput
                             placeholder="Search by date (YYYY-MM-DD)..."
-                            placeholderTextColor="#c4c4c4"
-                            style={styles.filterInput}
+                            placeholderTextColor={isDark ? colors.textMuted : '#c4c4c4'}
+                            style={[styles.filterInput, { color: isDark ? colors.text : '#111' }]}
                             value={searchDate}
                             onChangeText={setSearchDate}
                         />
                         {searchDate.length > 0 && (
                             <TouchableOpacity onPress={() => setSearchDate('')}>
-                                <Ionicons name="close-circle" size={16} color="#ccc" />
+                                <Ionicons name="close-circle" size={16} color={isDark ? colors.textMuted : '#ccc'} />
                             </TouchableOpacity>
                         )}
                     </View>
@@ -376,22 +378,22 @@ export default function Schedule() {
             )}
 
             {/* Main List - Grouped by Date */}
-            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 130 }}>
                 {groupKeys.length === 0 ? (
                     <View style={styles.emptyContainer}>
-                        <View style={styles.emptyIcon}>
-                            <Ionicons name="calendar-outline" size={40} color="#d1d5db" />
+                        <View style={[styles.emptyIcon, { backgroundColor: isDark ? colors.card : '#f3f4f6' }]}>
+                            <Ionicons name="calendar-outline" size={40} color={isDark ? colors.textMuted : '#d1d5db'} />
                         </View>
-                        <Text style={styles.emptyTitle}>No availability set</Text>
-                        <Text style={styles.emptySub}>Tap "Add Slots" to set your viewing times.</Text>
+                        <Text style={[styles.emptyTitle, { color: isDark ? colors.text : '#111' }]}>No availability set</Text>
+                        <Text style={[styles.emptySub, { color: isDark ? colors.textMuted : '#9ca3af' }]}>Tap "Add Slots" to set your viewing times.</Text>
                     </View>
                 ) : (
                     groupKeys.map(dateKey => (
                         <View key={dateKey} style={styles.dateGroup}>
-                            <View style={styles.dateGroupHeader}>
-                                <Ionicons name="calendar" size={14} color="#9ca3af" />
-                                <Text style={styles.dateGroupTitle}>{dateKey}</Text>
-                                <Text style={styles.dateGroupCount}>{groupedSlots[dateKey].length} slot{groupedSlots[dateKey].length > 1 ? 's' : ''}</Text>
+                            <View style={[styles.dateGroupHeader, { borderBottomColor: isDark ? colors.border : '#f3f4f6' }]}>
+                                <Ionicons name="calendar" size={14} color={isDark ? colors.textMuted : '#9ca3af'} />
+                                <Text style={[styles.dateGroupTitle, { color: isDark ? colors.text : '#111' }]}>{dateKey}</Text>
+                                <Text style={[styles.dateGroupCount, { color: isDark ? colors.textMuted : '#9ca3af' }]}>{groupedSlots[dateKey].length} slot{groupedSlots[dateKey].length > 1 ? 's' : ''}</Text>
                             </View>
                             {groupedSlots[dateKey].map(renderSlotCard)}
                         </View>
@@ -400,90 +402,92 @@ export default function Schedule() {
             </ScrollView>
 
             {/* ADD MODAL - Redesigned */}
-            <Modal visible={showAddModal} animationType="slide" presentationStyle="pageSheet">
-                <View style={styles.modalContainer}>
-                    {/* Modal Header */}
-                    <View style={styles.modalHeader}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                            <View style={styles.modalHeaderIcon}>
-                                <Ionicons name="calendar" size={20} color="white" />
-                            </View>
-                            <View>
-                                <Text style={styles.modalTitle}>Select Schedule</Text>
-                                <Text style={styles.modalSubtitle}>Tap a date, then pick time slots</Text>
-                            </View>
-                        </View>
-                        <TouchableOpacity onPress={() => setShowAddModal(false)} style={styles.modalCloseBtn}>
-                            <Ionicons name="close" size={20} color="#666" />
-                        </TouchableOpacity>
-                    </View>
-
-                    {/* Time Slot Legend */}
-                    <View style={styles.legendRow}>
-                        {SLOT_KEYS.map(key => {
-                            const config = TIME_SLOT_CONFIG[key];
-                            return (
-                                <View key={key} style={styles.legendItem}>
-                                    <View style={[styles.legendDot, { backgroundColor: config.color }]} />
-                                    <View>
-                                        <Text style={styles.legendLabel}>{config.label}</Text>
-                                        <Text style={styles.legendTime}>{config.time}</Text>
-                                    </View>
+            <Modal visible={showAddModal} animationType="slide" transparent={true}>
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+                    <View style={{ backgroundColor: isDark ? colors.background : '#f9fafb', height: '85%', borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: 'hidden' }}>
+                        {/* Modal Header */}
+                        <View style={[styles.modalHeader, { backgroundColor: isDark ? colors.surface : 'white', borderBottomColor: isDark ? colors.border : '#f3f4f6' }]}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                                <View style={[styles.modalHeaderIcon, { backgroundColor: isDark ? colors.card : '#111827' }]}>
+                                    <Ionicons name="calendar" size={20} color="white" />
                                 </View>
-                            );
-                        })}
-                    </View>
-
-                    {/* Quick Select Chips */}
-                    <View style={{ height: 56, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#f3f4f6' }}>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 8, alignItems: 'center', paddingVertical: 1 }}>
-                            {[
-                                { l: 'Weekdays AM1', type: 'am1', fn: (d: Date) => d.getDay() !== 0 && d.getDay() !== 6 },
-                                { l: 'Weekdays AM2', type: 'am2', fn: (d: Date) => d.getDay() !== 0 && d.getDay() !== 6 },
-                                { l: 'Weekdays PM1', type: 'pm1', fn: (d: Date) => d.getDay() !== 0 && d.getDay() !== 6 },
-                                { l: 'Weekdays PM2', type: 'pm2', fn: (d: Date) => d.getDay() !== 0 && d.getDay() !== 6 },
-                                { l: 'Clear All', type: 'clear', fn: () => true },
-                            ].map((opt, i) => (
-                                <TouchableOpacity
-                                    key={i}
-                                    style={[styles.chip, opt.type === 'clear' && styles.chipClear]}
-                                    onPress={() => opt.type === 'clear' ? setSelectedDateSlots({}) : selectAllDates(opt.type, opt.fn)}
-                                >
-                                    {opt.type !== 'clear' && <View style={[styles.chipDot, { backgroundColor: TIME_SLOT_CONFIG[opt.type]?.color }]} />}
-                                    <Text style={[styles.chipText, opt.type === 'clear' && { color: '#ef4444' }]}>{opt.l}</Text>
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
-                    </View>
-
-                    {/* Date List */}
-                    <FlatList
-                        data={getNextDays(60)}
-                        keyExtractor={(item: Date) => item.toISOString()}
-                        renderItem={renderDateRow}
-                        contentContainerStyle={{ paddingBottom: 20, paddingTop: 8 }}
-                    />
-
-                    {/* Bottom Footer */}
-                    <View style={styles.modalFooter}>
-                        <View>
-                            <Text style={styles.footerCount}>{getTotalSelectedSlots()} time slots</Text>
-                            <Text style={styles.footerSub}>{Object.keys(selectedDateSlots).length} dates selected</Text>
+                                <View>
+                                    <Text style={[styles.modalTitle, { color: isDark ? colors.text : '#111' }]}>Select Schedule</Text>
+                                    <Text style={[styles.modalSubtitle, { color: isDark ? colors.textMuted : '#9ca3af' }]}>Tap a date, then pick time slots</Text>
+                                </View>
+                            </View>
+                            <TouchableOpacity onPress={() => setShowAddModal(false)} style={[styles.modalCloseBtn, { backgroundColor: isDark ? colors.card : '#f3f4f6' }]}>
+                                <Ionicons name="close" size={20} color={isDark ? colors.textMuted : '#666'} />
+                            </TouchableOpacity>
                         </View>
-                        <TouchableOpacity
-                            style={[styles.confirmBtn, getTotalSelectedSlots() === 0 && { opacity: 0.4 }]}
-                            onPress={addTimeSlots}
-                            disabled={submitting || getTotalSelectedSlots() === 0}
-                        >
-                            {submitting ? (
-                                <ActivityIndicator color="white" size="small" />
-                            ) : (
-                                <>
-                                    <Ionicons name="checkmark-circle" size={18} color="white" />
-                                    <Text style={styles.confirmBtnText}>Confirm Slots</Text>
-                                </>
-                            )}
-                        </TouchableOpacity>
+
+                        {/* Time Slot Legend */}
+                        <View style={[styles.legendRow, { backgroundColor: isDark ? colors.surface : 'white' }]}>
+                            {SLOT_KEYS.map(key => {
+                                const config = TIME_SLOT_CONFIG[key];
+                                return (
+                                    <View key={key} style={[styles.legendItem, { backgroundColor: isDark ? colors.card : '#fafafa' }]}>
+                                        <View style={[styles.legendDot, { backgroundColor: config.color }]} />
+                                        <View>
+                                            <Text style={[styles.legendLabel, { color: isDark ? colors.text : '#111' }]}>{config.label}</Text>
+                                            <Text style={[styles.legendTime, { color: isDark ? colors.textMuted : '#9ca3af' }]}>{config.time}</Text>
+                                        </View>
+                                    </View>
+                                );
+                            })}
+                        </View>
+
+                        {/* Quick Select Chips */}
+                        <View style={{ height: 56, backgroundColor: isDark ? colors.surface : 'white', borderBottomWidth: 1, borderBottomColor: isDark ? colors.border : '#f3f4f6' }}>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 8, alignItems: 'center', paddingVertical: 1 }}>
+                                {[
+                                    { l: 'Weekdays AM1', type: 'am1', fn: (d: Date) => d.getDay() !== 0 && d.getDay() !== 6 },
+                                    { l: 'Weekdays AM2', type: 'am2', fn: (d: Date) => d.getDay() !== 0 && d.getDay() !== 6 },
+                                    { l: 'Weekdays PM1', type: 'pm1', fn: (d: Date) => d.getDay() !== 0 && d.getDay() !== 6 },
+                                    { l: 'Weekdays PM2', type: 'pm2', fn: (d: Date) => d.getDay() !== 0 && d.getDay() !== 6 },
+                                    { l: 'Clear All', type: 'clear', fn: () => true },
+                                ].map((opt, i) => (
+                                    <TouchableOpacity
+                                        key={i}
+                                        style={[styles.chip, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#e5e7eb' }, opt.type === 'clear' && [styles.chipClear, { borderColor: isDark ? '#b91c1c' : '#fecaca', backgroundColor: isDark ? '#7f1d1d' : '#fff5f5' }]]}
+                                        onPress={() => opt.type === 'clear' ? setSelectedDateSlots({}) : selectAllDates(opt.type, opt.fn)}
+                                    >
+                                        {opt.type !== 'clear' && <View style={[styles.chipDot, { backgroundColor: TIME_SLOT_CONFIG[opt.type]?.color }]} />}
+                                        <Text style={[styles.chipText, { color: isDark ? colors.text : '#333' }, opt.type === 'clear' && { color: isDark ? '#fca5a5' : '#ef4444' }]}>{opt.l}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </ScrollView>
+                        </View>
+
+                        {/* Date List */}
+                        <FlatList
+                            data={getNextDays(60)}
+                            keyExtractor={(item: Date) => item.toISOString()}
+                            renderItem={renderDateRow}
+                            contentContainerStyle={{ paddingBottom: 20, paddingTop: 8 }}
+                        />
+
+                        {/* Bottom Footer */}
+                        <View style={[styles.modalFooter, { backgroundColor: isDark ? colors.surface : 'white', borderTopColor: isDark ? colors.border : '#f3f4f6' }]}>
+                            <View>
+                                <Text style={[styles.footerCount, { color: isDark ? colors.text : '#111' }]}>{getTotalSelectedSlots()} time slots</Text>
+                                <Text style={[styles.footerSub, { color: isDark ? colors.textMuted : '#9ca3af' }]}>{Object.keys(selectedDateSlots).length} dates selected</Text>
+                            </View>
+                            <TouchableOpacity
+                                style={[styles.confirmBtn, { backgroundColor: isDark ? 'white' : '#111' }, getTotalSelectedSlots() === 0 && { opacity: 0.4 }]}
+                                onPress={addTimeSlots}
+                                disabled={submitting || getTotalSelectedSlots() === 0}
+                            >
+                                {submitting ? (
+                                    <ActivityIndicator color={isDark ? 'black' : 'white'} size="small" />
+                                ) : (
+                                    <>
+                                        <Ionicons name="checkmark-circle" size={18} color={isDark ? '#111' : 'white'} />
+                                        <Text style={[styles.confirmBtnText, { color: isDark ? '#111' : 'white' }]}>Confirm Slots</Text>
+                                    </>
+                                )}
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 </View>
             </Modal>

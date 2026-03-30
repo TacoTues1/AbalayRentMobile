@@ -1,8 +1,8 @@
-import React from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient'; // Ensure you have installed expo-linear-gradient
+import { useRouter } from 'expo-router';
+import React from 'react';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 interface PropertyCardProps {
   property: any;
@@ -11,30 +11,34 @@ interface PropertyCardProps {
   showCompare?: boolean;
   onToggleCompare?: () => void;
   isCompareSelected?: boolean;
+  isTopRated?: boolean;
+  isMostFavorite?: boolean;
 }
 
-export default function PropertyCard({ 
-  property, 
-  onToggleFavorite, 
+export default function PropertyCard({
+  property,
+  onToggleFavorite,
   isFavorite = false,
   showCompare = false,
   onToggleCompare,
-  isCompareSelected = false
+  isCompareSelected = false,
+  isTopRated = false,
+  isMostFavorite = false
 }: PropertyCardProps) {
   const router = useRouter();
   const imageUri = property.images?.[0] || 'https://via.placeholder.com/400x300';
   const isGuestFavorite = (property.reviews_count > 3 && property.avg_rating >= 4.5) || false;
 
   return (
-    <TouchableOpacity 
-      style={[styles.card, isCompareSelected && styles.compareSelected]} 
+    <TouchableOpacity
+      style={[styles.card, isCompareSelected && styles.compareSelected]}
       onPress={() => router.push(`/properties/${property.id}` as any)}
       activeOpacity={0.9}
     >
       {/* Image Section */}
       <View style={styles.imageContainer}>
         <Image source={{ uri: imageUri }} style={styles.image} resizeMode="cover" />
-        
+
         {/* Gradient Overlay */}
         <LinearGradient
           colors={['transparent', 'rgba(0,0,0,0.7)']}
@@ -42,36 +46,48 @@ export default function PropertyCard({
         />
 
         {/* Status Badge */}
-        <View style={[styles.badgeContainer, {top: 10, left: 10}]}>
-             <View style={[styles.badge, property.status === 'available' ? {backgroundColor: 'rgba(255,255,255,0.95)'} : {backgroundColor: 'rgba(0,0,0,0.8)'}]}>
-                <Text style={[styles.badgeText, property.status === 'available' ? {color:'black'} : {color:'white'}]}>
-                    {property.status === 'available' ? 'AVAILABLE' : property.status?.toUpperCase()}
-                </Text>
-             </View>
-             {isGuestFavorite && (
-                 <View style={styles.favBadge}>
-                     <Ionicons name="trophy" size={10} color="white" />
-                     <Text style={styles.favText}>Guest Favorite</Text>
-                 </View>
-             )}
+        <View style={[styles.badgeContainer, { top: 10, left: 10 }]}>
+          <View style={[styles.badge, property.status === 'available' ? { backgroundColor: 'rgba(255,255,255,0.95)' } : { backgroundColor: 'rgba(0,0,0,0.8)' }]}>
+            <Text style={[styles.badgeText, property.status === 'available' ? { color: 'black' } : { color: 'white' }]}>
+              {property.status === 'available' ? 'AVAILABLE' : property.status?.toUpperCase()}
+            </Text>
+          </View>
+          {isGuestFavorite && (
+            <View style={styles.favBadge}>
+              <Ionicons name="trophy" size={10} color="white" />
+              <Text style={styles.favText}>Guest Favorite</Text>
+            </View>
+          )}
+          {isTopRated && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#fffbeb', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#fde68a' }}>
+              <Ionicons name="trophy" size={10} color="#d97706" />
+              <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#d97706', marginLeft: 3 }}>Top Rated</Text>
+            </View>
+          )}
+          {isMostFavorite && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff1f2', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#fecdd3' }}>
+              <Ionicons name="heart" size={10} color="#e11d48" />
+              <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#e11d48', marginLeft: 3 }}>Most Favorite</Text>
+            </View>
+          )}
         </View>
 
         {/* Action Icons */}
         <View style={styles.actions}>
           {showCompare && (
-            <TouchableOpacity onPress={onToggleCompare} style={[styles.iconBtn, isCompareSelected && {backgroundColor:'black'}]}>
-              <Ionicons 
-                name={isCompareSelected ? "checkmark" : "add"} 
-                size={18} 
-                color={isCompareSelected ? "white" : "black"} 
+            <TouchableOpacity onPress={onToggleCompare} style={[styles.iconBtn, isCompareSelected && { backgroundColor: 'black' }]}>
+              <Ionicons
+                name={isCompareSelected ? "checkmark" : "add"}
+                size={18}
+                color={isCompareSelected ? "white" : "black"}
               />
             </TouchableOpacity>
           )}
           <TouchableOpacity onPress={onToggleFavorite} style={styles.iconBtn}>
-            <Ionicons 
-              name={isFavorite ? "heart" : "heart-outline"} 
-              size={18} 
-              color={isFavorite ? "#ef4444" : "black"} 
+            <Ionicons
+              name={isFavorite ? "heart" : "heart-outline"}
+              size={18}
+              color={isFavorite ? "#ef4444" : "black"}
             />
           </TouchableOpacity>
         </View>
@@ -85,29 +101,29 @@ export default function PropertyCard({
 
       {/* Details Section */}
       <View style={styles.details}>
-        <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start'}}>
-            <Text style={styles.title} numberOfLines={1}>{property.title}</Text>
-            <View style={{flexDirection:'row', alignItems:'center', gap:2}}>
-                 <Ionicons name="star" color="#eab308" size={12} />
-                 <Text style={{fontWeight:'bold', fontSize:12}}>{Number(property.avg_rating || 0).toFixed(1)}</Text>
-            </View>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <Text style={styles.title} numberOfLines={1}>{property.title}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+            <Ionicons name="star" color="#eab308" size={12} />
+            <Text style={{ fontWeight: 'bold', fontSize: 12 }}>{Number(property.avg_rating || 0).toFixed(1)}</Text>
+          </View>
         </View>
-        
+
         <Text style={styles.location} numberOfLines={1}>
           <Ionicons name="location-outline" size={12} /> {property.city}, Philippines
         </Text>
 
         <View style={styles.features}>
           <Text style={styles.featText}>
-             <Text style={{fontWeight:'bold'}}>{property.bedrooms}</Text> Beds
+            <Text style={{ fontWeight: 'bold' }}>{property.bedrooms}</Text> Beds
           </Text>
           <View style={styles.dot} />
           <Text style={styles.featText}>
-             <Text style={{fontWeight:'bold'}}>{property.bathrooms}</Text> Baths
+            <Text style={{ fontWeight: 'bold' }}>{property.bathrooms}</Text> Baths
           </Text>
           <View style={styles.dot} />
           <Text style={styles.featText}>
-             <Text style={{fontWeight:'bold'}}>{property.area_sqft}</Text> sqft
+            <Text style={{ fontWeight: 'bold' }}>{property.area_sqft}</Text> sqft
           </Text>
         </View>
       </View>

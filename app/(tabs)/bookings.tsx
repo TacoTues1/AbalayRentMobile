@@ -17,12 +17,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { createNotification } from '../../lib/notifications';
 import { supabase } from '../../lib/supabase';
+import { useTheme } from '../../lib/theme';
 
 // Optional: Define your backend URL if you want to send actual emails like the Next.js app
 const API_URL = null; // e.g. 'https://your-app.com/api'
 
 export default function Bookings() {
     const router = useRouter();
+    const { isDark, colors } = useTheme();
 
     // -- State --
     const [session, setSession] = useState<any>(null);
@@ -746,16 +748,16 @@ export default function Bookings() {
         }
 
         return (
-            <View style={styles.card}>
+            <View style={[styles.card, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                     <View style={{ flex: 1 }}>
-                        <Text style={styles.cardTitle}>{item.property?.title || 'Unknown Property'}</Text>
-                        <Text style={styles.cardSubtitle}>{item.property?.address}</Text>
-                        <Text style={styles.cardSubtitle}>
+                        <Text style={[styles.cardTitle, { color: isDark ? colors.text : '#111' }]}>{item.property?.title || 'Unknown Property'}</Text>
+                        <Text style={[styles.cardSubtitle, { color: isDark ? colors.textMuted : '#666' }]}>{item.property?.address}</Text>
+                        <Text style={[styles.cardSubtitle, { color: isDark ? colors.textMuted : '#666' }]}>
                             {item.tenant_profile?.first_name} {item.tenant_profile?.last_name}
                             {item.tenant_profile?.phone ? ` • ${item.tenant_profile.phone}` : ''}
                         </Text>
-                        {item.notes ? <Text style={styles.notes}>"{item.notes}"</Text> : null}
+                        {item.notes ? <Text style={[styles.notes, { backgroundColor: isDark ? colors.surface : '#f9fafb', color: isDark ? colors.textSecondary : '#666' }]}>"{item.notes}"</Text> : null}
                     </View>
                     <View style={[styles.badge, badgeStyle]}>
                         <Text style={[badgeText]}>{statusText}</Text>
@@ -772,10 +774,10 @@ export default function Bookings() {
 
                 {/* Date / Time Display (Updated with TimeSlotInfo) */}
                 {statusLower !== 'ready_to_book' && date && (
-                    <View style={styles.dateContainer}>
-                        <Text style={styles.dateLabel}>REQUESTED TIME</Text>
+                    <View style={[styles.dateContainer, { backgroundColor: isDark ? colors.surface : '#f9fafb' }]}>
+                        <Text style={[styles.dateLabel, { color: isDark ? colors.textMuted : '#9ca3af' }]}>REQUESTED TIME</Text>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text style={styles.dateValue}>
+                            <Text style={[styles.dateValue, { color: isDark ? colors.text : '#111' }]}>
                                 {date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                             </Text>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -783,8 +785,8 @@ export default function Bookings() {
                                     <Ionicons name={timeInfo.icon} size={13} color={timeInfo.color} />
                                 </View>
                                 <View>
-                                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#111' }}>{timeInfo.label}</Text>
-                                    <Text style={styles.timeValue}>{timeInfo.time}</Text>
+                                    <Text style={{ fontSize: 11, fontWeight: '700', color: isDark ? colors.text : '#111' }}>{timeInfo.label}</Text>
+                                    <Text style={[styles.timeValue, { color: isDark ? colors.textMuted : '#666' }]}>{timeInfo.time}</Text>
                                 </View>
                             </View>
                         </View>
@@ -870,34 +872,34 @@ export default function Bookings() {
     };
 
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
-            <View style={styles.header}>
-                <Text style={styles.headerTitle}>Viewing Bookings</Text>
-                <Text style={styles.headerSub}>Manage your viewing appointments.</Text>
+        <SafeAreaView style={[styles.container, { backgroundColor: isDark ? colors.background : '#f9fafb' }]} edges={['top']}>
+            <View style={[styles.header, { backgroundColor: isDark ? colors.surface : 'white', borderBottomColor: isDark ? colors.border : '#f3f4f6' }]}>
+                <Text style={[styles.headerTitle, { color: isDark ? colors.text : '#111' }]}>Viewing Bookings</Text>
+                <Text style={[styles.headerSub, { color: isDark ? colors.textMuted : '#666' }]}>Manage your viewing appointments.</Text>
             </View>
 
             {/* Stats Grid */}
             <View style={styles.statsGrid}>
-                <View style={styles.statCard}>
-                    <Text style={styles.statLabel}>Pending</Text>
-                    <Text style={styles.statValue}>{pendingCount}</Text>
+                <View style={[styles.statCard, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}>
+                    <Text style={[styles.statLabel, { color: isDark ? colors.textMuted : '#999' }]}>Pending</Text>
+                    <Text style={[styles.statValue, { color: isDark ? colors.text : '#111' }]}>{pendingCount}</Text>
                 </View>
-                <View style={styles.statCard}>
-                    <Text style={styles.statLabel}>Approved</Text>
+                <View style={[styles.statCard, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}>
+                    <Text style={[styles.statLabel, { color: isDark ? colors.textMuted : '#999' }]}>Approved</Text>
                     <Text style={[styles.statValue, { color: '#16a34a' }]}>{approvedCount}</Text>
                 </View>
-                <View style={styles.statCard}>
-                    <Text style={styles.statLabel}>Rejected</Text>
+                <View style={[styles.statCard, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#f3f4f6' }]}>
+                    <Text style={[styles.statLabel, { color: isDark ? colors.textMuted : '#999' }]}>Rejected</Text>
                     <Text style={[styles.statValue, { color: '#dc2626' }]}>{rejectedCount}</Text>
                 </View>
             </View>
 
             {/* Filters */}
-            <View style={styles.filterScroll}>
+            <View style={[styles.filterScroll, { backgroundColor: isDark ? colors.background : '#f9fafb' }]}>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20 }}>
                     {['all', 'pending', 'approved', 'completed', 'rejected', 'cancelled'].map(f => (
-                        <TouchableOpacity key={f} onPress={() => setFilter(f)} style={[styles.filterBtn, filter === f && styles.filterBtnActive]}>
-                            <Text style={[styles.filterText, filter === f && styles.filterTextActive]}>{f.charAt(0).toUpperCase() + f.slice(1)}</Text>
+                        <TouchableOpacity key={f} onPress={() => setFilter(f)} style={[styles.filterBtn, { borderColor: isDark ? colors.cardBorder : '#e5e7eb' }, filter === f && styles.filterBtnActive]}>
+                            <Text style={[styles.filterText, { color: isDark ? colors.textSecondary : '#666' }, filter === f && styles.filterTextActive]}>{f.charAt(0).toUpperCase() + f.slice(1)}</Text>
                         </TouchableOpacity>
                     ))}
                 </ScrollView>
@@ -908,7 +910,7 @@ export default function Bookings() {
                     <ActivityIndicator size="large" color="black" style={{ marginTop: 50 }} />
                 ) : (
                     <ScrollView
-                        contentContainerStyle={{ padding: 20, paddingBottom: 30 }}
+                        contentContainerStyle={{ padding: 20, paddingBottom: 130 }}
                         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadBookings(session?.user?.id, profile?.role, filter)} />}
                     >
                         {bookings.length === 0 ? (
@@ -922,30 +924,30 @@ export default function Bookings() {
 
             {/* Booking Modal - Redesigned */}
             <Modal visible={showBookingModal} animationType="slide" presentationStyle="pageSheet">
-                <View style={{ flex: 1, backgroundColor: 'white' }}>
+                <View style={{ flex: 1, backgroundColor: isDark ? colors.background : 'white' }}>
                     {/* Modal Header */}
-                    <View style={styles.modalHeader}>
+                    <View style={[styles.modalHeader, { borderBottomColor: isDark ? colors.border : '#f3f4f6' }]}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                             <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' }}>
                                 <Ionicons name="calendar" size={20} color="white" />
                             </View>
                             <View>
-                                <Text style={styles.modalTitle}>Schedule Viewing</Text>
-                                <Text style={{ fontSize: 12, color: '#9ca3af' }}>Pick a time slot below</Text>
+                                <Text style={[styles.modalTitle, { color: isDark ? colors.text : '#111' }]}>Schedule Viewing</Text>
+                                <Text style={{ fontSize: 12, color: isDark ? colors.textMuted : '#9ca3af' }}>Pick a time slot below</Text>
                             </View>
                         </View>
-                        <TouchableOpacity onPress={() => setShowBookingModal(false)} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center' }}>
-                            <Ionicons name="close" size={20} color="#666" />
+                        <TouchableOpacity onPress={() => setShowBookingModal(false)} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: isDark ? colors.card : '#f3f4f6', alignItems: 'center', justifyContent: 'center' }}>
+                            <Ionicons name="close" size={20} color={isDark ? colors.textMuted : '#666'} />
                         </TouchableOpacity>
                     </View>
 
                     {/* Property Info */}
                     {selectedApplication?.property && (
-                        <View style={{ margin: 20, marginBottom: 0, padding: 14, backgroundColor: '#f9fafb', borderRadius: 14, borderWidth: 1, borderColor: '#f3f4f6' }}>
-                            <Text style={{ fontWeight: '700', color: '#111', fontSize: 14 }}>{selectedApplication.property.title}</Text>
+                        <View style={{ margin: 20, marginBottom: 0, padding: 14, backgroundColor: isDark ? colors.card : '#f9fafb', borderRadius: 14, borderWidth: 1, borderColor: isDark ? colors.cardBorder : '#f3f4f6' }}>
+                            <Text style={{ fontWeight: '700', color: isDark ? colors.text : '#111', fontSize: 14 }}>{selectedApplication.property.title}</Text>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
-                                <Ionicons name="location-outline" size={12} color="#9ca3af" />
-                                <Text style={{ fontSize: 12, color: '#9ca3af' }}>{selectedApplication.property.address}, {selectedApplication.property.city}</Text>
+                                <Ionicons name="location-outline" size={12} color={isDark ? colors.textMuted : '#9ca3af'} />
+                                <Text style={{ fontSize: 12, color: isDark ? colors.textMuted : '#9ca3af' }}>{selectedApplication.property.address}, {selectedApplication.property.city}</Text>
                             </View>
                         </View>
                     )}
@@ -1019,7 +1021,7 @@ export default function Bookings() {
                     </ScrollView>
 
                     {/* Fixed Bottom */}
-                    <View style={{ padding: 20, paddingBottom: 30, borderTopWidth: 1, borderTopColor: '#f3f4f6', backgroundColor: 'white' }}>
+                    <View style={{ padding: 20, paddingBottom: 30, borderTopWidth: 1, borderTopColor: isDark ? colors.border : '#f3f4f6', backgroundColor: isDark ? colors.surface : 'white' }}>
                         <TouchableOpacity
                             style={[styles.btnBlack, (submittingBooking || !selectedTimeSlot) && styles.btnDisabled]}
                             onPress={submitBooking}
@@ -1041,16 +1043,16 @@ export default function Bookings() {
             {/* Cancel Confirmation Modal */}
             <Modal visible={showCancelModal} animationType="fade" transparent>
                 <View style={styles.modalOverlay}>
-                    <View style={styles.modalContentSmall}>
+                    <View style={[styles.modalContentSmall, { backgroundColor: isDark ? colors.surface : 'white' }]}>
                         <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: '#fef2f2', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
                             <Ionicons name="warning" size={24} color="#ef4444" />
                         </View>
-                        <Text style={styles.modalTitleCenter}>Cancel Viewing?</Text>
-                        <Text style={styles.modalTextCenter}>
+                        <Text style={[styles.modalTitleCenter, { color: isDark ? colors.text : '#111' }]}>Cancel Viewing?</Text>
+                        <Text style={[styles.modalTextCenter, { color: isDark ? colors.textMuted : '#9ca3af' }]}>
                             Are you sure you want to cancel your viewing{bookingToCancel?.property?.title ? ` for ${bookingToCancel.property.title}` : ''}? This action cannot be undone.
                         </Text>
                         <View style={{ flexDirection: 'row', gap: 10, marginTop: 20, width: '100%' }}>
-                            <TouchableOpacity onPress={() => setShowCancelModal(false)} style={styles.btnOutline}><Text style={{ fontWeight: '700' }}>Keep it</Text></TouchableOpacity>
+                            <TouchableOpacity onPress={() => setShowCancelModal(false)} style={[styles.btnOutline, { backgroundColor: isDark ? colors.card : 'white', borderColor: isDark ? colors.cardBorder : '#e5e7eb' }]}><Text style={{ fontWeight: '700', color: isDark ? colors.text : '#000' }}>Keep it</Text></TouchableOpacity>
                             <TouchableOpacity onPress={confirmCancelBooking} style={styles.btnRed}><Text style={styles.btnTextWhite}>Yes, Cancel</Text></TouchableOpacity>
                         </View>
                     </View>
@@ -1059,12 +1061,12 @@ export default function Bookings() {
 
             {/* ASSIGN TENANT MODAL WIZARD */}
             <Modal visible={showAssignModal} animationType="slide" presentationStyle="pageSheet">
-                <View style={{ flex: 1, backgroundColor: '#f9fafb' }}>
+                <View style={{ flex: 1, backgroundColor: isDark ? colors.background : '#f9fafb' }}>
                     {/* Top Bar */}
-                    <View style={styles.wizardTopBar}>
+                    <View style={[styles.wizardTopBar, { backgroundColor: isDark ? colors.surface : 'white' }]}>
                         <TouchableOpacity onPress={() => setShowAssignModal(false)} style={styles.backBtnText}>
-                            <Ionicons name="chevron-down" size={18} color="#4b5563" />
-                            <Text style={{ fontWeight: '600', color: '#4b5563', fontSize: 14 }}>Close</Text>
+                            <Ionicons name="chevron-down" size={18} color={isDark ? colors.textSecondary : '#4b5563'} />
+                            <Text style={{ fontWeight: '600', color: isDark ? colors.textSecondary : '#4b5563', fontSize: 14 }}>Close</Text>
                         </TouchableOpacity>
                         <Text style={styles.stepCounterText}>STEP {assignStep + 1} OF {ASSIGN_STEPS.length}</Text>
                         <View style={{ width: 60 }} />

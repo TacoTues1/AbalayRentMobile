@@ -1,23 +1,26 @@
-import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  StyleSheet,
-  Text, TouchableOpacity,
-  View
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { supabase } from '../../lib/supabase';
+    ActivityIndicator,
+    Alert,
+    Image,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { supabase } from "../../lib/supabase";
+import { useTheme } from "../../lib/theme";
 
 // Import Dashboards
-import LandlordDashboard from '../../components/auth/dashboard/LandlordDashboard';
-import TenantDashboard from '../../components/auth/dashboard/TenantDashboard';
+import LandlordDashboard from "../../components/auth/dashboard/LandlordDashboard";
+import TenantDashboard from "../../components/auth/dashboard/TenantDashboard";
 
 export default function Dashboard() {
   const router = useRouter();
+  const { isDark, colors } = useTheme();
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -43,19 +46,21 @@ export default function Dashboard() {
   useFocusEffect(
     useCallback(() => {
       fetchUnreadCount();
-    }, [])
+    }, []),
   );
 
   const fetchUnreadCount = async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session) return;
 
       const { count } = await supabase
-        .from('notifications')
-        .select('*', { count: 'exact', head: true })
-        .eq('recipient', session.user.id)
-        .eq('read', false);
+        .from("notifications")
+        .select("*", { count: "exact", head: true })
+        .eq("recipient", session.user.id)
+        .eq("read", false);
 
       setUnreadCount(count || 0);
     } catch (e) {
@@ -65,19 +70,21 @@ export default function Dashboard() {
 
   const checkUser = useCallback(async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
       if (!session) {
-        router.replace('/');
+        router.replace("/");
         return;
       }
 
       setSession(session);
 
       const { data: profileData } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
+        .from("profiles")
+        .select("*")
+        .eq("id", session.user.id)
         .single();
 
       if (profileData) {
@@ -85,10 +92,10 @@ export default function Dashboard() {
 
         if (profileData.phone) {
           const { data: duplicates } = await supabase
-            .from('profiles')
-            .select('id')
-            .eq('phone', profileData.phone)
-            .neq('id', session.user.id);
+            .from("profiles")
+            .select("id")
+            .eq("phone", profileData.phone)
+            .neq("id", session.user.id);
 
           if (duplicates && duplicates.length > 0) {
             setIsDuplicate(true);
@@ -96,7 +103,7 @@ export default function Dashboard() {
         }
       }
     } catch (e) {
-      console.log('Error checking user:', e);
+      console.log("Error checking user:", e);
     } finally {
       setLoading(false);
     }
@@ -107,7 +114,7 @@ export default function Dashboard() {
     setMenuVisible(false);
     // Directly navigate to the logout handler screen
     // This forces unmounting of the Dashboard and its state
-    router.replace('/logout');
+    router.replace("/logout");
   };
 
   const handleDeleteAccount = async () => {
@@ -118,23 +125,36 @@ export default function Dashboard() {
         { text: "Cancel", style: "cancel" },
         {
           text: "Delete",
-          style: 'destructive',
+          style: "destructive",
           onPress: async () => {
             setDeleting(true);
             try {
-              await supabase.from('profiles').delete().eq('id', session.user.id);
+              await supabase
+                .from("profiles")
+                .delete()
+                .eq("id", session.user.id);
               handleSignOut(); // Reuse logout logic
             } catch (error: any) {
               Alert.alert("Error", error.message);
               setDeleting(false);
             }
-          }
-        }
-      ]
+          },
+        },
+      ],
     );
   };
 
-  const MenuOption = ({ icon, label, route, isLogout }: { icon: any; label: string; route?: string; isLogout?: boolean }) => (
+  const MenuOption = ({
+    icon,
+    label,
+    route,
+    isLogout,
+  }: {
+    icon: any;
+    label: string;
+    route?: string;
+    isLogout?: boolean;
+  }) => (
     <TouchableOpacity
       style={styles.menuItem}
       onPress={() => {
@@ -149,7 +169,12 @@ export default function Dashboard() {
       <View style={styles.menuIconBox}>
         <Ionicons name={icon} size={20} color={isLogout ? "black" : "#333"} />
       </View>
-      <Text style={[styles.menuText, isLogout && { color: "black", fontWeight: "bold" }]}>
+      <Text
+        style={[
+          styles.menuText,
+          isLogout && { color: "black", fontWeight: "bold" },
+        ]}
+      >
         {label}
       </Text>
       {!isLogout && <Ionicons name="chevron-forward" size={16} color="#ccc" />}
@@ -174,43 +199,39 @@ export default function Dashboard() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-
+    <SafeAreaView
+      style={[
+        styles.container,
+        { backgroundColor: isDark ? colors.background : "#fff" },
+      ]}
+      edges={["top"]}
+    >
       {/* --- HEADER (Always Visible) --- */}
-      <View style={styles.header}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <Image source={require('../../assets/images/home.png')} style={styles.logoImage} />
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: isDark ? colors.headerBg : "#fff",
+            borderBottomColor: isDark ? colors.border : "#eee",
+          },
+        ]}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <Image
+            source={require("../../assets/images/home.png")}
+            style={styles.logoImage}
+          />
           <View>
-            <Text style={styles.brandName}>Abalay</Text>
-            {/* <Text style={{ fontSize: 10, color: '#999', fontWeight: '500', marginTop: -1 }}>A Rental Management Platform</Text> */}
+            <Text
+              style={[
+                styles.brandName,
+                { color: isDark ? colors.text : "#111" },
+              ]}
+            >
+              Abalay
+            </Text>
           </View>
         </View>
-        <TouchableOpacity
-          style={styles.notificationBtn}
-          onPress={() => router.push('/(tabs)/notifications' as any)}
-        >
-          <Ionicons name="notifications-outline" size={24} color="#333" />
-          {unreadCount > 0 && (
-            <View style={{
-              position: 'absolute',
-              top: -2,
-              right: -2,
-              minWidth: 18,
-              height: 18,
-              borderRadius: 9,
-              backgroundColor: '#ef4444',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderWidth: 1.5,
-              borderColor: 'white',
-              paddingHorizontal: 4
-            }}>
-              <Text style={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>
-                {unreadCount > 99 ? '99+' : unreadCount}
-              </Text>
-            </View>
-          )}
-        </TouchableOpacity>
       </View>
 
       {/* --- BODY CONTENT --- */}
@@ -221,11 +242,10 @@ export default function Dashboard() {
             <Ionicons name="close-circle-outline" size={60} color="black" />
           </View>
           <Text style={styles.lockedTitle}>Restricted Access</Text>
-          <Text style={styles.lockedDesc}>
-            Duplicate Account Detected
-          </Text>
+          <Text style={styles.lockedDesc}>Duplicate Account Detected</Text>
           <Text style={styles.lockedSubDesc}>
-            This phone number is already associated with another account. Please delete this account to proceed.
+            This phone number is already associated with another account. Please
+            delete this account to proceed.
           </Text>
 
           <TouchableOpacity
@@ -233,31 +253,35 @@ export default function Dashboard() {
             onPress={handleDeleteAccount}
             disabled={deleting}
           >
-            {deleting ? <ActivityIndicator color="white" /> : <Text style={styles.deleteBtnText}>Delete Account</Text>}
+            {deleting ? (
+              <ActivityIndicator color="white" />
+            ) : (
+              <Text style={styles.deleteBtnText}>Delete Account</Text>
+            )}
           </TouchableOpacity>
 
           {/* Added explicit Logout for Duplicate Screen */}
           <TouchableOpacity onPress={handleSignOut} style={{ marginTop: 20 }}>
-            <Text style={{ color: '#666', textDecorationLine: 'underline' }}>Log Out</Text>
+            <Text style={{ color: "#666", textDecorationLine: "underline" }}>
+              Log Out
+            </Text>
           </TouchableOpacity>
         </View>
+      ) : // --- NORMAL DASHBOARD ---
+      profile?.role === "landlord" ? (
+        <>
+          <LandlordDashboard session={session} profile={profile} />
+        </>
       ) : (
-        // --- NORMAL DASHBOARD ---
-        profile?.role === 'landlord' ? (
-          <>
-            <LandlordDashboard session={session} profile={profile} />
-          </>
-        ) : (
-          <TenantDashboard session={session} profile={profile} />
-        )
+        <TenantDashboard session={session} profile={profile} />
       )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  container: { flex: 1, backgroundColor: "#fff" },
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
 
   // Header Styles
   header: {
@@ -271,7 +295,12 @@ const styles = StyleSheet.create({
     borderBottomColor: "#eee",
   },
   logoImage: { width: 36, height: 36, borderRadius: 10 },
-  brandName: { fontSize: 30, fontWeight: '900', color: '#111', letterSpacing: -0.5, fontFamily: 'Pacifico_400Regular' },
+  brandName: {
+    fontSize: 30,
+    color: "#111",
+    letterSpacing: -0.5,
+    fontFamily: "Pacifico_400Regular",
+  },
   notificationBtn: {
     width: 40,
     height: 40,
@@ -286,33 +315,58 @@ const styles = StyleSheet.create({
   // Locked View Styles (Black & White)
   lockedContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     padding: 30,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
   },
   lockIconCircle: {
     marginBottom: 25,
-    alignItems: 'center',
-    justifyContent: 'center'
+    alignItems: "center",
+    justifyContent: "center",
   },
-  lockedTitle: { fontSize: 24, fontWeight: '900', color: 'black', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 },
-  lockedDesc: { fontSize: 18, textAlign: 'center', color: '#000', marginBottom: 10, fontWeight: 'bold' },
-  lockedSubDesc: { fontSize: 14, textAlign: 'center', color: '#666', marginBottom: 40, lineHeight: 22 },
+  lockedTitle: {
+    fontSize: 24,
+    fontWeight: "900",
+    color: "black",
+    marginBottom: 10,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  lockedDesc: {
+    fontSize: 18,
+    textAlign: "center",
+    color: "#000",
+    marginBottom: 10,
+    fontWeight: "bold",
+  },
+  lockedSubDesc: {
+    fontSize: 14,
+    textAlign: "center",
+    color: "#666",
+    marginBottom: 40,
+    lineHeight: 22,
+  },
   deleteBtn: {
-    backgroundColor: 'black', // Black button
+    backgroundColor: "black", // Black button
     paddingVertical: 16,
     paddingHorizontal: 40,
     borderRadius: 12,
-    width: '100%',
-    alignItems: 'center',
+    width: "100%",
+    alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 3,
-    elevation: 4
+    elevation: 4,
   },
-  deleteBtnText: { color: 'white', fontWeight: 'bold', fontSize: 16, textTransform: 'uppercase', letterSpacing: 1 },
+  deleteBtnText: {
+    color: "white",
+    fontWeight: "bold",
+    fontSize: 16,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
 
   // Dropdown Styles
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.2)" },
@@ -330,7 +384,7 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     elevation: 10,
     borderWidth: 1,
-    borderColor: '#f0f0f0',
+    borderColor: "#f0f0f0",
   },
   menuItem: {
     flexDirection: "row",
@@ -345,16 +399,16 @@ const styles = StyleSheet.create({
 
   // Floating Action Button
   floatingAddBtn: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 20,
     right: 20,
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#000',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
+    backgroundColor: "#000",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 5,
