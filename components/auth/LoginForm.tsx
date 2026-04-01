@@ -15,9 +15,11 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { getUserRouteById } from "../../lib/authRedirect";
 import { supabase } from "../../lib/supabase";
 
 WebBrowser.maybeCompleteAuthSession();
+const GOOGLE_OAUTH_ENABLED = false;
 
 export default function LoginForm({
   loading,
@@ -99,7 +101,8 @@ export default function LoginForm({
         console.log("Auto profile creation:", profileErr);
       }
 
-      router.replace("/(tabs)");
+      const destination = await getUserRouteById(data.session.user.id);
+      router.replace(destination as any);
     }
   };
 
@@ -222,7 +225,8 @@ export default function LoginForm({
         );
       }
 
-      router.replace("/(tabs)");
+      const destination = await getUserRouteById(session.user.id);
+      router.replace(destination as any);
     } catch (err: any) {
       Alert.alert("Login Error", err.message || "Google sign-in failed.");
     } finally {
@@ -301,9 +305,12 @@ export default function LoginForm({
 
       <View style={styles.socialRow}>
         <TouchableOpacity
-          style={[styles.socialBtn, loading && styles.disabled]}
+          style={[
+            styles.socialBtn,
+            (loading || !GOOGLE_OAUTH_ENABLED) && styles.disabled,
+          ]}
           onPress={() => performOAuth("google")}
-          disabled={loading}
+          disabled={loading || !GOOGLE_OAUTH_ENABLED}
         >
           <Image
             source={{ uri: "https://img.icons8.com/color/48/google-logo.png" }}
@@ -321,6 +328,12 @@ export default function LoginForm({
           <Text style={styles.socialText}>Facebook</Text>
         </TouchableOpacity>
       </View>
+
+      {!GOOGLE_OAUTH_ENABLED && (
+        <Text style={styles.tempDisabledNote}>
+          Google & Facebook sign-in is temporarily unavailable.
+        </Text>
+      )}
 
       <View style={styles.footer}>
         <Text style={styles.footerText}>Don't have an account? </Text>
@@ -425,6 +438,14 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
   },
   socialText: { fontWeight: "600", color: "#374151", fontSize: 15 },
+  tempDisabledNote: {
+    marginTop: -26,
+    marginBottom: 24,
+    fontSize: 12,
+    color: "#6b7280",
+    textAlign: "center",
+    fontWeight: "500",
+  },
   footer: { flexDirection: "row", justifyContent: "center" },
   footerText: { color: "#6b7280", fontSize: 14 },
   link: { color: "#111827", fontWeight: "bold", fontSize: 14 },

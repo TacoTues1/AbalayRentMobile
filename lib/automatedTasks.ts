@@ -21,8 +21,90 @@ export const runDailyAutomatedTasks = async (landlordId: string) => {
         const todayDay = now.getDate();
         const todayMonth = now.getMonth();
         const todayYear = now.getFullYear();
+        const todayDate = now.toISOString().split('T')[0];
+
+        // 1. Auto-end contracts whose approved end date is due today or earlier.
+        const { data: dueContractEnds } = await supabase
+            .from('tenant_occupancies')
+            .select(`
+                id,
+                tenant_id,
+                property_id,
+                end_request_date,
+                end_request_reason,
+                tenant:profiles!tenant_occupancies_tenant_id_fkey(id, first_name, last_name),
+                property:properties(id, title)
+            `)
+            .eq('landlord_id', landlordId)
+            .eq('status', 'pending_end')
+            .eq('end_request_status', 'approved')
+            .not('end_request_date', 'is', null)
+            .lte('end_request_date', todayDate);
+
+        if (dueContractEnds && dueContractEnds.length > 0) {
+            for (const occ of dueContractEnds) {
+                const unresolvedPaymentStatuses = ['pending', 'unpaid', 'rejected', 'pending_confirmation'];
+                const { count: pendingPaymentCount, error: pendingPaymentError } = await supabase
+                    .from('payment_requests')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('occupancy_id', occ.id)
+                    .eq('tenant', occ.tenant_id)
+                    .in('status', unresolvedPaymentStatuses);
+
+                if (pendingPaymentError) {
+                    console.error(`Failed to verify pending payments for occupancy ${occ.id}:`, pendingPaymentError);
+                    continue;
+                }
+
+                if ((pendingPaymentCount || 0) > 0) {
+                    console.log(`Skipping auto-end for occupancy ${occ.id} due to pending payments.`);
+                    continue;
+                }
+
+                const { error: endError } = await supabase
+                    .from('tenant_occupancies')
+                    .update({ status: 'ended' })
+                    .eq('id', occ.id)
+                    .eq('landlord_id', landlordId);
+
+                if (endError) {
+                    console.error(`Failed to auto-end occupancy ${occ.id}:`, endError);
+                    continue;
+                }
+
+                await supabase
+                    .from('properties')
+                    .update({ status: 'available' })
+                    .eq('id', occ.property_id);
+
+                await supabase
+                    .from('bookings')
+                    .update({ status: 'completed' })
+                    .eq('tenant', occ.tenant_id)
+                    .eq('property_id', occ.property_id)
+                    .in('status', ['approved', 'pending']);
+
+                await supabase
+                    .from('maintenance_requests')
+                    .update({ status: 'cancelled' })
+                    .eq('property_id', occ.property_id)
+                    .eq('tenant', occ.tenant_id)
+                    .in('status', ['pending', 'scheduled', 'in_progress']);
+
+                const reasonText = occ.end_request_reason
+                    ? ` Reason: ${occ.end_request_reason}`
+                    : '';
+
+                await createNotification(
+                    occ.tenant_id,
+                    'occupancy_ended',
+                    `Your contract for "${occ.property?.title || 'your rental'}" has ended on ${occ.end_request_date}.${reasonText}`,
+                    { actor: landlordId },
+                );
+            }
+        }
         
-        // 1. Fetch active occupancies for this landlord
+        // 2. Fetch current occupancies for this landlord
         const { data: occupancies } = await supabase
             .from('tenant_occupancies')
             .select(`
@@ -31,9 +113,9 @@ export const runDailyAutomatedTasks = async (landlordId: string) => {
                 property:properties(id, title)
             `)
             .eq('landlord_id', landlordId)
-            .eq('status', 'active');
+            .in('status', ['active', 'pending_end']);
 
-        // 2. FIRST WEEK OF THE MONTH (Days 1, 2, 3) - Send Electricity and Water Bill "Auto Send" (Reminders)
+        // 3. FIRST WEEK OF THE MONTH (Days 1, 2, 3) - Send Electricity and Water Bill "Auto Send" (Reminders)
         if (todayDay >= 1 && todayDay <= 3 && occupancies) {
             const todayStart = new Date(todayYear, todayMonth, todayDay, 0, 0, 0, 0).toISOString();
             const todayEnd = new Date(todayYear, todayMonth, todayDay, 23, 59, 59, 999).toISOString();
@@ -67,7 +149,7 @@ export const runDailyAutomatedTasks = async (landlordId: string) => {
             }
         }
 
-        // 3. APPLY OVERDUE PENALTIES AND SEC DEPOSIT DEDUCT
+        // 4. APPLY OVERDUE PENALTIES AND SEC DEPOSIT DEDUCT
         const todayISO = now.toISOString();
         const { data: overdueBills } = await supabase
             .from('payment_requests')

@@ -6,18 +6,18 @@ import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  Image,
-  Linking,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    Image,
+    Linking,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 
@@ -69,7 +69,6 @@ export default function NewProperty() {
     has_advance: true,
     advance_amount: "",
     advance_same_as_rent: true,
-    min_contract_months: "",
     terms_conditions: "",
     amenities: [] as string[],
     images: [] as string[],
@@ -84,13 +83,12 @@ export default function NewProperty() {
   const bedTypes = ["Single Bed", "Double Bed", "Triple Bed"];
 
   const availableAmenities = [
-    "Kitchen",
-    "Wifi",
     "Pool",
     "TV",
     "Elevator",
     "Air conditioning",
     "Heating",
+    "CCTV",
     "Washing machine",
     "Dryer",
     "Parking",
@@ -99,14 +97,13 @@ export default function NewProperty() {
     "Balcony",
     "Garden",
     "Pet friendly",
-    "Furnished",
+    "Not Furnished",
+    "Fully Furnished",
+    "Semi-Furnished",
     "Carbon monoxide alarm",
     "Smoke alarm",
     "Fire extinguisher",
     "First aid kit",
-    "Free Water",
-    "Free Electricity",
-    "Free WiFi",
   ];
 
   useEffect(() => {
@@ -261,7 +258,6 @@ export default function NewProperty() {
           ? sanitize(form.price)
           : sanitize(form.advance_amount)
         : 0,
-      min_contract_months: sanitize(form.min_contract_months) || null,
     };
 
     const { error } = await supabase.from("properties").insert(payload);
@@ -330,14 +326,6 @@ export default function NewProperty() {
     }
 
     if (step === 4) {
-      if (isBlank(form.min_contract_months)) {
-        Alert.alert(
-          "Required Field",
-          "Payment terms require minimum contract duration.",
-        );
-        return false;
-      }
-
       if (
         form.has_security_deposit &&
         !form.deposit_same_as_rent &&
@@ -488,7 +476,7 @@ export default function NewProperty() {
 
               <View style={styles.row}>
                 <View style={[styles.fieldGroup, { flex: 1 }]}>
-                  <Text style={styles.subLabel}>ZIP *</Text>
+                  <Text style={styles.subLabel}>ZIP Code*</Text>
                   <TextInput
                     style={styles.input}
                     placeholder=""
@@ -826,24 +814,6 @@ export default function NewProperty() {
                   </View>
                 )}
               </View>
-
-              <View style={styles.toggleBox}>
-                <Text style={styles.toggleLabel}>
-                  Minimum Contract Duration (months)
-                </Text>
-                <TextInput
-                  style={[styles.input, { marginTop: 8, marginBottom: 0 }]}
-                  keyboardType="numeric"
-                  placeholder="e.g. 6 (leave blank for no minimum)"
-                  value={form.min_contract_months}
-                  onChangeText={(t) =>
-                    setForm({ ...form, min_contract_months: t })
-                  }
-                />
-                <Text style={styles.helperText}>
-                  If set, tenants must sign for at least this many months.
-                </Text>
-              </View>
             </View>
 
             {/* --- Utilities --- */}
@@ -871,13 +841,6 @@ export default function NewProperty() {
                   icon: "flash-outline",
                   bg: "#FEF3C7",
                   text: "#D97706",
-                },
-                {
-                  label: "WiFi",
-                  amenity: "Free WiFi",
-                  icon: "wifi-outline",
-                  bg: "#F3E8FF",
-                  text: "#9333EA",
                 },
               ].map((u) => {
                 const isFree = form.amenities.includes(u.amenity);
@@ -934,6 +897,60 @@ export default function NewProperty() {
                   </View>
                 );
               })}
+
+              {/* WIFI SECTION */}
+              <View style={[styles.utilityRow, { flexDirection: 'column', alignItems: 'stretch' }]}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                  <View style={{ flexDirection: "row", alignItems: "center" }}>
+                    <View style={[styles.utilityIconBox, { backgroundColor: "#F3E8FF" }]}>
+                      <Ionicons name="wifi-outline" size={18} color="#9333EA" />
+                    </View>
+                    <Text style={[styles.utilityLabel, { color: '#9333EA' }]}>WiFi Internet</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[
+                      styles.utilityBtn,
+                      (form.amenities.includes("Free WiFi") || form.amenities.includes("Paid WiFi")) && styles.utilityBtnActive
+                    ]}
+                    onPress={() => {
+                      const hasWifi = form.amenities.includes("Free WiFi") || form.amenities.includes("Paid WiFi");
+                      if (hasWifi) {
+                        setForm(prev => ({ ...prev, amenities: prev.amenities.filter(a => a !== "Free WiFi" && a !== "Paid WiFi") }));
+                      } else {
+                        setForm(prev => ({ ...prev, amenities: [...prev.amenities, "Paid WiFi"] }));
+                      }
+                    }}
+                  >
+                    <Text style={[styles.utilityBtnText, (form.amenities.includes("Free WiFi") || form.amenities.includes("Paid WiFi")) && styles.utilityBtnTextActive]}>
+                      {(form.amenities.includes("Free WiFi") || form.amenities.includes("Paid WiFi")) ? "Available" : "Not Available"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {(form.amenities.includes("Free WiFi") || form.amenities.includes("Paid WiFi")) && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, paddingLeft: 46 }}>
+                    <Text style={{ fontSize: 13, color: '#4B5563', fontWeight: 'bold' }}>Is WiFi Free?</Text>
+                    <TouchableOpacity
+                      style={[
+                        styles.utilityBtn,
+                        form.amenities.includes("Free WiFi") && { backgroundColor: '#10B981', borderColor: '#10B981' }
+                      ]}
+                      onPress={() => {
+                        const isFree = form.amenities.includes("Free WiFi");
+                        if (isFree) {
+                          setForm(prev => ({ ...prev, amenities: [...prev.amenities.filter(a => a !== "Free WiFi" && a !== "Paid WiFi"), "Paid WiFi"] }));
+                        } else {
+                          setForm(prev => ({ ...prev, amenities: [...prev.amenities.filter(a => a !== "Free WiFi" && a !== "Paid WiFi"), "Free WiFi"] }));
+                        }
+                      }}
+                    >
+                      <Text style={[styles.utilityBtnText, form.amenities.includes("Free WiFi") && { color: 'white' }]}>
+                        {form.amenities.includes("Free WiFi") ? "Yes, Free WiFi" : "No, Tenant Pays"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
             </View>
           </>
         )}

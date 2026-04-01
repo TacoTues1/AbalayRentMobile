@@ -89,18 +89,18 @@ export default function TermsView({ onBack }: { onBack: () => void }) {
                     <Text style={{ fontSize: 15, color: body, lineHeight: 24, marginBottom: 8 }}><Text style={{ fontWeight: 'bold' }}>Limitation of Liability:</Text> In no event shall Abalay, its directors, employees, or agents be liable for any indirect, incidental, special, consequential, or punitive damages arising out of your use of or inability to use the platform.</Text>
                 </View>
 
-                <View style={{ marginBottom: 32 }}>
+                {/* <View style={{ marginBottom: 32 }}>
                     <Text style={{ fontSize: 18, fontWeight: 'bold', color: heading, marginBottom: 12 }}>7. Governing Law & Dispute Resolution</Text>
                     <Text style={{ fontSize: 15, color: body, lineHeight: 24 }}>These Terms shall be governed by and construed in accordance with the applicable laws of the jurisdiction in which Abalay operates, without regard to its conflict of law provisions. Any dispute arising from these Terms will be handled strictly through binding arbitration or within competent local courts.</Text>
-                </View>
+                </View> */}
 
-                <View style={{ backgroundColor: '#000', borderRadius: 16, padding: 24, marginTop: 16 }}>
+                {/* <View style={{ backgroundColor: '#000', borderRadius: 16, padding: 24, marginTop: 16 }}>
                     <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#fff', marginBottom: 8 }}>Questions regarding these terms?</Text>
                     <Text style={{ color: '#d1d5db', marginBottom: 16 }}>If you have any clarifications required for our terms of service, reach out to us.</Text>
                     <TouchableOpacity style={{ backgroundColor: '#fff', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 8, alignSelf: 'flex-start' }}>
                         <Text style={{ color: '#000', fontWeight: 'bold', fontSize: 14 }}>Contact Us</Text>
                     </TouchableOpacity>
-                </View>
+                </View> */}
             </ScrollView>
         </SafeAreaView>
     );

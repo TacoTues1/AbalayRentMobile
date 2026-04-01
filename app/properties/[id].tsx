@@ -4,20 +4,20 @@ import * as Linking from "expo-linking";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  FlatList,
-  Image,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    FlatList,
+    Image,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import WebViewMap from "../../components/WebViewMap";
 import { supabase } from "../../lib/supabase";
@@ -53,6 +53,8 @@ export default function PropertyDetail() {
   const [submitting, setSubmitting] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [landlordProfile, setLandlordProfile] = useState<any>(null);
+  const [landlordRatingAverage, setLandlordRatingAverage] = useState(0);
+  const [landlordRatingCount, setLandlordRatingCount] = useState(0);
   const [hasActiveOccupancy, setHasActiveOccupancy] = useState(false);
   const [occupiedPropertyTitle, setOccupiedPropertyTitle] = useState("");
   const [propertyStatsInfo, setPropertyStatsInfo] = useState({
@@ -187,8 +189,39 @@ export default function PropertyDetail() {
         .eq("id", propertyData.landlord)
         .maybeSingle();
       if (landlordData) setLandlordProfile(landlordData);
+
+      await loadLandlordRating(propertyData.landlord);
     }
     setLoading(false);
+  };
+
+  const loadLandlordRating = async (landlordId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("landlord_ratings")
+        .select("rating")
+        .eq("landlord_id", landlordId);
+
+      if (error) {
+        console.warn("loadLandlordRating warning:", error.message);
+        setLandlordRatingAverage(0);
+        setLandlordRatingCount(0);
+        return;
+      }
+
+      const count = (data || []).length;
+      const sum = (data || []).reduce(
+        (acc: number, row: any) => acc + Number(row.rating || 0),
+        0,
+      );
+
+      setLandlordRatingCount(count);
+      setLandlordRatingAverage(count > 0 ? sum / count : 0);
+    } catch (err) {
+      console.warn("loadLandlordRating error:", err);
+      setLandlordRatingAverage(0);
+      setLandlordRatingCount(0);
+    }
   };
 
   const loadReviews = async () => {
@@ -244,6 +277,17 @@ export default function PropertyDetail() {
   // --- ACTIONS ---
 
   const handleOpenBooking = () => {
+    const latestStatus = String(property?.status || "")
+      .trim()
+      .toLowerCase();
+    if (latestStatus !== "available") {
+      Alert.alert(
+        "Unavailable",
+        "This property is no longer available for viewing.",
+      );
+      return;
+    }
+
     if (!session) {
       Alert.alert("Login Required", "You need to login first.", [
         { text: "OK", onPress: () => router.push("/") },
@@ -277,6 +321,28 @@ export default function PropertyDetail() {
 
       if (activeOcc) {
         throw new Error("You are currently occupying this property.");
+      }
+
+      // 1.5 Check latest property status before creating booking
+      const { data: latestProperty, error: latestPropertyError } =
+        await supabase
+          .from("properties")
+          .select("status, is_deleted")
+          .eq("id", id)
+          .maybeSingle();
+
+      if (latestPropertyError) throw latestPropertyError;
+
+      const latestStatus = String(latestProperty?.status || "")
+        .trim()
+        .toLowerCase();
+
+      if (
+        !latestProperty ||
+        latestProperty?.is_deleted ||
+        latestStatus !== "available"
+      ) {
+        throw new Error("This property is no longer available for viewing.");
       }
 
       // 2. Check Existing Booking
@@ -446,8 +512,28 @@ export default function PropertyDetail() {
     property.images && property.images.length > 0
       ? property.images
       : ["https://via.placeholder.com/600x400"];
+  const amenities = Array.isArray(property.amenities) ? property.amenities : [];
+  const hasFreeWater = amenities.includes("Free Water");
+  const hasFreeElectricity = amenities.includes("Free Electricity");
+  const includesAdvance =
+    typeof property.has_advance === "boolean"
+      ? property.has_advance
+      : Number(property.advance_amount || 0) > 0;
+  const includesSecurityDeposit =
+    typeof property.has_security_deposit === "boolean"
+      ? property.has_security_deposit
+      : Number(property.security_deposit_amount || 0) > 0;
   const isOwner = profile?.id === property.landlord;
   const isLandlordRole = profile?.role === "landlord";
+  const propertyStatus = String(property?.status || "")
+    .trim()
+    .toLowerCase();
+  const isBookableStatus = propertyStatus === "available";
+  const canBookViewing =
+    isBookableStatus &&
+    !isOwner &&
+    !isLandlordRole &&
+    !activeOccupancyCheck(hasActiveOccupancy, occupiedPropertyTitle);
 
   // Stats calculation
   const avgRating =
@@ -864,6 +950,134 @@ export default function PropertyDetail() {
               {property.description || "No description provided."}
             </Text>
           </View>
+
+          {/* AMENITIES */}
+          {amenities.length > 0 && (
+            <View style={styles.section}>
+              <Text
+                style={[
+                  styles.sectionTitle,
+                  { color: isDark ? colors.text : "#111" },
+                ]}
+              >
+                Amenities
+              </Text>
+              <View style={styles.amenitiesRow}>
+                {(showAllAmenities ? amenities : amenities.slice(0, 6)).map(
+                  (am: string, i: number) => (
+                    <View
+                      key={i}
+                      style={[
+                        styles.amenityBadge,
+                        { backgroundColor: isDark ? colors.card : "#f3f4f6" },
+                      ]}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          color: isDark ? colors.textSecondary : "#333",
+                        }}
+                      >
+                        {am}
+                      </Text>
+                    </View>
+                  ),
+                )}
+              </View>
+              {amenities.length > 6 && (
+                <TouchableOpacity
+                  onPress={() => setShowAllAmenities(!showAllAmenities)}
+                  style={{ marginTop: 5 }}
+                >
+                  <Text style={styles.linkText}>
+                    {showAllAmenities
+                      ? "Show Less"
+                      : `+${amenities.length - 6} more`}
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              <View
+                style={{
+                  marginTop: 12,
+                  borderWidth: 1,
+                  borderRadius: 14,
+                  padding: 12,
+                  backgroundColor: isDark ? colors.card : "white",
+                  borderColor: isDark ? colors.cardBorder : "#eee",
+                  gap: 8,
+                }}
+              >
+                <View style={styles.rowBetween}>
+                  <Text
+                    style={{ color: isDark ? colors.textSecondary : "#666" }}
+                  >
+                    Water
+                  </Text>
+                  <Text
+                    style={{
+                      fontWeight: "700",
+                      color: isDark ? colors.text : "#111",
+                    }}
+                  >
+                    {hasFreeWater ? "Free" : "Not Free"}
+                  </Text>
+                </View>
+                <View style={styles.rowBetween}>
+                  <Text
+                    style={{ color: isDark ? colors.textSecondary : "#666" }}
+                  >
+                    Electricity
+                  </Text>
+                  <Text
+                    style={{
+                      fontWeight: "700",
+                      color: isDark ? colors.text : "#111",
+                    }}
+                  >
+                    {hasFreeElectricity ? "Free" : "Not Free"}
+                  </Text>
+                </View>
+                <View
+                  style={{
+                    height: 1,
+                    backgroundColor: isDark ? colors.border : "#eee",
+                    marginVertical: 4,
+                  }}
+                />
+                <View style={styles.rowBetween}>
+                  <Text
+                    style={{ color: isDark ? colors.textSecondary : "#666" }}
+                  >
+                    Advance Payment
+                  </Text>
+                  <Text
+                    style={{
+                      fontWeight: "700",
+                      color: isDark ? colors.text : "#111",
+                    }}
+                  >
+                    {includesAdvance ? `₱${Number(property.advance_amount || property.price || 0).toLocaleString()}` : "Excluded"}
+                  </Text>
+                </View>
+                <View style={styles.rowBetween}>
+                  <Text
+                    style={{ color: isDark ? colors.textSecondary : "#666" }}
+                  >
+                    Security Deposit
+                  </Text>
+                  <Text
+                    style={{
+                      fontWeight: "700",
+                      color: isDark ? colors.text : "#111",
+                    }}
+                  >
+                    {includesSecurityDeposit ? `₱${Number(property.security_deposit_amount || property.price || 0).toLocaleString()}` : "Excluded"}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
 
           {/* REVIEWS DETAILED SECTION */}
           <View style={styles.section}>
@@ -1384,6 +1598,27 @@ export default function PropertyDetail() {
                   >
                     {landlordProfile?.first_name} {landlordProfile?.last_name}
                   </Text>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 5,
+                      marginTop: 4,
+                    }}
+                  >
+                    <Ionicons name="star" size={12} color="#eab308" />
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        color: isDark ? colors.textMuted : "#666",
+                        fontWeight: "600",
+                      }}
+                    >
+                      {landlordRatingCount > 0
+                        ? `${landlordRatingAverage.toFixed(1)} rating for ${landlordRatingCount} response${landlordRatingCount === 1 ? "" : "s"}`
+                        : "No Review"}
+                    </Text>
+                  </View>
                   {/* <Text style={{ fontSize: 12, color: '#666' }}>{landlordProfile?.role === 'landlord' ? 'Posted By' : 'Agent'}</Text>
                   <View style={{ flexDirection: 'row', gap: 2, marginTop: 2 }}>
                     {[1, 2, 3, 4, 5].map(s => <Ionicons key={s} name="star" size={10} color="#facc15" />)}
@@ -1508,59 +1743,16 @@ export default function PropertyDetail() {
                       You have an active occupancy.
                     </Text>
                   </View>
+                ) : !isBookableStatus ? (
+                  <View style={styles.infoBoxGray}>
+                    <Text style={styles.infoTextGray}>
+                      This property is not available for viewing.
+                    </Text>
+                  </View>
                 ) : null}
               </View>
             </View>
           </View>
-
-          {/* AMENITIES */}
-          {property.amenities && property.amenities.length > 0 && (
-            <View style={styles.section}>
-              <Text
-                style={[
-                  styles.sectionTitle,
-                  { color: isDark ? colors.text : "#111" },
-                ]}
-              >
-                Amenities
-              </Text>
-              <View style={styles.amenitiesRow}>
-                {(showAllAmenities
-                  ? property.amenities
-                  : property.amenities.slice(0, 6)
-                ).map((am: string, i: number) => (
-                  <View
-                    key={i}
-                    style={[
-                      styles.amenityBadge,
-                      { backgroundColor: isDark ? colors.card : "#f3f4f6" },
-                    ]}
-                  >
-                    <Text
-                      style={{
-                        fontSize: 10,
-                        color: isDark ? colors.textSecondary : "#333",
-                      }}
-                    >
-                      {am}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-              {property.amenities.length > 6 && (
-                <TouchableOpacity
-                  onPress={() => setShowAllAmenities(!showAllAmenities)}
-                  style={{ marginTop: 5 }}
-                >
-                  <Text style={styles.linkText}>
-                    {showAllAmenities
-                      ? "Show Less"
-                      : `+${property.amenities.length - 6} more`}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
 
           <View style={{ height: 100 }} />
         </View>
@@ -1786,8 +1978,17 @@ export default function PropertyDetail() {
                 });
 
                 const today = new Date();
-                const viewDate = new Date();
-                viewDate.setMonth(viewDate.getMonth() + calendarMonthOffset);
+                const todayStart = new Date(
+                  today.getFullYear(),
+                  today.getMonth(),
+                  today.getDate(),
+                );
+                // Build from day 1 to avoid month-overflow skips (e.g. Mar 31 -> May).
+                const viewDate = new Date(
+                  today.getFullYear(),
+                  today.getMonth() + calendarMonthOffset,
+                  1,
+                );
                 const year = viewDate.getFullYear();
                 const month = viewDate.getMonth();
                 const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -1861,8 +2062,7 @@ export default function PropertyDetail() {
                         const dateObj = new Date(year, month, day);
                         const hasSlots = !!slotsByDate[dateKey];
                         const isSelected = selectedDateKey === dateKey;
-                        const isPast =
-                          dateObj < new Date(today.setHours(0, 0, 0, 0));
+                        const isPast = dateObj < todayStart;
 
                         return (
                           <TouchableOpacity
@@ -2056,29 +2256,21 @@ export default function PropertyDetail() {
       </Modal>
 
       {/* STICKY FOOTER */}
-      {!isOwner &&
-        !isLandlordRole &&
-        !activeOccupancyCheck(
-          hasActiveOccupancy,
-          activeOccupancyCheck.length > 1 ? occupiedPropertyTitle : "",
-        ) && (
-          <View
-            style={[
-              styles.stickyFooter,
-              {
-                backgroundColor: isDark ? colors.surface : "white",
-                borderTopColor: isDark ? colors.border : "#eee",
-              },
-            ]}
-          >
-            <TouchableOpacity
-              style={styles.btnBlack}
-              onPress={handleOpenBooking}
-            >
-              <Text style={styles.btnTextWhite}>Book a Viewing</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+      {canBookViewing && (
+        <View
+          style={[
+            styles.stickyFooter,
+            {
+              backgroundColor: isDark ? colors.surface : "white",
+              borderTopColor: isDark ? colors.border : "#eee",
+            },
+          ]}
+        >
+          <TouchableOpacity style={styles.btnBlack} onPress={handleOpenBooking}>
+            <Text style={styles.btnTextWhite}>Book a Viewing</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }

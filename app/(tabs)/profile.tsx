@@ -1,21 +1,21 @@
 import { Ionicons } from "@expo/vector-icons";
 import { decode } from "base64-arraybuffer";
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Linking,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import PrivacyView from "../../components/profile/PrivacyView";
@@ -24,6 +24,68 @@ import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || "";
+const BREVO_API_KEY = process.env.EXPO_PUBLIC_BREVO_API_KEY || "";
+const BUG_REPORT_RECIPIENT = "alfonzperez92@gmail.com";
+
+async function sendBugReportViaBrevo({
+  reporterName,
+  reporterEmail,
+  description,
+  source,
+  attachments,
+}: {
+  reporterName: string;
+  reporterEmail: string | null;
+  description: string;
+  source: "login" | "profile";
+  attachments?: { name: string; content: string }[];
+}) {
+  if (!BREVO_API_KEY) {
+    throw new Error("Missing EXPO_PUBLIC_BREVO_API_KEY.");
+  }
+
+  const safe = (value: string) =>
+    value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+
+  const htmlContent = `
+    <h2>New Bug Report</h2>
+    <p><strong>Source:</strong> ${safe(source)}</p>
+    <p><strong>Reported by:</strong> ${safe(reporterName)}</p>
+    <p><strong>User Email:</strong> ${safe(reporterEmail || "N/A")}</p>
+    <p><strong>Issue Description:</strong></p>
+    <pre style="white-space: pre-wrap; font-family: Arial, sans-serif;">${safe(description)}</pre>
+  `;
+
+  const body: Record<string, any> = {
+    sender: { name: "Abalay", email: "alfnzperez@gmail.com" },
+    to: [{ email: BUG_REPORT_RECIPIENT }],
+    subject: `Abalay Bug Report - ${reporterName}`,
+    htmlContent,
+  };
+
+  if (attachments && attachments.length > 0) {
+    body.attachment = attachments;
+  }
+
+  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "api-key": BREVO_API_KEY,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok && response.status !== 201) {
+    const errText = await response.text();
+    throw new Error(errText || "Brevo send failed.");
+  }
+}
 
 export default function Profile() {
   const router = useRouter();
@@ -33,7 +95,13 @@ export default function Profile() {
 
   // --- VIEW STATE ---
   const [currentView, setCurrentView] = useState<
-    "menu" | "personal" | "Password" | "notifications" | "terms" | "privacy"
+    | "menu"
+    | "personal"
+    | "Password"
+    | "notifications"
+    | "terms"
+    | "privacy"
+    | "report_bug"
   >("menu");
 
   // --- PROFILE STATE ---
@@ -46,6 +114,20 @@ export default function Profile() {
   const [avatarUrl, setAvatarUrl] = useState("");
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [profileRole, setProfileRole] = useState("");
+
+  // --- BUG REPORT STATE ---
+  const [bugReportName, setBugReportName] = useState("");
+  const [bugReportDescription, setBugReportDescription] = useState("");
+  const [bugReportAttachment, setBugReportAttachment] =
+    useState<ImagePicker.ImagePickerAsset | null>(null);
+  const [sendingBugReport, setSendingBugReport] = useState(false);
+
+  // --- LANDLORD RATING STATE ---
+  const [landlordRating, setLandlordRating] = useState({
+    average: 0,
+    count: 0,
+  });
+
   const [saving, setSaving] = useState(false);
 
   // Verification State
@@ -74,6 +156,42 @@ export default function Profile() {
   useEffect(() => {
     getProfile();
   }, []);
+
+  // Load landlord rating when profile is loaded and user is landlord
+  useEffect(() => {
+    if (session?.user?.id && profileRole === "landlord") {
+      loadLandlordRating(session.user.id);
+    }
+  }, [session?.user?.id, profileRole]);
+
+  const loadLandlordRating = async (landlordId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("landlord_ratings")
+        .select("rating")
+        .eq("landlord_id", landlordId);
+
+      if (error) {
+        console.warn("landlord_ratings fetch warning:", error.message);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        const sum = data.reduce(
+          (acc: number, r: any) => acc + Number(r.rating || 0),
+          0,
+        );
+        setLandlordRating({
+          average: sum / data.length,
+          count: data.length,
+        });
+      } else {
+        setLandlordRating({ average: 0, count: 0 });
+      }
+    } catch (e) {
+      console.warn("loadLandlordRating error:", e);
+    }
+  };
 
   const getProfile = async () => {
     try {
@@ -301,25 +419,112 @@ export default function Profile() {
     router.replace("/logout");
   };
 
-  const handleReportBug = async () => {
-    const subject = encodeURIComponent("Abalay Bug Report");
-    const body = encodeURIComponent(
-      "Describe what happened and steps to reproduce:\n\n1.\n2.\n3.\n\nExpected:\nActual:\n",
-    );
-    const mailtoUrl = `mailto:support@abalay-rent.me?subject=${subject}&body=${body}`;
+  const handleReportBug = () => {
+    setBugReportName("");
+    setBugReportDescription("");
+    setBugReportAttachment(null);
+    setCurrentView("report_bug");
+  };
 
+  const pickBugAttachment = async () => {
     try {
-      const canOpen = await Linking.canOpenURL(mailtoUrl);
-      if (!canOpen) {
-        Alert.alert(
-          "No Email App",
-          "Please install an email app to report a bug.",
-        );
-        return;
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images", "videos"],
+        allowsEditing: false,
+        quality: 0.7,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setBugReportAttachment(result.assets[0]);
       }
-      await Linking.openURL(mailtoUrl);
-    } catch (e) {
-      Alert.alert("Error", "Unable to open email app.");
+    } catch (error) {
+      Alert.alert("Error", "Failed to pick file");
+    }
+  };
+
+  const removeBugAttachment = () => {
+    setBugReportAttachment(null);
+  };
+
+  const submitBugReport = async () => {
+    if (!bugReportDescription.trim()) {
+      Alert.alert("Error", "Please describe the issue.");
+      return;
+    }
+
+    setSendingBugReport(true);
+    try {
+      const reporterName = bugReportName.trim() || "Anonymous";
+      let attachments:
+        | {
+            name: string;
+            content: string;
+          }[]
+        | undefined;
+      let attachmentNote: string | undefined;
+
+      if (bugReportAttachment?.uri) {
+        const maxAttachmentSize = 8 * 1024 * 1024;
+        if ((bugReportAttachment.fileSize || 0) > maxAttachmentSize) {
+          Alert.alert(
+            "Error",
+            "Attachment is too large. Maximum size is 8 MB.",
+          );
+          setSendingBugReport(false);
+          return;
+        }
+
+        const fileBase64 = await FileSystem.readAsStringAsync(
+          bugReportAttachment.uri,
+          {
+            encoding: FileSystem.EncodingType.Base64,
+          },
+        );
+        const fallbackExt =
+          bugReportAttachment.type === "video" ? "mp4" : "jpg";
+        const fileName =
+          bugReportAttachment.fileName || `bug-attachment.${fallbackExt}`;
+
+        attachments = [
+          {
+            name: fileName,
+            content: fileBase64,
+          },
+        ];
+        attachmentNote = `Attached file: ${fileName}`;
+      }
+
+      const { error } = await supabase.functions.invoke("send-email", {
+        body: {
+          type: "bug_report",
+          source: "profile",
+          reporterName,
+          reporterEmail: session?.user?.email || null,
+          description: bugReportDescription.trim(),
+          attachmentNote,
+          attachments,
+        },
+      });
+
+      if (error) {
+        await sendBugReportViaBrevo({
+          reporterName,
+          reporterEmail: session?.user?.email || null,
+          description: bugReportDescription.trim(),
+          source: "profile",
+          attachments,
+        });
+      }
+
+      Alert.alert("Success", "Bug report sent! Thank you for your feedback.");
+      setCurrentView("menu");
+      setBugReportName("");
+      setBugReportDescription("");
+      setBugReportAttachment(null);
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to send bug report.");
+    } finally {
+      setSendingBugReport(false);
     }
   };
 
@@ -433,6 +638,48 @@ export default function Profile() {
               >
                 {firstName} {lastName}
               </Text>
+              {/* Landlord Rating Stars */}
+              {profileRole === "landlord" && (
+                <View style={styles.ratingContainer}>
+                  <View style={{ flexDirection: "row", gap: 2 }}>
+                    {[1, 2, 3, 4, 5].map((star) => {
+                      const filled = landlordRating.average >= star;
+                      const halfFilled =
+                        !filled && landlordRating.average >= star - 0.5;
+                      return (
+                        <Ionicons
+                          key={star}
+                          name={
+                            filled
+                              ? "star"
+                              : halfFilled
+                                ? "star-half"
+                                : "star-outline"
+                          }
+                          size={18}
+                          color={
+                            filled || halfFilled
+                              ? "#eab308"
+                              : isDark
+                                ? "#555"
+                                : "#d1d5db"
+                          }
+                        />
+                      );
+                    })}
+                  </View>
+                  <Text
+                    style={[
+                      styles.ratingText,
+                      { color: isDark ? colors.textMuted : "#6b7280" },
+                    ]}
+                  >
+                    {landlordRating.count > 0
+                      ? `${landlordRating.average.toFixed(1)} (${landlordRating.count} review${landlordRating.count === 1 ? "" : "s"})`
+                      : "No reviews yet"}
+                  </Text>
+                </View>
+              )}
               <TouchableOpacity
                 style={styles.editProfileBtn}
                 onPress={() => setCurrentView("personal")}
@@ -462,6 +709,11 @@ export default function Profile() {
               icon="business-outline"
               label="All Properties"
               onPress={() => router.push("/(tabs)/allproperties")}
+            />
+            <MenuRow
+              icon="search-outline"
+              label="Search Landlords"
+              onPress={() => router.push("/(tabs)/landlords")}
             />
             {profileRole === "landlord" && (
               <>
@@ -1240,6 +1492,284 @@ export default function Profile() {
     return <PrivacyView onBack={() => setCurrentView("menu")} />;
   }
 
+  // --- REPORT A BUG ---
+  if (currentView === "report_bug") {
+    return (
+      <SafeAreaView
+        style={[
+          styles.container,
+          { backgroundColor: isDark ? colors.background : "#f9fafb" },
+        ]}
+      >
+        <SubHeader title="Report a Bug" />
+        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+          {/* Header Description */}
+          <View
+            style={[
+              styles.bugReportHeader,
+              { backgroundColor: isDark ? colors.card : "#fff7ed" },
+            ]}
+          >
+            <View style={styles.bugReportHeaderIcon}>
+              <Ionicons name="bug" size={24} color="#f97316" />
+            </View>
+            <Text
+              style={[
+                styles.bugReportHeaderTitle,
+                { color: isDark ? colors.text : "#111" },
+              ]}
+            >
+              Found a bug?
+            </Text>
+            <Text
+              style={[
+                styles.bugReportHeaderDesc,
+                { color: isDark ? colors.textMuted : "#6b7280" },
+              ]}
+            >
+              Help us improve by describing the issue you encountered. Your
+              report will be sent to our development team.
+            </Text>
+          </View>
+
+          {/* Name Field (Optional) */}
+          <Text
+            style={[
+              styles.label,
+              { color: isDark ? colors.textMuted : "#666" },
+            ]}
+          >
+            Your Name{" "}
+            <Text style={{ fontWeight: "normal", fontSize: 10 }}>
+              (optional)
+            </Text>
+          </Text>
+          <TextInput
+            style={[
+              styles.input,
+              {
+                backgroundColor: isDark ? colors.card : "#fff",
+                borderColor: isDark ? colors.cardBorder : "#ddd",
+                color: isDark ? colors.text : "#000",
+              },
+            ]}
+            value={bugReportName}
+            onChangeText={setBugReportName}
+            placeholder="Enter your name"
+            placeholderTextColor={isDark ? colors.textMuted : "#999"}
+          />
+
+          {/* Issue Description */}
+          <Text
+            style={[
+              styles.label,
+              { color: isDark ? colors.textMuted : "#666" },
+            ]}
+          >
+            Issue Description{" "}
+            <Text style={{ color: "#ef4444", fontWeight: "normal" }}>*</Text>
+          </Text>
+          <TextInput
+            style={[
+              styles.input,
+              styles.bugReportTextArea,
+              {
+                backgroundColor: isDark ? colors.card : "#fff",
+                borderColor: isDark ? colors.cardBorder : "#ddd",
+                color: isDark ? colors.text : "#000",
+              },
+            ]}
+            value={bugReportDescription}
+            onChangeText={setBugReportDescription}
+            placeholder="Describe what happened, what you expected, and how to reproduce the issue..."
+            placeholderTextColor={isDark ? colors.textMuted : "#999"}
+            multiline
+            textAlignVertical="top"
+            numberOfLines={6}
+          />
+          <Text
+            style={{
+              fontSize: 11,
+              color: isDark ? colors.textMuted : "#9ca3af",
+              marginTop: 4,
+              textAlign: "right",
+            }}
+          >
+            {bugReportDescription.length} characters
+          </Text>
+
+          {/* Attachment */}
+          <Text
+            style={[
+              styles.label,
+              { color: isDark ? colors.textMuted : "#666" },
+            ]}
+          >
+            Attachment{" "}
+            <Text style={{ fontWeight: "normal", fontSize: 10 }}>
+              (optional - image or video)
+            </Text>
+          </Text>
+
+          {bugReportAttachment ? (
+            <View
+              style={[
+                styles.bugReportAttachmentPreview,
+                {
+                  backgroundColor: isDark ? colors.card : "#f9fafb",
+                  borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                },
+              ]}
+            >
+              {bugReportAttachment.type === "video" ? (
+                <View style={styles.bugReportVideoPreview}>
+                  <Ionicons
+                    name="videocam"
+                    size={32}
+                    color={isDark ? colors.textMuted : "#6b7280"}
+                  />
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      color: isDark ? colors.textMuted : "#6b7280",
+                      marginTop: 4,
+                    }}
+                  >
+                    Video attached
+                  </Text>
+                </View>
+              ) : (
+                <Image
+                  source={{ uri: bugReportAttachment.uri }}
+                  style={styles.bugReportImagePreview}
+                />
+              )}
+              <TouchableOpacity
+                onPress={removeBugAttachment}
+                style={styles.bugReportRemoveBtn}
+              >
+                <Ionicons name="close-circle" size={24} color="#ef4444" />
+              </TouchableOpacity>
+              <Text
+                style={{
+                  fontSize: 11,
+                  color: isDark ? colors.textMuted : "#6b7280",
+                  marginTop: 8,
+                  textAlign: "center",
+                }}
+                numberOfLines={1}
+              >
+                {bugReportAttachment.fileName || "Attachment"}
+              </Text>
+            </View>
+          ) : (
+            <TouchableOpacity
+              onPress={pickBugAttachment}
+              style={[
+                styles.bugReportUploadBtn,
+                {
+                  backgroundColor: isDark ? colors.card : "#f9fafb",
+                  borderColor: isDark ? colors.cardBorder : "#d1d5db",
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.bugReportUploadIcon,
+                  {
+                    backgroundColor: isDark ? colors.surface : "#f3f4f6",
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="cloud-upload-outline"
+                  size={28}
+                  color={isDark ? colors.textMuted : "#9ca3af"}
+                />
+              </View>
+              <Text
+                style={{
+                  fontSize: 14,
+                  fontWeight: "600",
+                  color: isDark ? colors.text : "#374151",
+                  marginTop: 8,
+                }}
+              >
+                Tap to attach a screenshot or video
+              </Text>
+              <Text
+                style={{
+                  fontSize: 11,
+                  color: isDark ? colors.textMuted : "#9ca3af",
+                  marginTop: 4,
+                }}
+              >
+                Supports images and videos
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Info Note */}
+          <View
+            style={[
+              styles.bugReportInfoBox,
+              {
+                backgroundColor: isDark ? colors.surface : "#eff6ff",
+                borderColor: isDark ? colors.cardBorder : "#bfdbfe",
+              },
+            ]}
+          >
+            <Ionicons
+              name="information-circle-outline"
+              size={18}
+              color={isDark ? "#60a5fa" : "#3b82f6"}
+            />
+            <Text
+              style={{
+                fontSize: 12,
+                color: isDark ? colors.textMuted : "#1e40af",
+                flex: 1,
+              }}
+            >
+              Your report will be sent directly to our development team.
+            </Text>
+          </View>
+
+          {/* Submit Button */}
+          <TouchableOpacity
+            style={[
+              styles.saveBtn,
+              {
+                backgroundColor: bugReportDescription.trim()
+                  ? "#000"
+                  : "#d1d5db",
+                opacity: sendingBugReport ? 0.6 : 1,
+                marginBottom: 18,
+              },
+            ]}
+            onPress={submitBugReport}
+            disabled={sendingBugReport || !bugReportDescription.trim()}
+          >
+            {sendingBugReport ? (
+              <ActivityIndicator color="white" />
+            ) : (
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <Ionicons name="send" size={18} color="white" />
+                <Text style={styles.saveBtnText}>Submit Bug Report</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   return null;
 }
 
@@ -1281,6 +1811,16 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#111",
     marginBottom: 10,
+  },
+  ratingContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 12,
+  },
+  ratingText: {
+    fontSize: 12,
+    fontWeight: "600",
   },
   editProfileBtn: {
     flexDirection: "row",
@@ -1458,5 +1998,93 @@ const styles = StyleSheet.create({
     borderBottomColor: "#eee",
     flexDirection: "row",
     justifyContent: "space-between",
+  },
+
+  // Bug Report Styles
+  bugReportHeader: {
+    alignItems: "center",
+    padding: 24,
+    borderRadius: 16,
+    marginBottom: 20,
+  },
+  bugReportHeaderIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#fff7ed",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: "#fed7aa",
+  },
+  bugReportHeaderTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 8,
+  },
+  bugReportHeaderDesc: {
+    fontSize: 13,
+    textAlign: "center",
+    lineHeight: 18,
+  },
+  bugReportTextArea: {
+    minHeight: 130,
+    textAlignVertical: "top",
+    paddingTop: 12,
+  },
+  bugReportAttachmentPreview: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    alignItems: "center",
+    position: "relative",
+  },
+  bugReportImagePreview: {
+    width: "100%",
+    height: 200,
+    borderRadius: 8,
+    resizeMode: "cover",
+  },
+  bugReportVideoPreview: {
+    width: "100%",
+    height: 120,
+    borderRadius: 8,
+    backgroundColor: "#f3f4f6",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bugReportRemoveBtn: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    zIndex: 10,
+    backgroundColor: "white",
+    borderRadius: 12,
+  },
+  bugReportUploadBtn: {
+    borderWidth: 2,
+    borderStyle: "dashed",
+    borderRadius: 12,
+    padding: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bugReportUploadIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bugReportInfoBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    padding: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginTop: 20,
+    marginBottom: 4,
   },
 });

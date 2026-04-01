@@ -26,6 +26,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [menuVisible, setMenuVisible] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [favoriteCount, setFavoriteCount] = useState(0);
 
   // Security State
   const [isDuplicate, setIsDuplicate] = useState(false);
@@ -46,8 +47,27 @@ export default function Dashboard() {
   useFocusEffect(
     useCallback(() => {
       fetchUnreadCount();
+      fetchFavoriteCount();
     }, []),
   );
+
+  const fetchFavoriteCount = async () => {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const { count } = await supabase
+        .from("favorites")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", session.user.id);
+
+      setFavoriteCount(count || 0);
+    } catch (e) {
+      console.log("Error fetching favorites", e);
+    }
+  };
 
   const fetchUnreadCount = async () => {
     try {
@@ -80,6 +100,7 @@ export default function Dashboard() {
       }
 
       setSession(session);
+      fetchFavoriteCount();
 
       const { data: profileData } = await supabase
         .from("profiles")
@@ -88,6 +109,11 @@ export default function Dashboard() {
         .single();
 
       if (profileData) {
+        if ((profileData.role || "").toLowerCase() === "admin") {
+          router.replace("/admin");
+          return;
+        }
+
         setProfile(profileData);
 
         if (profileData.phone) {
@@ -198,6 +224,15 @@ export default function Dashboard() {
     );
   }
 
+  const firstname =
+    `${profile?.first_name || ""}`.trim() ||
+    session?.user?.user_metadata?.full_name ||
+    session?.user?.email?.split("@")[0] ||
+    "User";
+  const roleLabel = profile?.role
+    ? profile.role.charAt(0).toUpperCase() + profile.role.slice(1)
+    : "User";
+
   return (
     <SafeAreaView
       style={[
@@ -217,21 +252,58 @@ export default function Dashboard() {
         ]}
       >
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <Image
-            source={require("../../assets/images/home.png")}
-            style={styles.logoImage}
-          />
+          {profile?.avatar_url ? (
+            <Image
+              source={{ uri: profile.avatar_url }}
+              style={styles.avatarImage}
+            />
+          ) : (
+            <View style={styles.avatarFallback}>
+              <Text style={styles.avatarText}>
+                {(profile?.first_name || session?.user?.email || "U")
+                  .charAt(0)
+                  .toUpperCase()}
+              </Text>
+            </View>
+          )}
           <View>
             <Text
               style={[
-                styles.brandName,
+                styles.headerGreeting,
                 { color: isDark ? colors.text : "#111" },
               ]}
             >
-              Abalay
+              Hello, {firstname}
+            </Text>
+            <Text
+              style={[
+                styles.headerRole,
+                { color: isDark ? colors.textSecondary : "#6b7280" },
+              ]}
+            >
+              {roleLabel}
             </Text>
           </View>
         </View>
+
+        <TouchableOpacity
+          style={styles.favoriteBtn}
+          onPress={() => router.push("/favorites")}
+          activeOpacity={0.8}
+        >
+          <Ionicons
+            name="heart-outline"
+            size={22}
+            color={isDark ? colors.text : "#111"}
+          />
+          {favoriteCount > 0 && (
+            <View style={styles.favoriteBadge}>
+              <Text style={styles.favoriteBadgeText}>
+                {favoriteCount > 99 ? "99+" : favoriteCount}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
       </View>
 
       {/* --- BODY CONTENT --- */}
@@ -294,23 +366,44 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#eee",
   },
-  logoImage: { width: 36, height: 36, borderRadius: 10 },
-  brandName: {
-    fontSize: 30,
-    color: "#111",
-    letterSpacing: -0.5,
-    fontFamily: "Pacifico_400Regular",
-  },
-  notificationBtn: {
+  favoriteBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
     backgroundColor: "#f5f5f5",
     justifyContent: "center",
     alignItems: "center",
+    position: "relative",
   },
   avatarImage: { width: 40, height: 40, borderRadius: 20 },
+  avatarFallback: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#111",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   avatarText: { color: "white", fontSize: 16, fontWeight: "bold" },
+  headerGreeting: { fontSize: 25, fontWeight: "700" },
+  headerRole: { fontSize: 12, fontWeight: "500", marginTop: 1 },
+  favoriteBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: "#ef4444",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 3,
+  },
+  favoriteBadgeText: {
+    color: "white",
+    fontSize: 9,
+    fontWeight: "800",
+  },
 
   // Locked View Styles (Black & White)
   lockedContainer: {

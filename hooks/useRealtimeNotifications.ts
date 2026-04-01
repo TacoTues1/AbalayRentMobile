@@ -12,13 +12,19 @@ function getNotificationMeta(type: string): { title: string; channelId: string }
     case 'payment':
     case 'payment_paid':
       return { title: '💳 Payment Reminder', channelId: 'payments' };
+    case 'auto_credit_applied':
+      return { title: '💰 Auto Credit Applied', channelId: 'payments' };
     case 'payment_request':
       return { title: '💳 New Bill', channelId: 'payments' };
     case 'payment_confirmed':
     case 'payment_approved':
       return { title: '✅ Payment Confirmed', channelId: 'payments' };
+    case 'payment_cash_accepted':
+      return { title: '✅ Cash Payment Accepted', channelId: 'payments' };
     case 'payment_confirmation_needed':
       return { title: '💳 Payment Needs Confirmation', channelId: 'payments' };
+    case 'payment_rejected':
+      return { title: '❌ Payment Rejected', channelId: 'payments' };
     case 'payment_late_fee':
       return { title: '⚠️ Late Fee Applied', channelId: 'payments' };
     case 'security_deposit_deduction':
@@ -81,6 +87,8 @@ function getNotificationMeta(type: string): { title: string; channelId: string }
       return { title: '🏠 Occupancy Assigned', channelId: 'default' };
     case 'occupancy_ended':
       return { title: '🏠 Occupancy Ended', channelId: 'default' };
+    case 'landlord_rating_received':
+      return { title: '⭐ New Landlord Rating', channelId: 'default' };
 
     default:
       return { title: '🔔 Abalay', channelId: 'default' };
@@ -175,11 +183,14 @@ export function useRealtimeNotifications(userId?: string) {
 function getScreenForType(type: string): string {
   switch (type) {
     case 'payment':
+    case 'auto_credit_applied':
     case 'payment_request':
     case 'payment_confirmed':
+    case 'payment_cash_accepted':
     case 'payment_approved':
     case 'payment_paid':
     case 'payment_confirmation_needed':
+    case 'payment_rejected':
     case 'payment_late_fee':
     case 'security_deposit_deduction':
     case 'rent_bill_reminder':

@@ -1,19 +1,20 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  Image,
-  Modal,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Dimensions,
+    Image,
+    Modal,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import CalendarPicker from "../../../components/ui/CalendarPicker";
 import { useRealtime } from "../../../hooks/useRealtime";
@@ -23,6 +24,7 @@ import { supabase } from "../../../lib/supabase";
 import { useTheme } from "../../../lib/theme";
 
 const { width } = Dimensions.get("window");
+const API_URL = (process.env.EXPO_PUBLIC_API_URL || "").replace(/\/+$/, "");
 
 export default function LandlordDashboard({ session, profile }: any) {
   const router = useRouter();
@@ -39,10 +41,6 @@ export default function LandlordDashboard({ session, profile }: any) {
   const [pendingBookingsCount, setPendingBookingsCount] = useState(0);
   const [pendingMaintenanceCount, setPendingMaintenanceCount] = useState(0);
   const [pendingPaymentsCount, setPendingPaymentsCount] = useState(0);
-  const [pendingEndRequests, setPendingEndRequests] = useState<any[]>([]);
-  const [pendingRenewalRequests, setPendingRenewalRequests] = useState<any[]>(
-    [],
-  );
   const [occupancies, setOccupancies] = useState<any[]>([]);
   const [scheduledViewings, setScheduledViewings] = useState<any[]>([]);
 
@@ -67,29 +65,10 @@ export default function LandlordDashboard({ session, profile }: any) {
   const [startDate, setStartDate] = useState(
     new Date().toISOString().split("T")[0],
   );
-  const [contractMonths, setContractMonths] = useState("12");
-  const [endDate, setEndDate] = useState("");
   const [wifiDueDay, setWifiDueDay] = useState("");
   const [uploadingContract, setUploadingContract] = useState(false);
 
-  // 2. End Contract Modal
-  const [endContractModal, setEndContractModal] = useState({
-    isOpen: false,
-    occupancy: null as any,
-  });
-  const [endContractDate, setEndContractDate] = useState("");
-  const [endContractReason, setEndContractReason] = useState("");
-
-  // 3. Renewal Modal
-  const [renewalModal, setRenewalModal] = useState({
-    isOpen: false,
-    occupancy: null as any,
-    action: null as any,
-  });
-  const [renewalSigningDate, setRenewalSigningDate] = useState("");
-  const [renewalEndDate, setRenewalEndDate] = useState("");
-
-  // 4. Email Notification Modal
+  // 2. Email Notification Modal
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [allTenants, setAllTenants] = useState<any[]>([]);
   const [selectedTenants, setSelectedTenants] = useState<string[]>([]);
@@ -99,17 +78,27 @@ export default function LandlordDashboard({ session, profile }: any) {
   const [sendingEmail, setSendingEmail] = useState(false);
   const [showTenantDropdown, setShowTenantDropdown] = useState(false);
 
-  // 5. Advance Bill Modal
+  // 3. Advance Bill Modal
   const [advanceBillModal, setAdvanceBillModal] = useState({
     isOpen: false,
     tenantId: null,
     tenantName: "",
     propertyTitle: "",
   });
+  const [sendingAdvanceBill, setSendingAdvanceBill] = useState(false);
   const [propertyDetailsModal, setPropertyDetailsModal] = useState({
     isOpen: false,
     occupancy: null as any,
   });
+  const [endContractModal, setEndContractModal] = useState({
+    isOpen: false,
+    occupancy: null as any,
+  });
+  const [endContractDate, setEndContractDate] = useState(
+    new Date().toISOString().split("T")[0],
+  );
+  const [endContractReason, setEndContractReason] = useState("");
+  const [endingContract, setEndingContract] = useState(false);
   const [editableRentPrice, setEditableRentPrice] = useState("");
   const [editableWifiDueDay, setEditableWifiDueDay] = useState("");
   const [editableWaterDueDay, setEditableWaterDueDay] = useState("");
@@ -117,6 +106,12 @@ export default function LandlordDashboard({ session, profile }: any) {
     useState("");
   const [editableLateFee, setEditableLateFee] = useState("");
   const [savingPropertyDetails, setSavingPropertyDetails] = useState(false);
+  const [quickActionsViewportWidth, setQuickActionsViewportWidth] = useState(0);
+  const [quickActionsContentWidth, setQuickActionsContentWidth] = useState(0);
+  const [quickActionsCanScroll, setQuickActionsCanScroll] = useState(false);
+  const [quickActionsHintDismissed, setQuickActionsHintDismissed] =
+    useState(false);
+  const quickActionsHintAnim = useRef(new Animated.Value(0)).current;
 
   // --- EFFECTS ---
 
@@ -125,6 +120,104 @@ export default function LandlordDashboard({ session, profile }: any) {
       loadDashboard();
     }
   }, [profile]);
+
+  useEffect(() => {
+    const canScroll =
+      quickActionsViewportWidth > 0 &&
+      quickActionsContentWidth > quickActionsViewportWidth + 8;
+    setQuickActionsCanScroll(canScroll);
+  }, [quickActionsViewportWidth, quickActionsContentWidth]);
+
+  const showQuickActionsHint =
+    !quickActionsHintDismissed &&
+    (quickActionsCanScroll || quickActionsContentWidth === 0);
+
+  useEffect(() => {
+    if (!showQuickActionsHint) return;
+
+    quickActionsHintAnim.setValue(0);
+    const loopAnimation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(quickActionsHintAnim, {
+          toValue: 1,
+          duration: 650,
+          useNativeDriver: true,
+        }),
+        Animated.timing(quickActionsHintAnim, {
+          toValue: 0,
+          duration: 650,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    loopAnimation.start();
+    return () => loopAnimation.stop();
+  }, [showQuickActionsHint, quickActionsHintAnim]);
+
+  const quickActionsHintArrowTranslateX = quickActionsHintAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 8],
+  });
+
+  const quickActionsHintArrowOpacity = quickActionsHintAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.55, 1],
+  });
+
+  const quickActionsItems = [
+    {
+      label: "All Properties",
+      icon: "business-outline",
+      action: () => router.push("/(tabs)/allproperties" as any),
+      badge: 0,
+    },
+    {
+      label: "My Properties",
+      icon: "home-outline",
+      action: () => router.push("/(tabs)/landlordproperties" as any),
+      badge: 0,
+    },
+    {
+      label: "Schedule",
+      icon: "calendar-outline",
+      action: () => router.push("/(tabs)/schedule" as any),
+      badge: scheduledViewings.length,
+    },
+    {
+      label: "Bookings",
+      icon: "people-outline",
+      action: () => router.push("/(tabs)/bookings" as any),
+      badge: pendingBookingsCount,
+    },
+    {
+      label: "Maintenance",
+      icon: "hammer-outline",
+      action: () => router.push("/(tabs)/maintenance" as any),
+      badge: pendingMaintenanceCount,
+    },
+    {
+      label: "Payments",
+      icon: "card-outline",
+      action: () => router.push("/(tabs)/payments" as any),
+      badge: pendingPaymentsCount,
+    },
+    {
+      label: "Add Property",
+      icon: "add-circle-outline",
+      action: () => router.push("/properties/new" as any),
+      badge: 0,
+    },
+  ];
+
+  useFocusEffect(
+    useCallback(() => {
+      if (profile && !loading) {
+        // Only refresh silently if it already loaded once
+        loadDashboard();
+      }
+    }, [profile]),
+  );
 
   useRealtime(
     [
@@ -141,22 +234,6 @@ export default function LandlordDashboard({ session, profile }: any) {
     !!profile,
   );
 
-  // Auto-calculate end date
-  useEffect(() => {
-    if (startDate && contractMonths) {
-      try {
-        const start = new Date(startDate);
-        if (!isNaN(start.getTime())) {
-          const end = new Date(start);
-          end.setMonth(end.getMonth() + parseInt(contractMonths));
-          setEndDate(end.toISOString().split("T")[0]);
-        }
-      } catch (e) {
-        console.log("Date calculation error:", e);
-      }
-    }
-  }, [startDate, contractMonths]);
-
   // Recalculate Billing Schedule when occupancies change
   useEffect(() => {
     if (occupancies.length > 0) calculateBillingSchedule();
@@ -172,8 +249,6 @@ export default function LandlordDashboard({ session, profile }: any) {
     const activeOccs = await loadOccupancies();
     await Promise.all([
       loadProperties(),
-      loadPendingEndRequests(),
-      loadPendingRenewalRequests(),
       loadDashboardTasks(),
       loadMonthlyIncome(),
       loadScheduledViewings(),
@@ -203,7 +278,7 @@ export default function LandlordDashboard({ session, profile }: any) {
         `*, tenant:profiles!tenant_occupancies_tenant_id_fkey(id, first_name, last_name, phone, email, avatar_url), property:properties(id, title, address, images, price)`,
       )
       .eq("landlord_id", session.user.id)
-      .eq("status", "active");
+      .in("status", ["active", "pending_end"]);
     const activeOccs = data || [];
     setOccupancies(activeOccs);
     return activeOccs;
@@ -266,45 +341,13 @@ export default function LandlordDashboard({ session, profile }: any) {
     const { data } = await supabase
       .from("tenant_occupancies")
       .select(
-        "id, property_id, end_date, contract_end_date, tenant:profiles!tenant_occupancies_tenant_id_fkey(first_name, last_name), property:properties(title)",
+        "id, property_id, tenant:profiles!tenant_occupancies_tenant_id_fkey(first_name, last_name), property:properties(title)",
       )
       .eq("landlord_id", session.user.id)
       .eq("status", "ended")
-      .order("end_date", { ascending: false })
+      .order("created_at", { ascending: false })
       .limit(30);
     setEndedOccupancies(data || []);
-  }
-
-  async function loadPendingEndRequests() {
-    const { data, error } = await supabase
-      .from("tenant_occupancies")
-      .select(
-        `*, tenant:profiles!tenant_occupancies_tenant_id_fkey(id, first_name, last_name, phone), property:properties(id, title, address)`,
-      )
-      .eq("landlord_id", session.user.id)
-      .eq("end_request_status", "pending");
-    if (error) {
-      console.error("loadPendingEndRequests error:", error);
-    } else {
-      console.log(
-        "loadPendingEndRequests:",
-        data?.length,
-        "pending end requests found",
-      );
-    }
-    setPendingEndRequests(data || []);
-  }
-
-  async function loadPendingRenewalRequests() {
-    const { data } = await supabase
-      .from("tenant_occupancies")
-      .select(
-        `*, tenant:profiles!tenant_occupancies_tenant_id_fkey(id, first_name, last_name, phone), property:properties(id, title, address, price)`,
-      )
-      .eq("landlord_id", session.user.id)
-      .eq("renewal_requested", true)
-      .eq("renewal_status", "pending");
-    setPendingRenewalRequests(data || []);
   }
 
   async function loadDashboardTasks() {
@@ -463,22 +506,11 @@ export default function LandlordDashboard({ session, profile }: any) {
   }
 
   const openPropertyDetailsModal = (occupancy: any) => {
-    setEditableRentPrice(String(occupancy?.property?.price ?? ""));
-    setEditableWifiDueDay(
-      occupancy?.wifi_due_day ? String(occupancy.wifi_due_day) : "",
-    );
-    setEditableWaterDueDay(
-      occupancy?.water_due_day ? String(occupancy.water_due_day) : "",
-    );
-    setEditableElectricityDueDay(
-      occupancy?.electricity_due_day
-        ? String(occupancy.electricity_due_day)
-        : "",
-    );
-    setEditableLateFee(
-      occupancy?.late_payment_fee ? String(occupancy.late_payment_fee) : "",
-    );
-    setPropertyDetailsModal({ isOpen: true, occupancy });
+    if (!occupancy?.id) return;
+    router.push({
+      pathname: "/(tabs)/rented-tenant/[id]",
+      params: { id: String(occupancy.id) },
+    } as any);
   };
 
   const savePropertyDetails = async () => {
@@ -567,10 +599,33 @@ export default function LandlordDashboard({ session, profile }: any) {
       const { data: allBills } = await supabase
         .from("payment_requests")
         .select(
-          "occupancy_id, status, due_date, created_at, rent_amount, advance_amount",
+          "occupancy_id, status, due_date, created_at, rent_amount, advance_amount, water_bill, electrical_bill, wifi_bill, other_bills, security_deposit_amount, is_move_in_payment",
         )
         .eq("landlord", session.user.id)
         .order("due_date", { ascending: true });
+
+      const normalizeStatus = (value: any) =>
+        String(value || "")
+          .trim()
+          .toLowerCase();
+      const parseDueDate = (value: any) => {
+        const date = value ? new Date(value) : null;
+        if (!date || Number.isNaN(date.getTime())) return null;
+        return date;
+      };
+      const toUtcDayStamp = (value: any) => {
+        const d = parseDueDate(value);
+        if (!d) return null;
+        return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+      };
+      const getBillTotal = (bill: any) =>
+        (Number(bill?.rent_amount) || 0) +
+        (Number(bill?.water_bill) || 0) +
+        (Number(bill?.electrical_bill) || 0) +
+        (Number(bill?.wifi_bill) || 0) +
+        (Number(bill?.other_bills) || 0) +
+        (Number(bill?.security_deposit_amount) || 0);
+      const isRentCycleBill = (bill: any) => Number(bill?.rent_amount || 0) > 0;
 
       const billsByOccupancy: any = {};
       if (allBills) {
@@ -583,37 +638,86 @@ export default function LandlordDashboard({ session, profile }: any) {
 
       const schedule = occupancies.map((occ) => {
         const bills = billsByOccupancy[occ.id] || [];
-        const earliestPending = bills.find(
-          (b: any) =>
-            b.status === "pending" || b.status === "pending_confirmation",
+
+        const latestPaidRentBill = [...bills]
+          .filter((bill: any) => {
+            const status = normalizeStatus(bill?.status);
+            const rentAmount = Number(bill?.rent_amount || 0);
+            return (
+              (status === "paid" || status === "recorded") && rentAmount > 0
+            );
+          })
+          .sort(
+            (a: any, b: any) =>
+              (parseDueDate(b?.due_date)?.getTime() || 0) -
+              (parseDueDate(a?.due_date)?.getTime() || 0),
+          )[0];
+
+        const latestPaidDayStamp = latestPaidRentBill
+          ? toUtcDayStamp(latestPaidRentBill.due_date)
+          : null;
+
+        const displayPendingCandidates = [...bills]
+          .filter((bill: any) => {
+            if (!isRentCycleBill(bill)) return false;
+
+            const status = normalizeStatus(bill?.status);
+            if (
+              status !== "pending" &&
+              status !== "pending_confirmation" &&
+              status !== "unpaid" &&
+              status !== "rejected"
+            ) {
+              return false;
+            }
+
+            // Ignore empty/ghost rows that can lock the Bill button as "Billed".
+            return getBillTotal(bill) > 0;
+          })
+          .sort(
+            (a: any, b: any) =>
+              (parseDueDate(a?.due_date)?.getTime() || 0) -
+              (parseDueDate(b?.due_date)?.getTime() || 0),
+          );
+
+        const earliestPendingDisplay =
+          displayPendingCandidates.find((bill: any) => {
+            if (latestPaidDayStamp === null) return true;
+            const dueDayStamp = toUtcDayStamp(bill?.due_date);
+            return dueDayStamp === null || dueDayStamp > latestPaidDayStamp;
+          }) || displayPendingCandidates[0];
+
+        const blockingStatuses = new Set(["pending", "unpaid", "rejected"]);
+        const blockingPendingCandidates = displayPendingCandidates.filter(
+          (bill: any) => blockingStatuses.has(normalizeStatus(bill?.status)),
         );
+        const earliestBlockingPending =
+          blockingPendingCandidates.find((bill: any) => {
+            if (latestPaidDayStamp === null) return true;
+            const dueDayStamp = toUtcDayStamp(bill?.due_date);
+            return dueDayStamp === null || dueDayStamp > latestPaidDayStamp;
+          }) || blockingPendingCandidates[0];
 
         let nextDueDate: Date | null = null;
         let status = "Scheduled";
 
         try {
-          if (earliestPending && earliestPending.due_date) {
-            nextDueDate = new Date(earliestPending.due_date);
+          if (earliestPendingDisplay && earliestPendingDisplay.due_date) {
+            nextDueDate = new Date(earliestPendingDisplay.due_date);
             if (!isNaN(nextDueDate.getTime())) {
+              const pendingStatus = normalizeStatus(
+                earliestPendingDisplay.status,
+              );
               status =
                 new Date() > nextDueDate
                   ? "Overdue"
-                  : earliestPending.status === "pending_confirmation"
+                  : pendingStatus === "pending_confirmation"
                     ? "Confirming"
                     : "Pending";
             }
           } else {
             // Estimate next due date from last paid (account for advance_amount)
-            const lastPaid = bills
-              .filter(
-                (b: any) =>
-                  b.status === "paid" && parseFloat(b.rent_amount) > 0,
-              )
-              .sort(
-                (a: any, b: any) =>
-                  new Date(b.due_date).getTime() -
-                  new Date(a.due_date).getTime(),
-              )[0];
+            const lastPaid = latestPaidRentBill;
             if (lastPaid && lastPaid.due_date) {
               const paidRent = parseFloat(lastPaid.rent_amount || 0);
               const paidAdvance = parseFloat(lastPaid.advance_amount || 0);
@@ -638,6 +742,7 @@ export default function LandlordDashboard({ session, profile }: any) {
           propertyTitle: occ.property?.title || "Unknown",
           nextDueDate: nextDueDate,
           status,
+          hasOpenBill: Boolean(earliestBlockingPending),
         };
       });
       setBillingSchedule(
@@ -735,7 +840,9 @@ export default function LandlordDashboard({ session, profile }: any) {
   // --- BILLING LOGIC ---
   const confirmSendAdvanceBill = async () => {
     const { tenantId, propertyTitle } = advanceBillModal;
-    if (!tenantId) return;
+    if (!tenantId || sendingAdvanceBill) return;
+
+    setSendingAdvanceBill(true);
 
     try {
       // Find occupancy for this tenant (reliable lookup via occupancy data)
@@ -754,7 +861,7 @@ export default function LandlordDashboard({ session, profile }: any) {
       // --- Calculate next due date based on last paid bill (matching web logic) ---
       const { data: lastPaidBill } = await supabase
         .from("payment_requests")
-        .select("due_date, rent_amount, advance_amount")
+        .select("due_date, rent_amount, advance_amount, is_move_in_payment")
         .eq("occupancy_id", occupancy.id)
         .eq("status", "paid")
         .gt("rent_amount", 0)
@@ -807,10 +914,11 @@ export default function LandlordDashboard({ session, profile }: any) {
 
       const { data: existingBill } = await supabase
         .from("payment_requests")
-        .select("id, status")
+        .select("id, status, rent_amount")
         .eq("occupancy_id", occupancy.id)
         .gte("due_date", monthStart)
         .lte("due_date", monthEnd)
+        .gt("rent_amount", 0)
         .in("status", ["pending", "pending_confirmation"])
         .maybeSingle();
 
@@ -867,6 +975,8 @@ export default function LandlordDashboard({ session, profile }: any) {
     } catch (e) {
       console.error("Advance bill error:", e);
       Alert.alert("Error", "Failed to create bill");
+    } finally {
+      setSendingAdvanceBill(false);
     }
   };
 
@@ -900,20 +1010,30 @@ export default function LandlordDashboard({ session, profile }: any) {
 
     // Reset Form
     setStartDate(new Date().toISOString().split("T")[0]);
-    setContractMonths("12");
     setPenaltyDetails("");
     setWifiDueDay("");
     setAssignModalVisible(true);
   };
 
   const assignTenant = async (candidate: any) => {
-    if (!startDate || !endDate)
-      return Alert.alert("Error", "Please check dates");
-    if (!penaltyDetails)
-      return Alert.alert("Error", "Please enter late penalty fee");
+    if (!startDate) return Alert.alert("Error", "Please select a start date");
 
     setUploadingContract(true);
-    const securityDeposit = selectedProperty.price || 0;
+    const rentAmount = selectedProperty.price || 0;
+    const hasAdvance =
+      typeof selectedProperty?.has_advance === "boolean"
+        ? selectedProperty?.has_advance
+        : Number(selectedProperty?.advance_amount || 0) > 0;
+    const advanceAmount = hasAdvance
+      ? Number(selectedProperty?.advance_amount || rentAmount)
+      : 0;
+    const hasSecurityDeposit =
+      typeof selectedProperty?.has_security_deposit === "boolean"
+        ? selectedProperty?.has_security_deposit
+        : Number(selectedProperty?.security_deposit_amount || 0) > 0;
+    const securityDeposit = hasSecurityDeposit
+      ? Number(selectedProperty?.security_deposit_amount || rentAmount)
+      : 0;
 
     // 1. Create Occupancy
     const { data: newOccupancy, error } = await supabase
@@ -924,7 +1044,6 @@ export default function LandlordDashboard({ session, profile }: any) {
         landlord_id: session.user.id,
         status: "active",
         start_date: new Date(startDate).toISOString(),
-        contract_end_date: endDate,
         security_deposit: securityDeposit,
         security_deposit_used: 0,
         wifi_due_day: wifiDueDay ? parseInt(wifiDueDay) : null,
@@ -951,9 +1070,9 @@ export default function LandlordDashboard({ session, profile }: any) {
       tenant: candidate.tenant,
       property_id: selectedProperty.id,
       occupancy_id: newOccupancy.id,
-      rent_amount: selectedProperty.price,
+      rent_amount: rentAmount,
       security_deposit_amount: securityDeposit,
-      advance_amount: selectedProperty.price, // 1 month advance
+      advance_amount: advanceAmount, // Custom configured advance amount
       bills_description: "Move-in Payment (Rent + Advance + Security Deposit)",
       due_date: new Date(startDate).toISOString(),
       status: "pending",
@@ -967,8 +1086,21 @@ export default function LandlordDashboard({ session, profile }: any) {
         candidate.tenant,
         "occupancy_assigned",
         message,
-        { actor: session.user.id },
+        { actor: session.user.id, email: true, sms: true },
       );
+      if (API_URL) {
+        fetch(`${API_URL}/api/notify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "occupancy_assigned",
+            recordId: newOccupancy.id,
+            actorId: session.user.id,
+          }),
+        }).catch((notifyErr) =>
+          console.log("Assignment notify API failed:", notifyErr),
+        );
+      }
     } catch (notifErr) {
       console.log("Notification failed (non-critical):", notifErr);
     }
@@ -979,138 +1111,140 @@ export default function LandlordDashboard({ session, profile }: any) {
     loadDashboard();
   };
 
-  // --- RENEWAL LOGIC ---
-  const openRenewalModal = (occupancy: any, action: string) => {
-    setRenewalModal({ isOpen: true, occupancy, action });
-    const defaultDate = new Date();
-    defaultDate.setDate(defaultDate.getDate() + 3);
-    setRenewalSigningDate(defaultDate.toISOString().split("T")[0]);
-
-    if (occupancy && occupancy.contract_end_date) {
-      const currentEnd = new Date(occupancy.contract_end_date);
-      currentEnd.setFullYear(currentEnd.getFullYear() + 1);
-      setRenewalEndDate(currentEnd.toISOString().split("T")[0]);
-    }
-  };
-
-  const confirmRenewalRequest = async () => {
-    const { occupancy, action } = renewalModal;
-    if (!occupancy) return;
-    const approved = action === "approve";
-
-    const updateData: any = {
-      renewal_status: approved ? "approved" : "rejected",
-      renewal_requested: false,
-    };
-
-    if (approved) {
-      updateData.contract_end_date = renewalEndDate;
-      updateData.renewal_signing_date = renewalSigningDate;
-
-      // Create Renewal Bill (Rent + Advance)
-      const rentAmount = occupancy.property?.price || 0;
-      await supabase.from("payment_requests").insert({
-        landlord: session.user.id,
-        tenant: occupancy.tenant_id,
-        property_id: occupancy.property_id,
-        occupancy_id: occupancy.id,
-        rent_amount: rentAmount,
-        advance_amount: rentAmount, // 1 month advance
-        bills_description: "Contract Renewal (1 Month Rent + 1 Month Advance)",
-        due_date: new Date(renewalSigningDate).toISOString(),
-        status: "pending",
-        is_renewal_payment: true,
-      });
-    }
-
-    await supabase
-      .from("tenant_occupancies")
-      .update(updateData)
-      .eq("id", occupancy.id);
-    const message = approved
-      ? `Your contract renewal for "${occupancy.property?.title}" was approved! A new bill has been sent.`
-      : `Your contract renewal request for "${occupancy.property?.title}" was declined.`;
-    await createNotification(
-      occupancy.tenant_id,
-      approved ? "contract_renewal_approved" : "contract_renewal_rejected",
-      message,
-      { actor: session.user.id, email: true, sms: true },
-    );
-
-    Alert.alert("Success", approved ? "Renewed & Bill Sent" : "Rejected");
-    setRenewalModal({ isOpen: false, occupancy: null, action: null });
-    loadDashboard();
-  };
-
-  // --- ACTION CENTER HELPERS ---
   const openEndContractModal = (occupancy: any) => {
+    if (!occupancy?.id) return;
+    const today = new Date().toISOString().split("T")[0];
+    const existingEndDate = occupancy?.end_request_date
+      ? String(occupancy.end_request_date).slice(0, 10)
+      : today;
+    setEndContractDate(existingEndDate);
+    setEndContractReason(occupancy?.end_request_reason || "");
     setEndContractModal({ isOpen: true, occupancy });
-    setEndContractDate(new Date().toISOString().split("T")[0]);
-    setEndContractReason("");
   };
 
-  const approveEndRequest = async (occupancyId: string) => {
-    const occupancy = pendingEndRequests.find((o) => o.id === occupancyId);
-    if (!occupancy) return;
+  const submitEndContract = async () => {
+    const occupancy = endContractModal.occupancy;
+    if (!occupancy?.id) return;
+    if (!endContractReason.trim()) {
+      Alert.alert("Error", "Please provide a reason for ending the contract.");
+      return;
+    }
 
-    await supabase
-      .from("tenant_occupancies")
-      .update({
-        status: "ended",
-        end_date: new Date().toISOString(),
-        end_request_status: "approved",
-      })
-      .eq("id", occupancyId);
-    await supabase
-      .from("properties")
-      .update({ status: "available" })
-      .eq("id", occupancy.property_id);
+    const normalizedEndDate = endContractDate.trim();
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(normalizedEndDate) ||
+      Number.isNaN(new Date(`${normalizedEndDate}T00:00:00`).getTime())
+    ) {
+      Alert.alert("Error", "Please provide a valid end date (YYYY-MM-DD).");
+      return;
+    }
 
-    // Close booking
-    await supabase
-      .from("bookings")
-      .update({ status: "completed" })
-      .eq("tenant", occupancy.tenant_id)
-      .eq("property_id", occupancy.property_id);
+    const propertyTitle = occupancy?.property?.title || "this property";
+    const today = new Date().toISOString().split("T")[0];
+    const shouldEndNow = normalizedEndDate <= today;
 
-    await createNotification(
-      occupancy.tenant_id,
-      "end_request_approved",
-      `Move-out approved for ${occupancy.property?.title}`,
-      { actor: session.user.id },
-    );
-    Alert.alert("Approved", "Contract ended.");
-    loadDashboard();
+    setEndingContract(true);
+    try {
+      const unresolvedPaymentStatuses = [
+        "pending",
+        "unpaid",
+        "rejected",
+        "pending_confirmation",
+      ];
+      const { count: pendingPaymentCount, error: pendingPaymentError } =
+        await supabase
+          .from("payment_requests")
+          .select("id", { count: "exact", head: true })
+          .eq("occupancy_id", occupancy.id)
+          .eq("tenant", occupancy.tenant_id)
+          .in("status", unresolvedPaymentStatuses);
+
+      if (pendingPaymentError) throw pendingPaymentError;
+
+      if ((pendingPaymentCount || 0) > 0) {
+        Alert.alert(
+          "Pending Payment Found",
+          "You cannot end this stay while there are pending payments. Please settle all pending bills first.",
+        );
+        return;
+      }
+
+      const { error: occError } = await supabase
+        .from("tenant_occupancies")
+        .update({
+          status: shouldEndNow ? "ended" : "pending_end",
+          end_requested_at: new Date().toISOString(),
+          end_request_date: normalizedEndDate,
+          end_request_status: "approved",
+          end_request_reason: endContractReason.trim(),
+        })
+        .eq("id", occupancy.id)
+        .eq("landlord_id", session.user.id);
+
+      if (occError) throw occError;
+
+      const { error: maintenanceCancelError } = await supabase
+        .from("maintenance_requests")
+        .update({ status: "cancelled" })
+        .eq("property_id", occupancy.property_id)
+        .eq("tenant", occupancy.tenant_id)
+        .in("status", ["pending", "scheduled", "in_progress"]);
+
+      if (maintenanceCancelError) {
+        console.log(
+          "submitEndContract: Failed to cancel open maintenance:",
+          maintenanceCancelError,
+        );
+      }
+
+      if (shouldEndNow) {
+        const { error: propError } = await supabase
+          .from("properties")
+          .update({ status: "available" })
+          .eq("id", occupancy.property_id);
+
+        if (propError) throw propError;
+
+        await supabase
+          .from("bookings")
+          .update({ status: "completed" })
+          .eq("tenant", occupancy.tenant_id)
+          .eq("property_id", occupancy.property_id)
+          .in("status", ["approved", "pending"]);
+
+        await createNotification(
+          occupancy.tenant_id,
+          "occupancy_ended",
+          `Your contract for ${propertyTitle} has been ended. Reason: ${endContractReason.trim()}`,
+          { actor: session.user.id, email: true, sms: true },
+        );
+      } else {
+        await createNotification(
+          occupancy.tenant_id,
+          "occupancy_ended",
+          `Your contract for ${propertyTitle} is scheduled to end on ${normalizedEndDate}. Reason: ${endContractReason.trim()}`,
+          { actor: session.user.id, email: true, sms: true },
+        );
+      }
+
+      Alert.alert(
+        "Success",
+        shouldEndNow
+          ? "Contract ended successfully."
+          : `Contract end scheduled for ${normalizedEndDate}.`,
+      );
+      setEndContractModal({ isOpen: false, occupancy: null });
+      setEndContractDate(new Date().toISOString().split("T")[0]);
+      setEndContractReason("");
+      loadDashboard();
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Failed to end contract");
+    } finally {
+      setEndingContract(false);
+    }
   };
 
-  const confirmEndContract = async () => {
-    const { occupancy } = endContractModal;
-    if (!occupancy) return;
-    if (!endContractDate || !endContractReason)
-      return Alert.alert("Error", "Date and Reason required");
-
-    await supabase
-      .from("tenant_occupancies")
-      .update({
-        status: "ended",
-        end_date: new Date(endContractDate).toISOString(),
-      })
-      .eq("id", occupancy.id);
-    await supabase
-      .from("properties")
-      .update({ status: "available" })
-      .eq("id", occupancy.property_id);
-
-    await createNotification(
-      occupancy.tenant_id,
-      "occupancy_ended",
-      `Contract ended. Reason: ${endContractReason}`,
-      { actor: session.user.id },
-    );
-    Alert.alert("Success", "Contract ended.");
-    setEndContractModal({ isOpen: false, occupancy: null });
-    loadDashboard();
-  };
+  const displayedActiveOccupancies = occupancies.slice(0, 3);
 
   return (
     <ScrollView
@@ -1123,77 +1257,73 @@ export default function LandlordDashboard({ session, profile }: any) {
         <RefreshControl refreshing={refreshing} onRefresh={loadDashboard} />
       }
     >
-      {/* --- HERO HEADER BOX --- */}
-      <View style={styles.headerBox}>
-        <View style={styles.headerTextSection}>
-          <Text style={styles.welcomeText}>Welcome back,</Text>
-          <Text style={styles.nameText}>
-            {profile?.first_name || "Landlord"} {profile?.last_name || ""}
-          </Text>
-          <View style={styles.roleBadge}>
-            <Ionicons name="shield-checkmark" size={12} color="#059669" />
-            <Text style={styles.roleText}>
-              {profile?.role === "landlord" ? "Landlord" : "User"}
-            </Text>
-          </View>
-        </View>
-      </View>
-
       {/* --- QUICK ACTIONS --- */}
       <View style={styles.sectionContainer}>
-        <Text
-          style={[
-            styles.sectionTitle,
-            { color: isDark ? colors.text : "#111" },
-          ]}
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginTop: 10,
+          }}
         >
-          Quick Actions
-        </Text>
-        <View style={styles.quickGrid}>
-          {[
-            {
-              label: "All Properties",
-              icon: "business-outline",
-              action: () => router.push("/(tabs)/allproperties" as any),
-              badge: 0,
-            },
-            {
-              label: "My Properties",
-              icon: "home-outline",
-              action: () => router.push("/(tabs)/landlordproperties" as any),
-              badge: 0,
-            },
-            {
-              label: "Schedule",
-              icon: "calendar-outline",
-              action: () => router.push("/(tabs)/schedule" as any),
-              badge: scheduledViewings.length,
-            },
-            {
-              label: "Bookings",
-              icon: "people-outline",
-              action: () => router.push("/(tabs)/bookings" as any),
-              badge: pendingBookingsCount,
-            },
-            {
-              label: "Maintenance",
-              icon: "hammer-outline",
-              action: () => router.push("/(tabs)/maintenance" as any),
-              badge: pendingMaintenanceCount,
-            },
-            {
-              label: "Payments",
-              icon: "card-outline",
-              action: () => router.push("/(tabs)/payments" as any),
-              badge: pendingPaymentsCount,
-            },
-            {
-              label: "Add Property",
-              icon: "add-circle-outline",
-              action: () => router.push("/properties/new" as any),
-              badge: 0,
-            },
-          ].map((item, index) => (
+          <Text
+            style={[
+              styles.sectionTitle,
+              { color: isDark ? colors.text : "#111" },
+            ]}
+          >
+            Quick Actions
+          </Text>
+          {showQuickActionsHint && (
+            <View
+              style={[styles.quickActionsHintWrap, { marginTop: 0 }]}
+              pointerEvents="none"
+            >
+              <Text
+                style={[
+                  styles.quickActionsHintText,
+                  { color: isDark ? colors.textMuted : "#6b7280" },
+                ]}
+              >
+                Swipe left to see more
+              </Text>
+              <Animated.View
+                style={{
+                  transform: [{ translateX: quickActionsHintArrowTranslateX }],
+                  opacity: quickActionsHintArrowOpacity,
+                }}
+              >
+                <Ionicons
+                  name="chevron-forward"
+                  size={14}
+                  color={isDark ? colors.textMuted : "#6b7280"}
+                />
+              </Animated.View>
+            </View>
+          )}
+        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.quickGrid}
+          onLayout={(event) => {
+            setQuickActionsViewportWidth(event.nativeEvent.layout.width);
+          }}
+          onContentSizeChange={(w) => {
+            setQuickActionsContentWidth(w);
+          }}
+          onScroll={(event) => {
+            if (
+              !quickActionsHintDismissed &&
+              event.nativeEvent.contentOffset.x > 14
+            ) {
+              setQuickActionsHintDismissed(true);
+            }
+          }}
+          scrollEventThrottle={16}
+        >
+          {quickActionsItems.map((item, index) => (
             <TouchableOpacity
               key={index}
               style={styles.quickBtn}
@@ -1234,264 +1364,7 @@ export default function LandlordDashboard({ session, profile }: any) {
               </Text>
             </TouchableOpacity>
           ))}
-        </View>
-      </View>
-
-      {/* --- METRICS GRID --- */}
-      <View style={[styles.gridContainer, { marginTop: 10 }]}>
-        {/* Properties */}
-        <View
-          style={[
-            styles.metricCard,
-            {
-              backgroundColor: isDark ? colors.card : "white",
-              shadowOpacity: isDark ? 0 : 0.05,
-              elevation: isDark ? 0 : 2,
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.iconBox,
-              { backgroundColor: isDark ? colors.surface : "#f3f4f6" },
-            ]}
-          >
-            <Ionicons
-              name="home-outline"
-              size={20}
-              color={isDark ? colors.text : "#111"}
-            />
-          </View>
-          <Text
-            style={[
-              styles.metricValue,
-              { color: isDark ? colors.text : "#111" },
-            ]}
-          >
-            {properties.length}
-          </Text>
-          <Text
-            style={[
-              styles.metricLabel,
-              { color: isDark ? colors.textMuted : "#666" },
-            ]}
-          >
-            Properties
-          </Text>
-        </View>
-        {/* Tenants */}
-        <View
-          style={[
-            styles.metricCard,
-            {
-              backgroundColor: isDark ? colors.card : "white",
-              shadowOpacity: isDark ? 0 : 0.05,
-              elevation: isDark ? 0 : 2,
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.iconBox,
-              { backgroundColor: isDark ? "rgba(5,150,105,0.15)" : "#d1fae5" },
-            ]}
-          >
-            <Ionicons name="people-outline" size={20} color="#059669" />
-          </View>
-          <Text
-            style={[
-              styles.metricValue,
-              { color: isDark ? colors.text : "#111" },
-            ]}
-          >
-            {occupancies.length}
-          </Text>
-          <Text
-            style={[
-              styles.metricLabel,
-              { color: isDark ? colors.textMuted : "#666" },
-            ]}
-          >
-            Tenants
-          </Text>
-        </View>
-        {/* Income */}
-        <View
-          style={[
-            styles.metricCard,
-            {
-              backgroundColor: isDark ? colors.card : "white",
-              shadowOpacity: isDark ? 0 : 0.05,
-              elevation: isDark ? 0 : 2,
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.iconBox,
-              { backgroundColor: isDark ? "rgba(37,99,235,0.15)" : "#dbeafe" },
-            ]}
-          >
-            <Ionicons name="cash-outline" size={20} color="#2563eb" />
-          </View>
-          <Text
-            style={[
-              styles.metricValue,
-              { fontSize: 18, color: isDark ? colors.text : "#111" },
-            ]}
-          >
-            ₱{(monthlyIncome.yearTotal / 1000).toFixed(1)}k
-          </Text>
-          <Text
-            style={[
-              styles.metricLabel,
-              { color: isDark ? colors.textMuted : "#666" },
-            ]}
-          >
-            Income
-          </Text>
-        </View>
-        {/* Tasks */}
-        <View
-          style={[
-            styles.metricCard,
-            {
-              backgroundColor: isDark ? colors.card : "white",
-              shadowOpacity: isDark ? 0 : 0.05,
-              elevation: isDark ? 0 : 2,
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.iconBox,
-              { backgroundColor: isDark ? "rgba(225,29,72,0.15)" : "#ffe4e6" },
-            ]}
-          >
-            <Ionicons name="alert-circle-outline" size={20} color="#e11d48" />
-          </View>
-          <Text
-            style={[
-              styles.metricValue,
-              { color: isDark ? colors.text : "#111" },
-            ]}
-          >
-            {pendingEndRequests.length +
-              pendingRenewalRequests.length +
-              pendingMaintenanceCount +
-              pendingPaymentsCount +
-              pendingBookingsCount}
-          </Text>
-          <Text
-            style={[
-              styles.metricLabel,
-              { color: isDark ? colors.textMuted : "#666" },
-            ]}
-          >
-            Pending
-          </Text>
-        </View>
-      </View>
-
-      {/* --- BILLING SCHEDULE --- */}
-      <View style={styles.sectionContainer}>
-        <Text
-          style={[
-            styles.sectionTitle,
-            { color: isDark ? colors.text : "#111" },
-          ]}
-        >
-          Upcoming Bills
-        </Text>
-        <View
-          style={[
-            styles.card,
-            {
-              backgroundColor: isDark ? colors.card : "white",
-              shadowOpacity: isDark ? 0 : 0.05,
-              elevation: isDark ? 0 : 2,
-            },
-          ]}
-        >
-          {billingSchedule.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={{ color: isDark ? colors.textMuted : "#999" }}>
-                No upcoming bills
-              </Text>
-            </View>
-          ) : (
-            billingSchedule.slice(0, 5).map((item, idx) => (
-              <View
-                key={idx}
-                style={[
-                  styles.billRow,
-                  { borderColor: isDark ? colors.border : "#f3f4f6" },
-                ]}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text
-                    style={[
-                      styles.billTenant,
-                      { color: isDark ? colors.text : "#111" },
-                    ]}
-                  >
-                    {item.tenantName}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.billProp,
-                      { color: isDark ? colors.textMuted : "#666" },
-                    ]}
-                  >
-                    {item.propertyTitle}
-                  </Text>
-                </View>
-                <View style={{ alignItems: "flex-end", marginRight: 10 }}>
-                  <Text
-                    style={[
-                      styles.billDate,
-                      { color: isDark ? colors.text : "#000" },
-                    ]}
-                  >
-                    {item.nextDueDate
-                      ? new Date(item.nextDueDate).toLocaleDateString()
-                      : "N/A"}
-                  </Text>
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      item.status === "Overdue" ? styles.bgRed : styles.bgGreen,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.statusText,
-                        item.status === "Overdue"
-                          ? styles.textRed
-                          : styles.textGreen,
-                      ]}
-                    >
-                      {item.status}
-                    </Text>
-                  </View>
-                </View>
-                <TouchableOpacity
-                  onPress={() =>
-                    setAdvanceBillModal({
-                      isOpen: true,
-                      tenantId: item.tenantId,
-                      tenantName: item.tenantName,
-                      propertyTitle: item.propertyTitle,
-                    })
-                  }
-                  style={styles.btnXs}
-                >
-                  <Text style={styles.btnTextXs}>Bill</Text>
-                </TouchableOpacity>
-              </View>
-            ))
-          )}
-        </View>
+        </ScrollView>
       </View>
 
       {/* --- SCHEDULED TENANTS TODAY --- */}
@@ -1501,6 +1374,7 @@ export default function LandlordDashboard({ session, profile }: any) {
             flexDirection: "row",
             justifyContent: "space-between",
             alignItems: "center",
+            marginTop: 10,
             marginBottom: 15,
           }}
         >
@@ -1638,7 +1512,7 @@ export default function LandlordDashboard({ session, profile }: any) {
         </View>
       </View>
 
-      {/* --- ACTIVE PROPERTIES --- */}
+      {/* --- BILLING SCHEDULE --- */}
       <View style={styles.sectionContainer}>
         <Text
           style={[
@@ -1646,8 +1520,311 @@ export default function LandlordDashboard({ session, profile }: any) {
             { color: isDark ? colors.text : "#111" },
           ]}
         >
-          Active Properties
+          Upcoming Bills
         </Text>
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: isDark ? colors.card : "white",
+              shadowOpacity: isDark ? 0 : 0.05,
+              elevation: isDark ? 0 : 2,
+            },
+          ]}
+        >
+          {billingSchedule.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={{ color: isDark ? colors.textMuted : "#999" }}>
+                No upcoming bills
+              </Text>
+            </View>
+          ) : (
+            billingSchedule.slice(0, 5).map((item, idx) => (
+              <View
+                key={idx}
+                style={[
+                  styles.billRow,
+                  { borderColor: isDark ? colors.border : "#f3f4f6" },
+                ]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={[
+                      styles.billTenant,
+                      { color: isDark ? colors.text : "#111" },
+                    ]}
+                  >
+                    {item.tenantName}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.billProp,
+                      { color: isDark ? colors.textMuted : "#666" },
+                    ]}
+                  >
+                    {item.propertyTitle}
+                  </Text>
+                </View>
+                <View style={{ alignItems: "flex-end", marginRight: 10 }}>
+                  <Text
+                    style={[
+                      styles.billDate,
+                      { color: isDark ? colors.text : "#000" },
+                    ]}
+                  >
+                    {item.nextDueDate
+                      ? new Date(item.nextDueDate).toLocaleDateString()
+                      : "N/A"}
+                  </Text>
+                  <View
+                    style={[
+                      styles.statusBadge,
+                      item.status === "Overdue" ? styles.bgRed : styles.bgGreen,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.statusText,
+                        item.status === "Overdue"
+                          ? styles.textRed
+                          : styles.textGreen,
+                      ]}
+                    >
+                      {item.status}
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  onPress={() =>
+                    setAdvanceBillModal({
+                      isOpen: true,
+                      tenantId: item.tenantId,
+                      tenantName: item.tenantName,
+                      propertyTitle: item.propertyTitle,
+                    })
+                  }
+                  style={[
+                    styles.btnXs,
+                    item.hasOpenBill && {
+                      backgroundColor: "#d1d5db",
+                    },
+                  ]}
+                  disabled={item.hasOpenBill}
+                >
+                  <Text
+                    style={[
+                      styles.btnTextXs,
+                      item.hasOpenBill && {
+                        color: "#9ca3af",
+                      },
+                    ]}
+                  >
+                    {item.hasOpenBill ? "Billed" : "Bill"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ))
+          )}
+        </View>
+      </View>
+
+      {/* --- DASHBOARD OVERVIEW (4 BOXES) --- */}
+      <View style={styles.metricsHeaderWrap}>
+        <Text
+          style={[
+            styles.sectionTitle,
+            { color: isDark ? colors.text : "#111" },
+          ]}
+        >
+          Dashboard Overview
+        </Text>
+      </View>
+      <View style={[styles.gridContainer, { marginTop: 10 }]}>
+        {/* Properties */}
+        <View
+          style={[
+            styles.metricCard,
+            {
+              backgroundColor: isDark ? colors.card : "white",
+              shadowOpacity: isDark ? 0 : 0.05,
+              elevation: isDark ? 0 : 2,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.metricCardTitle,
+              { color: isDark ? colors.textMuted : "#6b7280" },
+            ]}
+          >
+            Properties
+          </Text>
+          <View
+            style={[
+              styles.iconBox,
+              { backgroundColor: isDark ? colors.surface : "#f3f4f6" },
+            ]}
+          >
+            <Ionicons
+              name="home-outline"
+              size={20}
+              color={isDark ? colors.text : "#111"}
+            />
+          </View>
+          <Text
+            style={[
+              styles.metricValue,
+              { color: isDark ? colors.text : "#111" },
+            ]}
+          >
+            {properties.length}
+          </Text>
+        </View>
+        {/* Tenants */}
+        <View
+          style={[
+            styles.metricCard,
+            {
+              backgroundColor: isDark ? colors.card : "white",
+              shadowOpacity: isDark ? 0 : 0.05,
+              elevation: isDark ? 0 : 2,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.metricCardTitle,
+              { color: isDark ? colors.textMuted : "#6b7280" },
+            ]}
+          >
+            Tenants
+          </Text>
+          <View
+            style={[
+              styles.iconBox,
+              { backgroundColor: isDark ? "rgba(5,150,105,0.15)" : "#d1fae5" },
+            ]}
+          >
+            <Ionicons name="people-outline" size={20} color="#059669" />
+          </View>
+          <Text
+            style={[
+              styles.metricValue,
+              { color: isDark ? colors.text : "#111" },
+            ]}
+          >
+            {occupancies.length}
+          </Text>
+        </View>
+        {/* Income */}
+        <View
+          style={[
+            styles.metricCard,
+            {
+              backgroundColor: isDark ? colors.card : "white",
+              shadowOpacity: isDark ? 0 : 0.05,
+              elevation: isDark ? 0 : 2,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.metricCardTitle,
+              { color: isDark ? colors.textMuted : "#6b7280" },
+            ]}
+          >
+            Income
+          </Text>
+          <View
+            style={[
+              styles.iconBox,
+              { backgroundColor: isDark ? "rgba(37,99,235,0.15)" : "#dbeafe" },
+            ]}
+          >
+            <Ionicons name="cash-outline" size={20} color="#2563eb" />
+          </View>
+          <Text
+            style={[
+              styles.metricValue,
+              { fontSize: 18, color: isDark ? colors.text : "#111" },
+            ]}
+          >
+            ₱{(monthlyIncome.yearTotal / 1000).toFixed(1)}k
+          </Text>
+        </View>
+        {/* Tasks */}
+        <View
+          style={[
+            styles.metricCard,
+            {
+              backgroundColor: isDark ? colors.card : "white",
+              shadowOpacity: isDark ? 0 : 0.05,
+              elevation: isDark ? 0 : 2,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.metricCardTitle,
+              { color: isDark ? colors.textMuted : "#6b7280" },
+            ]}
+          >
+            Pending
+          </Text>
+          <View
+            style={[
+              styles.iconBox,
+              { backgroundColor: isDark ? "rgba(225,29,72,0.15)" : "#ffe4e6" },
+            ]}
+          >
+            <Ionicons name="alert-circle-outline" size={20} color="#e11d48" />
+          </View>
+          <Text
+            style={[
+              styles.metricValue,
+              { color: isDark ? colors.text : "#111" },
+            ]}
+          >
+            {pendingMaintenanceCount +
+              pendingPaymentsCount +
+              pendingBookingsCount}
+          </Text>
+        </View>
+      </View>
+
+      {/* --- ACTIVE PROPERTIES --- */}
+      <View style={styles.sectionContainer}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <Text
+            style={[
+              styles.sectionTitle,
+              { color: isDark ? colors.text : "#111" },
+            ]}
+          >
+            Active Properties
+          </Text>
+          {occupancies.length > 0 && (
+            <TouchableOpacity
+              onPress={() => router.push("/(tabs)/active-properties" as any)}
+            >
+              <Text
+                style={{
+                  fontSize: 12,
+                  fontWeight: "700",
+                  color: isDark ? colors.text : "#111",
+                }}
+              >
+                See All
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
         <Text
           style={{
             fontSize: 12,
@@ -1656,7 +1833,7 @@ export default function LandlordDashboard({ session, profile }: any) {
             marginBottom: 12,
           }}
         >
-          Manage lease details, utilities due schedule, and occupancy history.
+          Manage tenant details, utilities due schedule, and occupancy history.
         </Text>
 
         {occupancies.length === 0 ? (
@@ -1688,7 +1865,7 @@ export default function LandlordDashboard({ session, profile }: any) {
             </Text>
           </View>
         ) : (
-          occupancies.map((occ: any) => (
+          displayedActiveOccupancies.map((occ: any) => (
             <View
               key={occ.id}
               style={[
@@ -1734,10 +1911,11 @@ export default function LandlordDashboard({ session, profile }: any) {
                     style={{
                       fontSize: 10,
                       fontWeight: "bold",
-                      color: "#059669",
+                      color:
+                        occ.status === "pending_end" ? "#b45309" : "#059669",
                     }}
                   >
-                    OCCUPIED
+                    {occ.status === "pending_end" ? "ENDING SOON" : "OCCUPIED"}
                   </Text>
                 </View>
               </View>
@@ -1812,6 +1990,20 @@ export default function LandlordDashboard({ session, profile }: any) {
                   </View>
                 </View>
 
+                {occ.status === "pending_end" && occ.end_request_date ? (
+                  <Text
+                    style={{
+                      marginTop: -2,
+                      marginBottom: 10,
+                      fontSize: 12,
+                      fontWeight: "600",
+                      color: "#b45309",
+                    }}
+                  >
+                    Scheduled end: {String(occ.end_request_date).slice(0, 10)}
+                  </Text>
+                ) : null}
+
                 <View style={styles.activeActionsRow}>
                   <TouchableOpacity
                     onPress={() => openPropertyDetailsModal(occ)}
@@ -1823,7 +2015,11 @@ export default function LandlordDashboard({ session, profile }: any) {
                     onPress={() => openEndContractModal(occ)}
                     style={styles.btnEnd}
                   >
-                    <Text style={styles.btnEndText}>End Contract</Text>
+                    <Text style={styles.btnEndText}>
+                      {occ.status === "pending_end"
+                        ? "Update End Date"
+                        : "End Contract"}
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -1861,27 +2057,10 @@ export default function LandlordDashboard({ session, profile }: any) {
               </TouchableOpacity>
             </View>
             <ScrollView style={{ maxHeight: 400 }}>
-              <Text style={styles.label}>Start Date (YYYY-MM-DD)</Text>
-              <TextInput
-                style={styles.input}
-                value={startDate}
-                onChangeText={setStartDate}
-                placeholder="YYYY-MM-DD"
-              />
-
-              <Text style={styles.label}>Duration (Months)</Text>
-              <TextInput
-                style={styles.input}
-                value={contractMonths}
-                onChangeText={setContractMonths}
-                keyboardType="numeric"
-              />
-
-              <Text style={styles.label}>End Date (Auto)</Text>
-              <TextInput
-                style={[styles.input, { backgroundColor: "#f3f4f6" }]}
-                value={endDate}
-                editable={false}
+              <Text style={styles.label}>Start Date</Text>
+              <CalendarPicker
+                selectedDate={startDate}
+                onDateSelect={setStartDate}
               />
 
               <Text style={styles.label}>Late Penalty Fee (₱)</Text>
@@ -2183,133 +2362,6 @@ export default function LandlordDashboard({ session, profile }: any) {
                 </>
               )}
             </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* 3. Renewal Modal */}
-      <Modal visible={renewalModal.isOpen} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View
-            style={[
-              styles.modalContent,
-              { backgroundColor: isDark ? colors.surface : "white" },
-            ]}
-          >
-            <Text
-              style={[
-                styles.modalTitle,
-                { color: isDark ? colors.text : "#000" },
-              ]}
-            >
-              {renewalModal.action === "approve"
-                ? "Approve Renewal"
-                : "Reject Request"}
-            </Text>
-            {renewalModal.action === "approve" ? (
-              <>
-                <View
-                  style={{
-                    backgroundColor: isDark
-                      ? "rgba(79,70,229,0.15)"
-                      : "#e0e7ff",
-                    padding: 10,
-                    borderRadius: 8,
-                    marginBottom: 15,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: isDark ? "#a5b4fc" : "#3730a3",
-                      fontSize: 12,
-                    }}
-                  >
-                    Approving will extend the contract and automatically send a
-                    bill for Rent + 1 Month Advance.
-                  </Text>
-                </View>
-                <Text
-                  style={[
-                    styles.label,
-                    { color: isDark ? colors.textMuted : "#666" },
-                  ]}
-                >
-                  New End Date
-                </Text>
-                <TextInput
-                  style={[
-                    styles.input,
-                    {
-                      backgroundColor: isDark ? colors.card : "#f9fafb",
-                      borderColor: isDark ? colors.cardBorder : "#ddd",
-                      color: isDark ? colors.text : "#000",
-                    },
-                  ]}
-                  value={renewalEndDate}
-                  onChangeText={setRenewalEndDate}
-                />
-                <Text
-                  style={[
-                    styles.label,
-                    { color: isDark ? colors.textMuted : "#666" },
-                  ]}
-                >
-                  Signing Date
-                </Text>
-                <TextInput
-                  style={[
-                    styles.input,
-                    {
-                      backgroundColor: isDark ? colors.card : "#f9fafb",
-                      borderColor: isDark ? colors.cardBorder : "#ddd",
-                      color: isDark ? colors.text : "#000",
-                    },
-                  ]}
-                  value={renewalSigningDate}
-                  onChangeText={setRenewalSigningDate}
-                />
-              </>
-            ) : (
-              <Text
-                style={{
-                  marginBottom: 20,
-                  color: isDark ? colors.textSecondary : "#000",
-                }}
-              >
-                Are you sure you want to reject this request?
-              </Text>
-            )}
-            <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
-              <TouchableOpacity
-                onPress={() =>
-                  setRenewalModal({
-                    isOpen: false,
-                    occupancy: null,
-                    action: null,
-                  })
-                }
-                style={[
-                  styles.btnFull,
-                  { backgroundColor: isDark ? colors.card : "#eee" },
-                ]}
-              >
-                <Text style={{ color: isDark ? colors.text : "#000" }}>
-                  Cancel
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={confirmRenewalRequest}
-                style={[
-                  styles.btnFull,
-                  {
-                    backgroundColor:
-                      renewalModal.action === "approve" ? "#4f46e5" : "#ef4444",
-                  },
-                ]}
-              >
-                <Text style={styles.btnTextWhite}>Confirm</Text>
-              </TouchableOpacity>
-            </View>
           </View>
         </View>
       </Modal>
@@ -2837,51 +2889,40 @@ export default function LandlordDashboard({ session, profile }: any) {
             </Text>
             <Text
               style={{
+                marginTop: 4,
+                marginBottom: 10,
+                color: isDark ? colors.textSecondary : "#4b5563",
                 fontSize: 12,
-                color: isDark ? colors.textMuted : "#666",
-                marginBottom: 15,
               }}
             >
-              This will mark the property as available.
+              Set an end date and reason before confirming.
             </Text>
-            <Text
-              style={[
-                styles.label,
-                { color: isDark ? colors.textMuted : "#666" },
-              ]}
-            >
-              End Date
-            </Text>
+
+            <Text style={styles.label}>End Date</Text>
             <CalendarPicker
               selectedDate={endContractDate}
               onDateSelect={setEndContractDate}
             />
-            <Text
-              style={[
-                styles.label,
-                { color: isDark ? colors.textMuted : "#666" },
-              ]}
-            >
-              Reason
-            </Text>
+
+            <Text style={styles.label}>Reason</Text>
             <TextInput
               style={[
                 styles.input,
-                {
-                  backgroundColor: isDark ? colors.card : "#f9fafb",
-                  borderColor: isDark ? colors.cardBorder : "#ddd",
-                  color: isDark ? colors.text : "#000",
-                },
+                { minHeight: 80, textAlignVertical: "top" },
               ]}
               value={endContractReason}
               onChangeText={setEndContractReason}
+              placeholder="Enter reason"
               multiline
             />
+
             <View style={{ flexDirection: "row", gap: 10, marginTop: 15 }}>
               <TouchableOpacity
-                onPress={() =>
-                  setEndContractModal({ isOpen: false, occupancy: null })
-                }
+                onPress={() => {
+                  setEndContractModal({ isOpen: false, occupancy: null });
+                  setEndContractDate(new Date().toISOString().split("T")[0]);
+                  setEndContractReason("");
+                }}
                 style={[
                   styles.btnFull,
                   { backgroundColor: isDark ? colors.card : "#eee" },
@@ -2892,10 +2933,21 @@ export default function LandlordDashboard({ session, profile }: any) {
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={confirmEndContract}
-                style={[styles.btnFull, { backgroundColor: "#ef4444" }]}
+                onPress={submitEndContract}
+                disabled={endingContract}
+                style={[
+                  styles.btnFull,
+                  {
+                    backgroundColor: "#ef4444",
+                    opacity: endingContract ? 0.6 : 1,
+                  },
+                ]}
               >
-                <Text style={styles.btnTextWhite}>End Contract</Text>
+                {endingContract ? (
+                  <ActivityIndicator color="white" size="small" />
+                ) : (
+                  <Text style={styles.btnTextWhite}>Save End Contract</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -2933,14 +2985,16 @@ export default function LandlordDashboard({ session, profile }: any) {
             </Text>
             <View style={{ flexDirection: "row", gap: 10, marginTop: 15 }}>
               <TouchableOpacity
-                onPress={() =>
+                onPress={() => {
+                  setSendingAdvanceBill(false);
                   setAdvanceBillModal({
                     isOpen: false,
                     tenantId: null,
                     tenantName: "",
                     propertyTitle: "",
-                  })
-                }
+                  });
+                }}
+                disabled={sendingAdvanceBill}
                 style={[
                   styles.btnFull,
                   { backgroundColor: isDark ? colors.card : "#eee" },
@@ -2952,9 +3006,20 @@ export default function LandlordDashboard({ session, profile }: any) {
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={confirmSendAdvanceBill}
-                style={[styles.btnFull, { backgroundColor: "black" }]}
+                disabled={sendingAdvanceBill}
+                style={[
+                  styles.btnFull,
+                  {
+                    backgroundColor: "black",
+                    opacity: sendingAdvanceBill ? 0.6 : 1,
+                  },
+                ]}
               >
-                <Text style={styles.btnTextWhite}>Send Bill</Text>
+                {sendingAdvanceBill ? (
+                  <ActivityIndicator color="white" size="small" />
+                ) : (
+                  <Text style={styles.btnTextWhite}>Send Bill</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -3044,6 +3109,11 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     elevation: 2,
   },
+  metricCardTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
   iconBox: {
     width: 40,
     height: 40,
@@ -3054,6 +3124,10 @@ const styles = StyleSheet.create({
   },
   metricValue: { fontSize: 22, fontWeight: "900", color: "#111" },
   metricLabel: { fontSize: 12, color: "#666", fontWeight: "500" },
+  metricsHeaderWrap: {
+    paddingHorizontal: 15,
+    marginTop: 10,
+  },
 
   // Sections
   sectionContainer: { paddingHorizontal: 20, paddingBottom: 20 },
@@ -3500,14 +3574,16 @@ const styles = StyleSheet.create({
   // Quick Actions
   quickGrid: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    rowGap: 20,
+    alignItems: "flex-start",
+    paddingTop: 8,
+    paddingBottom: 10,
+    paddingRight: 8,
   },
   quickBtn: {
-    width: "30%", // 3 items per row approx
+    width: 92,
     alignItems: "center",
     gap: 8,
+    marginRight: 14,
   },
   quickBtnIcon: {
     width: 56,
@@ -3547,5 +3623,22 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 10,
     fontWeight: "bold",
+  },
+  quickActionsHintWrap: {
+    marginTop: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-end",
+    gap: 2,
+    backgroundColor: "#fffbeb",
+    borderColor: "#fde68a",
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  quickActionsHintText: {
+    fontSize: 11,
+    fontWeight: "700",
   },
 });

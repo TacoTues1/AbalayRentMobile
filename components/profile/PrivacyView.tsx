@@ -40,7 +40,7 @@ export default function PrivacyView({ onBack }: { onBack: () => void }) {
                 <View style={{ marginBottom: 32 }}>
                     <Text style={{ fontSize: 18, fontWeight: 'bold', color: heading, marginBottom: 12 }}>2. How We Use Information</Text>
                     <Text style={{ fontSize: 15, color: body, lineHeight: 24, marginBottom: 8 }}><Text style={{ fontWeight: 'bold' }}>• Service Provision:</Text> To create bookings, generate lease agreements, and manage maintenance requests.</Text>
-                    <Text style={{ fontSize: 15, color: body, lineHeight: 24, marginBottom: 8 }}><Text style={{ fontWeight: 'bold' }}>• Communication:</Text> To send SMS notifications (via services like Twilio/MessageBird) regarding booking status, maintenance updates, or security alerts.</Text>
+                    <Text style={{ fontSize: 15, color: body, lineHeight: 24, marginBottom: 8 }}><Text style={{ fontWeight: 'bold' }}>• Communication:</Text> To send SMS notifications (via services like SMSGate) regarding booking status, maintenance updates, or security alerts.</Text>
                     <Text style={{ fontSize: 15, color: body, lineHeight: 24, marginBottom: 8 }}><Text style={{ fontWeight: 'bold' }}>• Safety & Security:</Text> To detect and prevent fraud, spam, and abuse. We use data to verify that landlords own their properties and tenants are real people.</Text>
                     <Text style={{ fontSize: 15, color: body, lineHeight: 24, marginBottom: 8 }}><Text style={{ fontWeight: 'bold' }}>• Platform Improvement:</Text> To analyze usage trends and improve the Abalay user experience.</Text>
                 </View>
@@ -84,13 +84,13 @@ export default function PrivacyView({ onBack }: { onBack: () => void }) {
                     <Text style={{ fontSize: 15, color: body, lineHeight: 24 }}>We use cookies and similar tracking technologies to track activity on our platform and store certain information. Tracking technologies used include beacons, tags, and scripts to collect and track information and to improve and analyze our service.</Text>
                 </View>
 
-                <View style={{ backgroundColor: '#000', borderRadius: 16, padding: 24, marginTop: 16 }}>
+                {/* <View style={{ backgroundColor: '#000', borderRadius: 16, padding: 24, marginTop: 16 }}>
                     <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#fff', marginBottom: 8 }}>Have questions?</Text>
                     <Text style={{ color: '#d1d5db', marginBottom: 16 }}>If you have questions about this policy or your privacy rights, please contact our support team.</Text>
                     <TouchableOpacity style={{ backgroundColor: '#fff', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 8, alignSelf: 'flex-start' }}>
                         <Text style={{ color: '#000', fontWeight: 'bold', fontSize: 14 }}>Contact Support</Text>
                     </TouchableOpacity>
-                </View>
+                </View> */}
             </ScrollView>
         </SafeAreaView>
     );

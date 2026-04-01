@@ -1,4 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
+import DateTimePicker, {
+    DateTimePickerAndroid,
+} from "@react-native-community/datetimepicker";
 import { decode } from "base64-arraybuffer";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
@@ -30,6 +33,18 @@ function getRentMonth(dueDateString: string) {
   return due.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
 
+function formatCurrencyAmount(value: string | number) {
+  const normalized = String(value ?? "")
+    .replace(/,/g, "")
+    .trim();
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return "0.00";
+  return parsed.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 export default function Payments() {
   const router = useRouter();
   const { isDark, colors } = useTheme();
@@ -58,21 +73,14 @@ export default function Payments() {
   const [paymentMethod, setPaymentMethod] = useState("cash"); // 'cash', 'stripe', 'paymongo'
   const [uploading, setUploading] = useState(false);
   const [customAmount, setCustomAmount] = useState("");
-  const [appliedCredit, setAppliedCredit] = useState(0);
-  const [monthsCovered, setMonthsCovered] = useState(1);
-  const [contractEndDate, setContractEndDate] = useState<Date | null>(null);
-  const [contractStartDate, setContractStartDate] = useState<Date | null>(null);
-  const [monthlyRent, setMonthlyRent] = useState(0);
-  const [maxMonthsAllowed, setMaxMonthsAllowed] = useState(1);
-  const [isBelowMinimum, setIsBelowMinimum] = useState(false);
-  const [minimumPayment, setMinimumPayment] = useState(0);
   const [referenceNumber, setReferenceNumber] = useState("");
-  const [maxPaymentLimit, setMaxPaymentLimit] = useState<number | null>(null);
-  const [exceedsContract, setExceedsContract] = useState(false);
+  const [isFamilyMember, setIsFamilyMember] = useState(false);
+  const [isPayMongoVerifying, setIsPayMongoVerifying] = useState(false);
   const [showCashConfirmModal, setShowCashConfirmModal] = useState(false);
   const [landlordAcceptedPayments, setLandlordAcceptedPayments] =
     useState<any>(null);
   const [showBillReceiptModal, setShowBillReceiptModal] = useState(false);
+  const [showBillDueDatePicker, setShowBillDueDatePicker] = useState(false);
 
   // Constants
   const getApiUrl = () => {
@@ -95,6 +103,7 @@ export default function Payments() {
   // Edit Bill Modal (Landlord)
   const [showEditModal, setShowEditModal] = useState(false);
   const [editFormData, setEditFormData] = useState<any>({});
+  const [showEditDueDatePicker, setShowEditDueDatePicker] = useState(false);
 
   // Form State (Create Bill)
   const [formData, setFormData] = useState<any>({
@@ -122,6 +131,11 @@ export default function Payments() {
 
     try {
       console.log(`Loading payments for ${role} ${userId}`);
+      let detectedFamilyMember = false;
+
+      if (role !== "tenant") {
+        setIsFamilyMember(false);
+      }
 
       // 1. Check if user is a family member (Tenant only)
       if (role === "tenant" && API_URL) {
@@ -139,6 +153,8 @@ export default function Payments() {
               console.log(
                 "loadData: User is a family member. Loading parent's payments.",
               );
+              detectedFamilyMember = true;
+              setIsFamilyMember(true);
               setPaymentRequests(fmData.fullPaymentRequests || []);
               setPayments(fmData.paymentsHistory || []);
               return; // Exit early since we got the data
@@ -147,6 +163,10 @@ export default function Payments() {
         } catch (err) {
           console.error("Family member fetch error in payments:", err);
         }
+      }
+
+      if (role === "tenant" && !detectedFamilyMember) {
+        setIsFamilyMember(false);
       }
 
       // 2. Load Bills with joined properties and profiles (matching web version)
@@ -173,8 +193,11 @@ export default function Payments() {
         console.error("Fetch bills error:", error);
         Alert.alert("Error", "Failed to load bills. Please check connection.");
       }
-      setPaymentRequests(bills || []);
-      console.log(`Loaded ${bills?.length} bills.`);
+
+      const finalBills = bills || [];
+
+      setPaymentRequests(finalBills);
+      console.log(`Loaded ${finalBills?.length} bills.`);
 
       // 2. Load payment history (for stats / history)
       let paymentsQuery = supabase
@@ -412,6 +435,10 @@ export default function Payments() {
       due_date: bill.due_date
         ? new Date(bill.due_date).toISOString().split("T")[0]
         : "",
+      _original_rent: parseFloat(bill.rent_amount || 0),
+      _original_water: parseFloat(bill.water_bill || 0),
+      _original_electrical: parseFloat(bill.electrical_bill || 0),
+      _original_other: parseFloat(bill.other_bills || 0),
     });
     setShowEditModal(true);
   };
@@ -457,19 +484,15 @@ export default function Payments() {
     try {
       // 1. Get Occupancy Info
       let monthlyRent = parseFloat(request.rent_amount || 0);
-      let contractEndDate: Date | null = null;
 
       if (request.occupancy_id) {
         const { data: occ } = await supabase
           .from("tenant_occupancies")
-          .select("contract_end_date, rent_amount, start_date")
+          .select("rent_amount, start_date")
           .eq("id", request.occupancy_id)
           .single();
         if (occ) {
           monthlyRent = parseFloat(occ.rent_amount || request.rent_amount || 0);
-          contractEndDate = occ.contract_end_date
-            ? new Date(occ.contract_end_date)
-            : null;
         }
       }
 
@@ -483,14 +506,9 @@ export default function Payments() {
         parseFloat(request.other_bills || 0);
 
       // 3. Extra Months for Advance
-      // For move-in payments, advance_amount is a one-time deposit, NOT advance rent months
-      // So we skip creating extra "paid" bills for move-in payments
+      // Move-in bills can include advance rent; count it the same way as regular rent.
       let extraMonths = 0;
-      if (
-        !request.is_move_in_payment &&
-        monthlyRent > 0 &&
-        parseFloat(request.advance_amount || 0) > 0
-      ) {
+      if (monthlyRent > 0 && parseFloat(request.advance_amount || 0) > 0) {
         extraMonths = Math.floor(
           parseFloat(request.advance_amount) / monthlyRent,
         );
@@ -570,10 +588,17 @@ export default function Payments() {
       ) {
         updateData.due_date = actualNextDueDate;
       }
-      await supabase
+      const { data: updatedRows, error: statusError } = await supabase
         .from("payment_requests")
         .update(updateData)
-        .eq("id", request.id);
+        .eq("id", request.id)
+        .select("id");
+      if (statusError) throw statusError;
+      if (!updatedRows || updatedRows.length === 0) {
+        throw new Error(
+          "Payment status update failed. The bill may be protected by security policies. Please check your Supabase RLS settings.",
+        );
+      }
 
       // 7. Handle Advance Payments (Create Paid future bills)
       if (extraMonths > 0 && request.occupancy_id && actualNextDueDate) {
@@ -581,7 +606,6 @@ export default function Payments() {
         for (let i = 1; i <= extraMonths; i++) {
           const fDate = new Date(baseDueDate);
           fDate.setMonth(fDate.getMonth() + i);
-          if (contractEndDate && fDate > contractEndDate) break;
 
           await supabase.from("payment_requests").insert({
             landlord: session.user.id,
@@ -602,88 +626,17 @@ export default function Payments() {
         }
       }
 
-      // 8. Balance updates (Credit)
-      const totalPaidByTenant = parseFloat(request.amount_paid || 0);
-
-      if (totalPaidByTenant > 0) {
-        const billOwed =
-          parseFloat(request.rent_amount || 0) +
-          parseFloat(request.security_deposit_amount || 0) +
-          parseFloat(request.advance_amount || 0) +
-          parseFloat(request.water_bill || 0) +
-          parseFloat(request.electrical_bill || 0) +
-          parseFloat(request.other_bills || 0);
-        const remainingCredit = totalPaidByTenant - billOwed;
-
-        if (request.is_renewal_payment) {
-          // Reset renewal status
-          if (request.occupancy_id) {
-            await supabase
-              .from("tenant_occupancies")
-              .update({ renewal_status: null, renewal_requested: false })
-              .eq("id", request.occupancy_id);
-          }
-          // Check for incorrect credit from renewal and remove
-          if (request.occupancy_id) {
-            const { data: existing } = await supabase
-              .from("tenant_balances")
-              .select("amount")
-              .eq("tenant_id", request.tenant)
-              .eq("occupancy_id", request.occupancy_id)
-              .maybeSingle();
-            if (existing && existing.amount > 0) {
-              const adv = parseFloat(request.advance_amount || 0);
-              if (Math.abs(existing.amount - adv) < 1) {
-                // Likely incorrect credit -> remove
-                await supabase
-                  .from("tenant_balances")
-                  .update({ amount: 0, last_updated: new Date().toISOString() })
-                  .eq("tenant_id", request.tenant)
-                  .eq("occupancy_id", request.occupancy_id);
-              } else {
-                // Credit doesn't match - reduce by advance amount
-                const newBalance = Math.max(0, existing.amount - adv);
-                await supabase
-                  .from("tenant_balances")
-                  .update({
-                    amount: newBalance,
-                    last_updated: new Date().toISOString(),
-                  })
-                  .eq("tenant_id", request.tenant)
-                  .eq("occupancy_id", request.occupancy_id);
-              }
-            }
-          }
-        } else if (remainingCredit > 0 && request.occupancy_id) {
-          const { data: existing } = await supabase
-            .from("tenant_balances")
-            .select("amount")
-            .eq("tenant_id", request.tenant)
-            .eq("occupancy_id", request.occupancy_id)
-            .maybeSingle();
-          const newBal = (existing?.amount || 0) + remainingCredit;
-          await supabase
-            .from("tenant_balances")
-            .upsert(
-              {
-                tenant_id: request.tenant,
-                occupancy_id: request.occupancy_id,
-                amount: newBal,
-              },
-              { onConflict: "tenant_id,occupancy_id" },
-            );
-        }
-      } else {
-        // No amount_paid recorded - still handle renewal status reset
-        if (request.is_renewal_payment && request.occupancy_id) {
-          await supabase
-            .from("tenant_occupancies")
-            .update({ renewal_status: null, renewal_requested: false })
-            .eq("id", request.occupancy_id);
-        }
+      // 8. Credit-balance workflow is removed. Keep renewal status reset only.
+      if (request.is_renewal_payment && request.occupancy_id) {
+        await supabase
+          .from("tenant_occupancies")
+          .update({ renewal_status: null, renewal_requested: false })
+          .eq("id", request.occupancy_id);
       }
 
       // Detailed notification message matching web
+      const propertyTitle =
+        request.properties?.title || request.property?.title || "property";
       let notifMsg = `Your payment for ${request.properties?.title || request.property?.title || "property"} has been confirmed by your landlord.`;
       if (request.is_renewal_payment && extraMonths > 0) {
         notifMsg = `Your renewal payment for ${request.properties?.title || request.property?.title || "property"} has been confirmed! This covers ${extraMonths + 1} months - your next due date has been advanced accordingly.`;
@@ -696,6 +649,19 @@ export default function Payments() {
         email: true,
         sms: true,
       });
+
+      if (String(request.payment_method || "cash").toLowerCase() === "cash") {
+        await createNotification(
+          request.tenant,
+          "payment_cash_accepted",
+          `Your cash payment for ${propertyTitle} has been accepted by your landlord.`,
+          {
+            actor: session.user.id,
+            email: true,
+            sms: true,
+          },
+        );
+      }
 
       // Send SMS/Email via API (matching website)
       try {
@@ -753,14 +719,22 @@ export default function Payments() {
               request.properties?.title ||
               request.property?.title ||
               "property";
-            await supabase.from("notifications").insert({
-              recipient: request.tenant,
-              actor: session.user.id,
-              type: "payment_rejected",
-              message: `Your payment of ₱${billTotal.toLocaleString()} for ${propertyTitle} was rejected by the landlord. Please contact your landlord for details.`,
-              link: "/payments",
-              data: { payment_request_id: request.id },
-            });
+            const rejectedNotification = await createNotification(
+              request.tenant,
+              "payment_rejected",
+              `Your payment of ₱${billTotal.toLocaleString()} for ${propertyTitle} was rejected by the landlord. Please contact your landlord for details.`,
+              {
+                actor: session.user.id,
+                link: "/payments",
+                data: { payment_request_id: request.id },
+              },
+            );
+
+            if (!rejectedNotification) {
+              console.error(
+                "Failed to create tenant in-app payment rejection notification",
+              );
+            }
 
             // Send SMS/Email via API notify (matching website)
             try {
@@ -815,212 +789,293 @@ export default function Payments() {
       parseFloat(request.wifi_bill || 0) +
       parseFloat(request.other_bills || 0);
 
-    // 2. Fetch Tenant Credit (filtered by occupancy)
-    let credit = 0;
-
-    // Attempt to identify occupancy ID
-    let targetOccupancyId = request.occupancy_id;
-
-    if (!targetOccupancyId) {
-      // If legacy bill without ID, try to find active occupancy
-      const { data: activeOcc } = await supabase
-        .from("tenant_occupancies")
-        .select("id")
-        .eq("tenant_id", session.user.id)
-        .eq("status", "active")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (activeOcc) targetOccupancyId = activeOcc.id;
+    if (total <= 0) {
+      return Alert.alert("Error", "Invalid bill amount.");
     }
 
-    if (targetOccupancyId) {
-      // Fetch credit specific to this occupancy
-      const { data: bal } = await supabase
-        .from("tenant_balances")
-        .select("amount")
-        .eq("tenant_id", session.user.id)
-        .eq("occupancy_id", targetOccupancyId)
-        .maybeSingle();
-      credit = parseFloat(bal?.amount || 0);
-    } else {
-      // Fallback to general credit (null occupancy_id)
-      const { data: bal } = await supabase
-        .from("tenant_balances")
-        .select("amount")
-        .eq("tenant_id", session.user.id)
-        .is("occupancy_id", null)
-        .maybeSingle();
-      credit = parseFloat(bal?.amount || 0);
-    }
-
-    setAppliedCredit(credit);
-
-    // 3. Calculate Contract Limits
-    let limit = Infinity;
-    let rentPerMonth = parseFloat(request.rent_amount || 0);
-    let endDate: Date | null = null;
-    let startDate: Date | null = null;
-    let maxMonths = 1;
-
-    // Use occupancy ID from step 2
-    if (targetOccupancyId) {
-      try {
-        const { data: occupancy } = await supabase
-          .from("tenant_occupancies")
-          .select(
-            "contract_end_date, start_date, security_deposit, rent_amount",
-          )
-          .eq("id", targetOccupancyId)
-          .single();
-
-        if (occupancy) {
-          // Prefer bill rent amount, fallback to occupancy rent
-          rentPerMonth = parseFloat(
-            request.rent_amount || occupancy.rent_amount || 0,
-          );
-          endDate = occupancy.contract_end_date
-            ? new Date(occupancy.contract_end_date)
-            : null;
-          startDate = occupancy.start_date
-            ? new Date(occupancy.start_date)
-            : null;
-
-          if (endDate && startDate) {
-            const startYear = startDate.getFullYear();
-            const startMonth = startDate.getMonth();
-            const endYear = endDate.getFullYear();
-            const endMonth = endDate.getMonth();
-
-            // Total months in contract
-            const totalContractMonths =
-              (endYear - startYear) * 12 + (endMonth - startMonth);
-
-            // Check security deposit to see if it covers last month
-            const depositAmount = parseFloat(
-              request.security_deposit_amount ||
-                occupancy.security_deposit ||
-                0,
-            );
-            let adjustedTotalKey = totalContractMonths;
-
-            // If deposit covers ~1 month rent, deduct 1 month from max payable to prevent overpayment
-            if (rentPerMonth > 0 && depositAmount >= rentPerMonth * 0.9) {
-              adjustedTotalKey = Math.max(1, totalContractMonths - 1);
-            }
-
-            maxMonths = Math.max(1, adjustedTotalKey);
-
-            // Limit logic
-            if (endDate < new Date()) {
-              // Contract ended? Limit to just this bill + deposit
-              maxMonths = 1;
-              limit = total + parseFloat(request.security_deposit_amount || 0);
-            } else {
-              // Max rent payments = months * rent per month
-              const maxContractValue = maxMonths * rentPerMonth;
-
-              // Add one-time charges to the limit
-              const securityDeposit = parseFloat(
-                request.security_deposit_amount || 0,
-              );
-              const utilities =
-                parseFloat(request.water_bill || 0) +
-                parseFloat(request.electrical_bill || 0) +
-                parseFloat(request.wifi_bill || 0) +
-                parseFloat(request.other_bills || 0);
-              const advance = parseFloat(request.advance_amount || 0);
-
-              // Final limit calculation: Max Rent + One-Time Charges - Already Paid Credit
-              limit = Math.max(
-                0,
-                maxContractValue +
-                  securityDeposit +
-                  utilities +
-                  advance -
-                  credit,
-              );
-            }
-          }
-        }
-      } catch (err) {
-        console.log("Error calculating contract limits", err);
-      }
-    }
-
-    setMonthlyRent(rentPerMonth);
-    setContractEndDate(endDate);
-    setContractStartDate(startDate);
-    setMaxMonthsAllowed(maxMonths);
-    setMaxPaymentLimit(limit);
-    setMonthsCovered(1);
-    setExceedsContract(false);
-
-    // 4. Set Initial Amounts
-    let toPay = Math.max(0, total - credit);
-
-    // For renewals, force total amount
-    if (request.advance_amount && parseFloat(request.advance_amount) > 0) {
-      toPay = Math.max(0, total - credit);
-    }
-
-    setMinimumPayment(toPay);
-    setIsBelowMinimum(false);
-
-    // Default input to the total needed amount (capped by limit)
-    setCustomAmount(
-      Math.min(toPay, limit === Infinity ? toPay : limit).toFixed(2),
-    );
-
-    // Trigger month calc immediately for default
-    // We defer slightly to let state update or just rely on useEffect if we had one.
-    // RN doesn't have the same useEffect for this as web snippet, so we call calc manually if needed,
-    // but customAmount setter is enough. We will call calc in render or onChange.
+    setCustomAmount(total.toFixed(2));
+    setIsPayMongoVerifying(false);
 
     setShowPayModal(true);
   };
 
-  const calculateMonthsCovered = (amountVal: string) => {
-    setCustomAmount(amountVal);
-    const amount = parseFloat(amountVal) || 0;
+  const getAmountValidationError = (amountVal: number) => {
+    if (!Number.isFinite(amountVal) || amountVal <= 0) {
+      return "Enter valid amount";
+    }
 
-    if (!selectedBill) return;
+    if (selectedBill) {
+      const exactAmount =
+        (parseFloat(selectedBill.rent_amount || 0) || 0) +
+        (parseFloat(selectedBill.water_bill || 0) || 0) +
+        (parseFloat(selectedBill.electrical_bill || 0) || 0) +
+        (parseFloat(selectedBill.wifi_bill || 0) || 0) +
+        (parseFloat(selectedBill.other_bills || 0) || 0) +
+        (parseFloat(selectedBill.security_deposit_amount || 0) || 0) +
+        (parseFloat(selectedBill.advance_amount || 0) || 0);
 
-    if (amount < minimumPayment || (amount === 0 && minimumPayment > 0)) {
-      setIsBelowMinimum(true);
-      setMonthsCovered(1);
+      if (Math.abs(amountVal - exactAmount) >= 0.01) {
+        return `Exact amount required: ₱${exactAmount.toFixed(2)}.`;
+      }
+    }
+
+    return null;
+  };
+
+  const getPaymentMethodLabel = (method: string) => {
+    if (method === "qr_code") return "QR Code";
+    if (method === "stripe") return "Stripe";
+    if (method === "paymongo") return "PayMongo";
+    return "Cash";
+  };
+
+  const getLandlordIdFromBill = async (bill: any) => {
+    if (bill?.landlord) return bill.landlord;
+    if (bill?.landlord_id) return bill.landlord_id;
+    if (bill?.properties?.landlord) return bill.properties.landlord;
+    if (bill?.property?.landlord) return bill.property.landlord;
+
+    if (bill?.occupancy_id) {
+      const { data: occupancy } = await supabase
+        .from("tenant_occupancies")
+        .select("landlord_id")
+        .eq("id", bill.occupancy_id)
+        .maybeSingle();
+      if (occupancy?.landlord_id) return occupancy.landlord_id;
+    }
+
+    if (bill?.id) {
+      const { data: requestRow } = await supabase
+        .from("payment_requests")
+        .select("landlord, property_id, occupancy_id")
+        .eq("id", bill.id)
+        .maybeSingle();
+
+      if (requestRow?.landlord) return requestRow.landlord;
+
+      if (requestRow?.occupancy_id) {
+        const { data: occ } = await supabase
+          .from("tenant_occupancies")
+          .select("landlord_id")
+          .eq("id", requestRow.occupancy_id)
+          .maybeSingle();
+        if (occ?.landlord_id) return occ.landlord_id;
+      }
+
+      if (requestRow?.property_id) {
+        const { data: property } = await supabase
+          .from("properties")
+          .select("landlord")
+          .eq("id", requestRow.property_id)
+          .maybeSingle();
+        if (property?.landlord) return property.landlord;
+      }
+    }
+
+    if (bill?.property_id) {
+      const { data: property } = await supabase
+        .from("properties")
+        .select("landlord")
+        .eq("id", bill.property_id)
+        .maybeSingle();
+      if (property?.landlord) return property.landlord;
+    }
+
+    return null;
+  };
+
+  const notifyLandlordPaymentChannels = async (
+    bill: any,
+    amountPaid: number,
+    method: string,
+    coveredMonths: number,
+  ) => {
+    const landlordId = await getLandlordIdFromBill(bill);
+
+    const methodLabel = getPaymentMethodLabel(method);
+    const payerLabel = isFamilyMember ? "Family member" : "Tenant";
+    const payerName =
+      `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim() ||
+      (isFamilyMember ? "A family member" : "A tenant");
+    const propertyTitle =
+      bill?.properties?.title || bill?.property?.title || "property";
+    const safeAmount = Number(amountPaid) || 0;
+    const monthsText =
+      coveredMonths > 1 ? ` (${coveredMonths} months advance)` : "";
+    const requiresConfirmation = method !== "stripe" && method !== "paymongo";
+    const notificationType = requiresConfirmation
+      ? "payment_confirmation_needed"
+      : "payment_approved";
+    const message = requiresConfirmation
+      ? `${payerLabel} ${payerName} paid ₱${safeAmount.toLocaleString()} for ${propertyTitle} via ${methodLabel}${monthsText}. Please confirm payment receipt.`
+      : `${payerLabel} ${payerName} paid ₱${safeAmount.toLocaleString()} for ${propertyTitle} via ${methodLabel}${monthsText}.`;
+
+    if (!landlordId) {
+      console.warn(
+        "notifyLandlordPaymentChannels: landlord id not found, trying backend notify fallback",
+      );
+      if (API_URL && bill?.id) {
+        try {
+          await fetch(`${API_URL}/api/notify`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: notificationType,
+              recordId: bill.id,
+              actorId: session.user.id,
+              payerRole: isFamilyMember ? "family_member" : "tenant",
+              isFamilyMember,
+              amount: safeAmount,
+              paymentMethod: method,
+            }),
+          });
+        } catch (fallbackErr) {
+          console.error(
+            "Fallback backend notify failed for landlord payment:",
+            fallbackErr,
+          );
+        }
+      }
       return;
     }
-    setIsBelowMinimum(false);
 
-    // For move-in payments, advance_amount is a one-time deposit charge, not advance rent
-    const isMoveIn = selectedBill.is_move_in_payment;
-    const oneTimeCharges =
-      (parseFloat(selectedBill.security_deposit_amount) || 0) +
-      (parseFloat(selectedBill.water_bill) || 0) +
-      (parseFloat(selectedBill.other_bills) || 0) +
-      (isMoveIn ? parseFloat(selectedBill.advance_amount) || 0 : 0);
-    const rentPortion = Math.max(0, amount - oneTimeCharges);
+    const landlordNotification = await createNotification(
+      landlordId,
+      notificationType,
+      message,
+      {
+        actor: session.user.id,
+        link: "/payments",
+        data: {
+          payment_request_id: bill?.id,
+          payer_id: session.user.id,
+          is_family_member_payer: isFamilyMember,
+        },
+      },
+    );
 
-    const rentForCalc =
-      parseFloat(selectedBill.rent_amount || 0) > 0
-        ? parseFloat(selectedBill.rent_amount)
-        : monthlyRent;
-    const months = rentForCalc > 0 ? Math.ceil(rentPortion / rentForCalc) : 1;
-    const totalMonths = Math.max(1, months);
+    if (!landlordNotification) {
+      console.error("Failed to create landlord in-app payment notification");
+      if (API_URL && bill?.id) {
+        try {
+          await fetch(`${API_URL}/api/notify`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: notificationType,
+              recordId: bill.id,
+              actorId: session.user.id,
+              payerRole: isFamilyMember ? "family_member" : "tenant",
+              isFamilyMember,
+              amount: safeAmount,
+              paymentMethod: method,
+            }),
+          });
+        } catch (fallbackErr) {
+          console.error(
+            "Fallback backend notify failed for landlord payment:",
+            fallbackErr,
+          );
+        }
+      }
+    }
 
-    const maxRentAllowed = maxMonthsAllowed * rentForCalc;
-    const exceeds = rentPortion > maxRentAllowed;
+    try {
+      if (!API_URL) return;
 
-    setMonthsCovered(totalMonths);
-    setExceedsContract(exceeds);
+      const [{ data: landlordProfile }, { data: landlordEmail }] =
+        await Promise.all([
+          supabase
+            .from("profiles")
+            .select("first_name, last_name, phone")
+            .eq("id", landlordId)
+            .single(),
+          supabase.rpc("get_user_email", {
+            user_id: landlordId,
+          }),
+        ]);
+
+      if (landlordEmail || landlordProfile?.phone) {
+        await fetch(`${API_URL}/api/notify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "cash_payment",
+            recordId: bill?.id,
+            actorId: session.user.id,
+            landlordEmail,
+            landlordPhone: landlordProfile?.phone,
+            landlordName: landlordProfile?.first_name || "Landlord",
+            tenantName: payerName,
+            payerRole: isFamilyMember ? "family_member" : "tenant",
+            isFamilyMember,
+            propertyTitle,
+            amount: safeAmount,
+            monthsCovered: coveredMonths,
+            paymentMethod: method,
+          }),
+        });
+      }
+    } catch (notifyErr) {
+      console.error(
+        "Failed to send landlord email/SMS payment notification:",
+        notifyErr,
+      );
+    }
+  };
+
+  const notifyTenantPaymentSuccess = async (
+    bill: any,
+    options: {
+      status: "submitted" | "confirmed";
+      amount: number;
+      method: string;
+    },
+  ) => {
+    const propertyTitle =
+      bill?.properties?.title || bill?.property?.title || "your property";
+    const methodLabel = getPaymentMethodLabel(options.method);
+    const amountLabel = `₱${(Number(options.amount) || 0).toLocaleString()}`;
+
+    const message =
+      options.status === "confirmed"
+        ? `Your payment of ${amountLabel} for ${propertyTitle} via ${methodLabel} was successful.`
+        : `Your payment of ${amountLabel} for ${propertyTitle} via ${methodLabel} was submitted successfully and is waiting for landlord confirmation.`;
+
+    const notifType =
+      options.status === "confirmed" ? "payment_confirmed" : "payment";
+
+    const tenantNotification = await createNotification(
+      session.user.id,
+      notifType,
+      message,
+      {
+        actor: session.user.id,
+        link: "/payments",
+        data: {
+          payment_request_id: bill?.id,
+          payment_method: options.method,
+          amount_paid: Number(options.amount) || 0,
+          status: options.status,
+        },
+      },
+    );
+
+    if (!tenantNotification) {
+      console.error("Failed to create tenant payment success notification");
+    }
   };
 
   const handlePayMongoPayment = async () => {
     console.log("Handling PayMongo Payment...");
-    if (!selectedBill || !customAmount)
-      return Alert.alert("Error", "Invalid bill or amount");
+    if (!selectedBill) return Alert.alert("Error", "Invalid bill");
+    if (!API_URL) return Alert.alert("Error", "API URL is not configured.");
 
+    const amountVal = parseFloat(customAmount);
+    const validationError = getAmountValidationError(amountVal);
+    if (validationError) return Alert.alert("Error", validationError);
+
+    setIsPayMongoVerifying(false);
     setUploading(true);
     try {
       // Match website: include 'qrph' in allowed methods (create-paymongo-checkout.js line 57)
@@ -1036,31 +1091,59 @@ export default function Payments() {
         `Sending request to: ${API_URL}/api/payments/create-paymongo-checkout`,
       );
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      let res: Response | null = null;
+      let data: any = null;
 
-      const res = await fetch(
-        `${API_URL}/api/payments/create-paymongo-checkout`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            amount: parseFloat(customAmount),
-            description: `Payment for ${selectedBill.property?.title || "Property"}`,
-            remarks: `Payment Request ID: ${selectedBill.id}`,
-            paymentRequestId: selectedBill.id,
-            allowedMethods: allMethods,
-          }),
-          signal: controller.signal,
-        },
-      );
-      clearTimeout(timeoutId);
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        const controller = new AbortController();
+        const timeoutMs = attempt === 1 ? 30000 : 45000;
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-      const data = await res.json();
+        try {
+          res = await fetch(
+            `${API_URL}/api/payments/create-paymongo-checkout`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                amount: amountVal,
+                description: `Payment for ${selectedBill.property?.title || "Property"}`,
+                remarks: `Payment Request ID: ${selectedBill.id}`,
+                paymentRequestId: selectedBill.id,
+                allowedMethods: allMethods,
+              }),
+              signal: controller.signal,
+            },
+          );
+
+          const responseText = await res.text();
+          try {
+            data = responseText ? JSON.parse(responseText) : {};
+          } catch {
+            data = {};
+          }
+          break;
+        } catch (requestErr: any) {
+          if (requestErr?.name === "AbortError" && attempt < 2) {
+            console.warn(
+              `PayMongo checkout request timed out (attempt ${attempt}). Retrying...`,
+            );
+            continue;
+          }
+          throw requestErr;
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      }
+
+      if (!res) {
+        throw new Error("Failed to connect to payment gateway.");
+      }
+
       console.log("PayMongo Response:", data);
 
       if (!res.ok)
-        throw new Error(data.error || "Failed to connect to gateway");
+        throw new Error(data?.error || "Failed to connect to gateway");
 
       if (data.checkoutUrl) {
         const billId = selectedBill.id;
@@ -1069,8 +1152,9 @@ export default function Payments() {
         console.log("Opening browser to:", data.checkoutUrl);
         await WebBrowser.openBrowserAsync(data.checkoutUrl);
 
-        // Reset uploading immediately after browser closes so button is not stuck
+        // Switch from redirecting to verifying state after browser closes
         setUploading(false);
+        setIsPayMongoVerifying(true);
 
         // After browser closes, start polling (matching website lines 1153-1209)
         // Poll every 5 seconds for up to 60 attempts (5 minutes)
@@ -1079,6 +1163,50 @@ export default function Payments() {
 
         let attempts = 0;
         const maxAttempts = 60;
+
+        const resolveSuccessFromBillStatus = async () => {
+          const { data: latestBill, error: latestBillError } = await supabase
+            .from("payment_requests")
+            .select("id, status, payment_method, paid_at")
+            .eq("id", billId)
+            .maybeSingle();
+
+          if (latestBillError) return false;
+
+          const status = String(latestBill?.status || "").toLowerCase();
+          // If backend/webhook already processed the payment, stop polling and treat as success.
+          if (status === "paid" || status === "pending_confirmation") {
+            clearInterval(pollInterval);
+            console.log(
+              "PayMongo payment already reflected in bill status:",
+              status,
+            );
+
+            if (status === "paid") {
+              await notifyLandlordPaymentChannels(
+                selectedBill,
+                amountVal,
+                "paymongo",
+                1,
+              );
+            }
+
+            await notifyTenantPaymentSuccess(selectedBill, {
+              status: status === "paid" ? "confirmed" : "submitted",
+              amount: amountVal,
+              method: "paymongo",
+            });
+
+            Alert.alert("Success", "Payment verified and processed!");
+            setIsPayMongoVerifying(false);
+            setShowPayModal(false);
+            loadData(session.user.id, profile.role);
+            setUploading(false);
+            return true;
+          }
+
+          return false;
+        };
 
         const pollInterval = setInterval(async () => {
           attempts++;
@@ -1098,24 +1226,51 @@ export default function Payments() {
               // SUCCESS: Payment verified
               clearInterval(pollInterval);
               console.log("PayMongo payment verified successfully!");
+              await notifyLandlordPaymentChannels(
+                selectedBill,
+                amountVal,
+                "paymongo",
+                1,
+              );
+              await notifyTenantPaymentSuccess(selectedBill, {
+                status: "confirmed",
+                amount: amountVal,
+                method: "paymongo",
+              });
               Alert.alert("Success", "Payment verified and processed!");
+              setIsPayMongoVerifying(false);
               setShowPayModal(false);
               loadData(session.user.id, profile.role);
               setUploading(false);
               return;
             }
+
+            const alreadyProcessed = await resolveSuccessFromBillStatus();
+            if (alreadyProcessed) return;
           } catch (e) {
             console.log("Poll error (will retry):", e);
+
+            // If API verification call failed but bill status is already updated, stop showing timeout.
+            try {
+              const alreadyProcessed = await resolveSuccessFromBillStatus();
+              if (alreadyProcessed) return;
+            } catch {
+              // Ignore and continue polling.
+            }
           }
 
           if (attempts >= maxAttempts) {
-            // TIMEOUT: Stop polling
-            clearInterval(pollInterval);
-            setUploading(false);
-            Alert.alert(
-              "Verification Pending",
-              "Automatic verification timed out. The payment may still be processing. Please check your payment history later.",
-            );
+            // Before timeout, do one final status check to avoid false timeout messages.
+            const alreadyProcessed = await resolveSuccessFromBillStatus();
+            if (!alreadyProcessed) {
+              clearInterval(pollInterval);
+              setIsPayMongoVerifying(false);
+              setUploading(false);
+              Alert.alert(
+                "Verification Pending",
+                "Automatic verification timed out. The payment may still be processing. Please check your payment history later.",
+              );
+            }
           }
         }, 5000); // Poll every 5 seconds
       } else {
@@ -1124,12 +1279,16 @@ export default function Payments() {
       }
     } catch (e: any) {
       console.error("PayMongo Error:", e);
-      if (e.name === "AbortError") {
+      setIsPayMongoVerifying(false);
+      const errorName = String(e?.name || "");
+      const errorMessage = String(e?.message || "");
+
+      if (errorName === "AbortError") {
         Alert.alert(
           "Timeout",
-          "Connection to server timed out. Check your network.",
+          "Connection timed out while creating checkout. Please try again.",
         );
-      } else if (e.message.includes("Network request failed")) {
+      } else if (errorMessage.includes("Network request failed")) {
         Alert.alert(
           "Connection Error",
           `Could not reach ${API_URL}. Ensure you are on the same Wi-Fi as the server.`,
@@ -1137,51 +1296,19 @@ export default function Payments() {
       } else {
         Alert.alert(
           "Payment Error",
-          e.message || "Failed to initialize payment.",
+          errorMessage || "Failed to initialize payment.",
         );
       }
       setUploading(false);
     }
   };
 
-  const handleCreditPayment = async () => {
-    try {
-      const res = await fetch(`${API_URL}/api/payments/pay-with-credit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          paymentRequestId: selectedBill.id,
-          tenantId: session.user.id,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-
-      await createNotification(
-        selectedBill.landlord,
-        "payment_confirmation_needed",
-        `Tenant paid with credit`,
-        { actor: session.user.id, email: true, sms: true },
-      );
-      Alert.alert("Success", "Paid with credit balance!");
-      setShowPayModal(false);
-      loadData(session.user.id, profile.role);
-    } catch (e: any) {
-      Alert.alert("Error", e.message);
-    }
-  };
-
   const handleStripePayment = async () => {
-    // Basic validation first
-    const amountVal = parseFloat(customAmount) || 0;
-    if (amountVal <= 0) return Alert.alert("Error", "Enter valid amount");
-    if (amountVal < minimumPayment)
-      return Alert.alert(
-        "Error",
-        `Minimum payment is ₱${minimumPayment.toLocaleString()}`,
-      );
-    if (exceedsContract)
-      return Alert.alert("Error", "Amount exceeds contract period");
+    if (!selectedBill) return Alert.alert("Error", "Invalid bill");
+
+    const amountVal = parseFloat(customAmount);
+    const validationError = getAmountValidationError(amountVal);
+    if (validationError) return Alert.alert("Error", validationError);
 
     setUploading(true);
     try {
@@ -1298,12 +1425,17 @@ export default function Payments() {
         console.log("Stripe Status Response:", data);
 
         if (res.ok && data.success) {
-          await createNotification(
-            selectedBill.landlord,
-            "payment_approved",
-            `Tenant paid via Stripe: ₱${customAmount}`,
-            { actor: session.user.id, email: true, sms: true },
+          await notifyLandlordPaymentChannels(
+            selectedBill,
+            parseFloat(customAmount) || 0,
+            "stripe",
+            1,
           );
+          await notifyTenantPaymentSuccess(selectedBill, {
+            status: "confirmed",
+            amount: parseFloat(customAmount) || 0,
+            method: "stripe",
+          });
           Alert.alert("Success", "Payment confirmed via Stripe!");
           setShowPayModal(false);
           loadData(session.user.id, profile.role);
@@ -1331,11 +1463,15 @@ export default function Payments() {
 
   // Extracted helper for actual cash/QR submission (matching website pattern)
   const executePaymentSubmission = async () => {
+    const amountVal = parseFloat(customAmount);
+    const validationError = getAmountValidationError(amountVal);
+    if (validationError) return Alert.alert("Error", validationError);
+
     setShowCashConfirmModal(false);
     setUploading(true);
     try {
       let proofUrl = null;
-      if (proofImage) {
+      if (paymentMethod === "qr_code" && proofImage) {
         const fileName = `${session.user.id}/${Date.now()}.jpg`;
         await supabase.storage
           .from("payment_proofs")
@@ -1348,90 +1484,53 @@ export default function Payments() {
         proofUrl = data.publicUrl;
       }
 
-      const amountVal = parseFloat(customAmount) || 0;
       const isMoveIn = selectedBill.is_move_in_payment;
       const oneTimeCharges =
         (parseFloat(selectedBill.security_deposit_amount) || 0) +
         (parseFloat(selectedBill.water_bill) || 0) +
         (parseFloat(selectedBill.other_bills) || 0) +
         (isMoveIn ? parseFloat(selectedBill.advance_amount) || 0 : 0);
-      const rentPortion = Math.max(
-        0,
-        amountVal + appliedCredit - oneTimeCharges,
-      );
+      const rentPortion = Math.max(0, amountVal - oneTimeCharges);
       const firstMonthRent = parseFloat(selectedBill.rent_amount || 0);
       const advanceAmount = isMoveIn
         ? parseFloat(selectedBill.advance_amount) || 0
         : Math.max(0, rentPortion - firstMonthRent);
 
-      await supabase
+      const { data: updatedRows, error: updateError } = await supabase
         .from("payment_requests")
         .update({
           status: "pending_confirmation",
           paid_at: new Date().toISOString(),
           payment_method: paymentMethod,
-          proof_of_payment_url: proofUrl,
-          tenant_reference_number: referenceNumber.trim() || null,
+          tenant_reference_number:
+            paymentMethod === "qr_code" ? referenceNumber.trim() || null : null,
           advance_amount: advanceAmount,
-          amount_paid: amountVal + appliedCredit,
+          amount_paid: amountVal,
         })
-        .eq("id", selectedBill.id);
+        .eq("id", selectedBill.id)
+        .select("id");
+
+      if (updateError) throw updateError;
+      if (!updatedRows || updatedRows.length === 0) {
+        throw new Error(
+          "Payment update failed. The bill may be protected by security policies. Please contact your landlord or check Supabase RLS settings.",
+        );
+      }
 
       // Notify Landlord
       const totalPaid = amountVal;
-      const monthsText =
-        monthsCovered > 1 ? ` (${monthsCovered} months advance)` : "";
+      await notifyLandlordPaymentChannels(
+        selectedBill,
+        totalPaid,
+        paymentMethod,
+        1,
+      );
 
-      await supabase.from("notifications").insert({
-        recipient: selectedBill.landlord,
-        actor: session.user.id,
-        type: "payment_confirmation_needed",
-        message: `Tenant paid ₱${totalPaid.toLocaleString()} for ${selectedBill.properties?.title || selectedBill.property?.title || "property"} via ${paymentMethod === "qr_code" ? "QR Code" : "Cash"}${monthsText}. Please confirm payment receipt.`,
-        link: "/payments",
-        data: { payment_request_id: selectedBill.id },
+      await notifyTenantPaymentSuccess(selectedBill, {
+        status: "submitted",
+        amount: totalPaid,
+        method: paymentMethod,
       });
-
-      // API Notification (matching website)
-      try {
-        const { data: landlordProfile } = await supabase
-          .from("profiles")
-          .select("first_name, last_name, phone")
-          .eq("id", selectedBill.landlord)
-          .single();
-        const { data: tenantProfile } = await supabase
-          .from("profiles")
-          .select("first_name, last_name")
-          .eq("id", session.user.id)
-          .single();
-        const { data: landlordEmail } = await supabase.rpc("get_user_email", {
-          user_id: selectedBill.landlord,
-        });
-
-        if (landlordEmail || landlordProfile?.phone) {
-          fetch(`${API_URL}/api/notify`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              type: "cash_payment",
-              landlordEmail,
-              landlordPhone: landlordProfile?.phone,
-              landlordName: landlordProfile?.first_name || "Landlord",
-              tenantName:
-                `${tenantProfile?.first_name || ""} ${tenantProfile?.last_name || ""}`.trim() ||
-                "Tenant",
-              propertyTitle:
-                selectedBill.properties?.title ||
-                selectedBill.property?.title ||
-                "property",
-              amount: totalPaid,
-              monthsCovered,
-              paymentMethod,
-            }),
-          }).catch((err) => console.error("Notification failed:", err));
-        }
-      } catch (notifyErr) {
-        console.error("Notify Error:", notifyErr);
-      }
 
       Alert.alert(
         "Success",
@@ -1454,6 +1553,10 @@ export default function Payments() {
     console.log("Submit Payment Clicked. Method:", paymentMethod);
     if (!selectedBill) return;
 
+    const amountVal = parseFloat(customAmount);
+    const validationError = getAmountValidationError(amountVal);
+    if (validationError) return Alert.alert("Error", validationError);
+
     // Route to correct handler
     if (paymentMethod === "paymongo") {
       await handlePayMongoPayment();
@@ -1462,27 +1565,6 @@ export default function Payments() {
     if (paymentMethod === "stripe") {
       await handleStripePayment();
       return;
-    }
-
-    const amountVal = parseFloat(customAmount) || 0;
-
-    // Validation
-    if (amountVal <= 0) return Alert.alert("Error", "Enter valid amount");
-    if (amountVal < minimumPayment)
-      return Alert.alert(
-        "Error",
-        `Minimum payment is ₱${minimumPayment.toLocaleString()}. Partial payments are not allowed.`,
-      );
-    if (
-      exceedsContract ||
-      (maxPaymentLimit !== null &&
-        maxPaymentLimit !== Infinity &&
-        amountVal > maxPaymentLimit)
-    ) {
-      return Alert.alert(
-        "Error",
-        `Payment exceeds contract period. Maximum allowed is ${maxMonthsAllowed} month${maxMonthsAllowed > 1 ? "s" : ""} (₱${maxPaymentLimit?.toLocaleString() || 0}).`,
-      );
     }
 
     if (paymentMethod === "qr_code") {
@@ -1541,29 +1623,6 @@ export default function Payments() {
           parseFloat(p.other_bills || 0);
       return sum + t;
     }, 0);
-
-  const nextPaymentBill =
-    paymentRequests
-      .filter((p: any) => {
-        const status = (p.status || "pending").toLowerCase();
-        return (
-          status === "pending" ||
-          status === "unpaid" ||
-          status === "recorded" ||
-          status === "rejected"
-        );
-      })
-      .sort((a: any, b: any) => {
-        const aTime = a?.due_date
-          ? new Date(a.due_date).getTime()
-          : Number.MAX_SAFE_INTEGER;
-        const bTime = b?.due_date
-          ? new Date(b.due_date).getTime()
-          : Number.MAX_SAFE_INTEGER;
-        return aTime - bTime;
-      })[0] || null;
-
-  const nextPaymentAmount = nextPaymentBill ? getTotal(nextPaymentBill) : 0;
 
   const renderBillCard = (item: any) => {
     const total = getTotal(item);
@@ -2325,62 +2384,6 @@ export default function Payments() {
         </View>
       )}
 
-      <View style={{ paddingHorizontal: 15, paddingBottom: 10 }}>
-        <View
-          style={[
-            styles.nextPaymentCard,
-            {
-              backgroundColor: isDark ? colors.card : "white",
-              borderColor: isDark ? colors.cardBorder : "#f0f0f0",
-            },
-          ]}
-        >
-          <Text
-            style={[
-              styles.nextPaymentLabel,
-              { color: isDark ? colors.textMuted : "#6b7280" },
-            ]}
-          >
-            Next Payment
-          </Text>
-          <Text
-            style={[
-              styles.nextPaymentAmount,
-              { color: isDark ? colors.text : "#111" },
-            ]}
-          >
-            ₱
-            {nextPaymentAmount.toLocaleString("en-US", {
-              minimumFractionDigits: 2,
-            })}
-          </Text>
-          {nextPaymentBill?.due_date ? (
-            <Text
-              style={[
-                styles.nextPaymentDate,
-                { color: isDark ? colors.textMuted : "#9ca3af" },
-              ]}
-            >
-              Due{" "}
-              {new Date(nextPaymentBill.due_date).toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-              })}
-            </Text>
-          ) : (
-            <Text
-              style={[
-                styles.nextPaymentDate,
-                { color: isDark ? colors.textMuted : "#9ca3af" },
-              ]}
-            >
-              No upcoming due date
-            </Text>
-          )}
-        </View>
-      </View>
-
       <View
         style={[
           styles.tabContainer,
@@ -2601,14 +2604,75 @@ export default function Payments() {
                     setFormData({ ...formData, other_bills: t })
                   }
                 />
-                <Text style={styles.label}>DUE DATE (YYYY-MM-DD)</Text>
-                <TextInput
-                  style={styles.input}
-                  onChangeText={(t) =>
-                    setFormData({ ...formData, other_due_date: t })
-                  }
-                  placeholder="YYYY-MM-DD"
-                />
+                <Text style={styles.label}>DUE DATE</Text>
+                <TouchableOpacity
+                  style={[
+                    styles.input,
+                    {
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                    },
+                  ]}
+                  onPress={() => {
+                    if (Platform.OS === "android") {
+                      DateTimePickerAndroid.open({
+                        value: formData.other_due_date
+                          ? new Date(formData.other_due_date)
+                          : new Date(),
+                        mode: "date",
+                        onChange: (_e: any, selected?: Date) => {
+                          if (selected) {
+                            setFormData({
+                              ...formData,
+                              other_due_date: selected
+                                .toISOString()
+                                .split("T")[0],
+                            });
+                          }
+                        },
+                      });
+                    } else {
+                      setShowBillDueDatePicker(true);
+                    }
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: formData.other_due_date ? "#111" : "#9ca3af",
+                      fontSize: 14,
+                    }}
+                  >
+                    {formData.other_due_date
+                      ? new Date(formData.other_due_date).toLocaleDateString(
+                          "en-US",
+                          { month: "long", day: "numeric", year: "numeric" },
+                        )
+                      : "Select date"}
+                  </Text>
+                  <Ionicons name="calendar-outline" size={18} color="#6b7280" />
+                </TouchableOpacity>
+                {Platform.OS === "ios" && showBillDueDatePicker && (
+                  <DateTimePicker
+                    value={
+                      formData.other_due_date
+                        ? new Date(formData.other_due_date)
+                        : new Date()
+                    }
+                    mode="date"
+                    display="inline"
+                    themeVariant={isDark ? "dark" : "light"}
+                    onChange={(_e: any, selected?: Date) => {
+                      if (selected) {
+                        setFormData({
+                          ...formData,
+                          other_due_date: selected.toISOString().split("T")[0],
+                        });
+                      }
+                      setShowBillDueDatePicker(false);
+                    }}
+                  />
+                )}
               </View>
             )}
 
@@ -2704,45 +2768,64 @@ export default function Payments() {
             </TouchableOpacity>
           </View>
           <ScrollView>
-            <Text style={styles.label}>RENT AMOUNT</Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="numeric"
-              value={editFormData.rent_amount}
-              onChangeText={(t) =>
-                setEditFormData({ ...editFormData, rent_amount: t })
-              }
-            />
+            {(editFormData._original_rent > 0 ||
+              (editFormData._original_water === 0 &&
+                editFormData._original_electrical === 0 &&
+                editFormData._original_other === 0)) && (
+              <>
+                <Text style={styles.label}>RENT AMOUNT</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  value={editFormData.rent_amount}
+                  onChangeText={(t) =>
+                    setEditFormData({ ...editFormData, rent_amount: t })
+                  }
+                />
+              </>
+            )}
 
-            <Text style={styles.label}>WATER BILL</Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="numeric"
-              value={editFormData.water_bill}
-              onChangeText={(t) =>
-                setEditFormData({ ...editFormData, water_bill: t })
-              }
-            />
+            {editFormData._original_water > 0 && (
+              <>
+                <Text style={styles.label}>WATER BILL</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  value={editFormData.water_bill}
+                  onChangeText={(t) =>
+                    setEditFormData({ ...editFormData, water_bill: t })
+                  }
+                />
+              </>
+            )}
 
-            <Text style={styles.label}>ELECTRICAL BILL</Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="numeric"
-              value={editFormData.electrical_bill}
-              onChangeText={(t) =>
-                setEditFormData({ ...editFormData, electrical_bill: t })
-              }
-            />
+            {editFormData._original_electrical > 0 && (
+              <>
+                <Text style={styles.label}>ELECTRICAL BILL</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  value={editFormData.electrical_bill}
+                  onChangeText={(t) =>
+                    setEditFormData({ ...editFormData, electrical_bill: t })
+                  }
+                />
+              </>
+            )}
 
-            <Text style={styles.label}>OTHER BILLS</Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="numeric"
-              value={editFormData.other_bills}
-              onChangeText={(t) =>
-                setEditFormData({ ...editFormData, other_bills: t })
-              }
-            />
+            {editFormData._original_other > 0 && (
+              <>
+                <Text style={styles.label}>OTHER BILLS</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  value={editFormData.other_bills}
+                  onChangeText={(t) =>
+                    setEditFormData({ ...editFormData, other_bills: t })
+                  }
+                />
+              </>
+            )}
 
             <Text style={styles.label}>DESCRIPTION</Text>
             <TextInput
@@ -2753,14 +2836,82 @@ export default function Payments() {
               }
             />
 
-            <Text style={styles.label}>DUE DATE (YYYY-MM-DD)</Text>
-            <TextInput
-              style={styles.input}
-              value={editFormData.due_date}
-              onChangeText={(t) =>
-                setEditFormData({ ...editFormData, due_date: t })
-              }
-            />
+            <Text style={styles.label}>DUE DATE</Text>
+            <TouchableOpacity
+              style={[
+                styles.input,
+                {
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                },
+              ]}
+              onPress={() => {
+                if (Platform.OS === "android") {
+                  DateTimePickerAndroid.open({
+                    value: editFormData.due_date
+                      ? new Date(editFormData.due_date)
+                      : new Date(),
+                    mode: "date",
+                    onChange: (_e: any, selected?: Date) => {
+                      if (selected) {
+                        setEditFormData({
+                          ...editFormData,
+                          due_date: selected.toISOString().split("T")[0],
+                        });
+                      }
+                    },
+                  });
+                } else {
+                  setShowEditDueDatePicker(true);
+                }
+              }}
+            >
+              <Text
+                style={{
+                  color: editFormData.due_date
+                    ? isDark
+                      ? colors.text
+                      : "#111"
+                    : "#9ca3af",
+                  fontSize: 14,
+                }}
+              >
+                {editFormData.due_date
+                  ? new Date(editFormData.due_date).toLocaleDateString(
+                      "en-US",
+                      {
+                        month: "long",
+                        day: "numeric",
+                        year: "numeric",
+                      },
+                    )
+                  : "Select date"}
+              </Text>
+              <Ionicons name="calendar-outline" size={18} color="#6b7280" />
+            </TouchableOpacity>
+
+            {Platform.OS === "ios" && showEditDueDatePicker && (
+              <DateTimePicker
+                value={
+                  editFormData.due_date
+                    ? new Date(editFormData.due_date)
+                    : new Date()
+                }
+                mode="date"
+                display="inline"
+                themeVariant={isDark ? "dark" : "light"}
+                onChange={(_e: any, selected?: Date) => {
+                  if (selected) {
+                    setEditFormData({
+                      ...editFormData,
+                      due_date: selected.toISOString().split("T")[0],
+                    });
+                  }
+                  setShowEditDueDatePicker(false);
+                }}
+              />
+            )}
 
             <TouchableOpacity
               onPress={handleUpdateBill}
@@ -3154,128 +3305,6 @@ export default function Payments() {
               )}
             </View>
 
-            {/* Amount Input */}
-            <View style={{ marginBottom: 24 }}>
-              <Text
-                style={{
-                  fontSize: 13,
-                  fontWeight: "600",
-                  color: isDark ? colors.textMuted : "#6b7280",
-                  marginBottom: 8,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
-                }}
-              >
-                Amount to Pay
-              </Text>
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  backgroundColor: isDark ? colors.card : "#fff",
-                  borderWidth: 1,
-                  borderColor: isDark ? colors.cardBorder : "#e5e7eb",
-                  borderRadius: 16,
-                  paddingHorizontal: 16,
-                }}
-              >
-                <Text
-                  style={{
-                    fontSize: 18,
-                    fontWeight: "700",
-                    color: isDark ? colors.text : "#111",
-                    marginRight: 8,
-                  }}
-                >
-                  ₱
-                </Text>
-                <TextInput
-                  style={{
-                    flex: 1,
-                    height: 56,
-                    fontSize: 18,
-                    fontWeight: "700",
-                    color: isDark ? colors.text : "#111",
-                  }}
-                  value={customAmount}
-                  onChangeText={calculateMonthsCovered}
-                  keyboardType="numeric"
-                  placeholderTextColor={isDark ? colors.textMuted : "#c4c4c4"}
-                />
-              </View>
-
-              {/* Messages for Amount Input */}
-              <View style={{ marginTop: 8, paddingHorizontal: 4 }}>
-                {monthsCovered > 1 && !exceedsContract && (
-                  <View>
-                    <Text
-                      style={{
-                        color: "#059669",
-                        fontSize: 13,
-                        fontWeight: "700",
-                      }}
-                    >
-                      ✓ Covers {monthsCovered} months
-                    </Text>
-                    {contractEndDate && (
-                      <Text
-                        style={{ color: "#6b7280", fontSize: 11, marginTop: 2 }}
-                      >
-                        Until{" "}
-                        {new Date(
-                          new Date(selectedBill.due_date).setMonth(
-                            new Date(selectedBill.due_date).getMonth() +
-                              monthsCovered -
-                              1,
-                          ),
-                        ).toLocaleDateString("en-US", {
-                          month: "short",
-                          year: "numeric",
-                        })}
-                      </Text>
-                    )}
-                  </View>
-                )}
-
-                {exceedsContract && (
-                  <View>
-                    <Text
-                      style={{
-                        color: "#dc2626",
-                        fontSize: 13,
-                        fontWeight: "700",
-                      }}
-                    >
-                      ⚠ Exceeds Contract Period!
-                    </Text>
-                    <Text
-                      style={{ color: "#dc2626", fontSize: 11, marginTop: 2 }}
-                    >
-                      Max allowed is {maxMonthsAllowed} months (₱
-                      {maxPaymentLimit?.toLocaleString()}). Contract ends{" "}
-                      {contractEndDate?.toLocaleDateString("en-US", {
-                        month: "short",
-                        year: "numeric",
-                      })}
-                      .
-                    </Text>
-                  </View>
-                )}
-
-                {isBelowMinimum && (
-                  <Text
-                    style={{
-                      color: "#dc2626",
-                      fontSize: 13,
-                      fontWeight: "700",
-                    }}
-                  >
-                    Minimum: ₱{minimumPayment.toLocaleString()}
-                  </Text>
-                )}
-              </View>
-            </View>
-
             <Text
               style={{
                 fontSize: 16,
@@ -3291,7 +3320,11 @@ export default function Payments() {
             <View>
               {/* Cash - Always available */}
               <TouchableOpacity
-                onPress={() => setPaymentMethod("cash")}
+                onPress={() => {
+                  setPaymentMethod("cash");
+                  setProofImage(null);
+                  setReferenceNumber("");
+                }}
                 activeOpacity={0.9}
                 style={[
                   styles.methodCard,
@@ -3338,7 +3371,7 @@ export default function Payments() {
                       { color: isDark ? colors.textMuted : "#6b7280" },
                     ]}
                   >
-                    Upload proof of payment
+                    No proof required
                   </Text>
                 </View>
                 <View
@@ -3429,53 +3462,10 @@ export default function Payments() {
                   </View>
                 </TouchableOpacity>
               )}
-
-              {/* Credit Balance (if available) */}
-              {appliedCredit > 0 && (
-                <TouchableOpacity
-                  onPress={handleCreditPayment}
-                  disabled={minimumPayment > 0}
-                  activeOpacity={0.9}
-                  style={[
-                    styles.methodCard,
-                    minimumPayment <= 0 && styles.methodCardSelected,
-                    { opacity: minimumPayment > 0 ? 0.6 : 1 },
-                  ]}
-                >
-                  <View style={styles.methodIcon}>
-                    <Ionicons
-                      name="wallet"
-                      size={22}
-                      color={minimumPayment <= 0 ? "#048818" : "#6b7280"}
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.methodTitle}>Wallet Balance</Text>
-                    <Text style={styles.methodSubtitle}>
-                      Available: ₱{appliedCredit.toLocaleString()}
-                    </Text>
-                  </View>
-                  {minimumPayment <= 0 ? (
-                    <View style={[styles.radio, styles.radioSelected]}>
-                      <View style={styles.radioInner} />
-                    </View>
-                  ) : (
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        fontWeight: "700",
-                        color: "#dc2626",
-                      }}
-                    >
-                      Insufficient
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              )}
             </View>
 
             {/* Cash / QR Code Proof Fields (matching website) */}
-            {(paymentMethod === "cash" || paymentMethod === "qr_code") && (
+            {paymentMethod === "qr_code" && (
               <View
                 style={{
                   marginTop: 24,
@@ -3568,10 +3558,11 @@ export default function Payments() {
           >
             <TouchableOpacity
               onPress={submitPayment}
-              disabled={uploading}
+              disabled={uploading || isPayMongoVerifying}
               activeOpacity={0.9}
               style={{
-                backgroundColor: uploading ? "#555" : "#000000ff",
+                backgroundColor:
+                  uploading || isPayMongoVerifying ? "#555" : "#000000ff",
                 height: 58,
                 borderRadius: 29,
                 alignItems: "center",
@@ -3579,14 +3570,23 @@ export default function Payments() {
                 flexDirection: "row",
                 gap: 10,
                 shadowColor: "#000000ff",
-                shadowOpacity: uploading ? 0.1 : 0.3,
+                shadowOpacity: uploading || isPayMongoVerifying ? 0.1 : 0.3,
                 shadowRadius: 8,
                 shadowOffset: { width: 0, height: 4 },
-                elevation: uploading ? 2 : 6,
-                opacity: uploading ? 0.7 : 1,
+                elevation: uploading || isPayMongoVerifying ? 2 : 6,
+                opacity: uploading || isPayMongoVerifying ? 0.7 : 1,
               }}
             >
-              {uploading ? (
+              {isPayMongoVerifying ? (
+                <>
+                  <ActivityIndicator color="white" size="small" />
+                  <Text
+                    style={{ color: "white", fontSize: 15, fontWeight: "700" }}
+                  >
+                    Verifying payment...
+                  </Text>
+                </>
+              ) : uploading ? (
                 <>
                   <ActivityIndicator color="white" size="small" />
                   <Text
@@ -3599,7 +3599,7 @@ export default function Payments() {
                 <Text
                   style={{ color: "white", fontSize: 16, fontWeight: "800" }}
                 >
-                  Continue to Pay ₱{customAmount}
+                  Continue to Pay ₱{formatCurrencyAmount(customAmount)}
                 </Text>
               )}
             </TouchableOpacity>
@@ -3893,27 +3893,6 @@ const styles = StyleSheet.create({
   tabActive: { backgroundColor: "black" },
   tabText: { color: "#666", fontWeight: "bold", fontSize: 12 },
   tabTextActive: { color: "white" },
-  nextPaymentCard: {
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  nextPaymentLabel: {
-    fontSize: 12,
-    fontWeight: "700",
-    marginBottom: 4,
-  },
-  nextPaymentAmount: {
-    fontSize: 28,
-    fontWeight: "900",
-    lineHeight: 34,
-  },
-  nextPaymentDate: {
-    fontSize: 11,
-    fontWeight: "600",
-    marginTop: 4,
-  },
   label: {
     fontSize: 12,
     fontWeight: "bold",

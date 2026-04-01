@@ -5,19 +5,18 @@ import { Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useRef, useState } from "react";
 import {
-  LogBox,
-  Platform,
-  StatusBar,
-  Text,
-  TouchableOpacity,
-  View,
+    LogBox,
+    Platform,
+    StatusBar,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePushNotifications } from "../hooks/usePushNotifications";
 import { useRealtimeNotifications } from "../hooks/useRealtimeNotifications";
 import { supabase } from "../lib/supabase";
 import { ThemeProvider, useTheme } from "../lib/theme";
-
 
 SplashScreen.preventAutoHideAsync();
 
@@ -84,6 +83,7 @@ const STACK_HEADER_ROUTES = new Set([
   "properties/[id]",
   "properties/new",
   "properties/edit/[id]",
+  "rented-tenant/[id]",
 ]);
 
 function AppHeader({
@@ -113,30 +113,7 @@ function AppHeader({
 
   return (
     <View style={{ backgroundColor }}>
-      <View
-        style={{
-          backgroundColor: "#ff0000",
-          paddingTop: topInset,
-          paddingBottom: 4,
-          paddingHorizontal: 12,
-          alignItems: "center",
-          justifyContent: "center",
-          borderBottomWidth: 1,
-          borderBottomColor: "#ff0000",
-        }}
-      >
-        <Text
-          style={{
-            fontSize: 10,
-            color: "#ffffff",
-            fontWeight: "600",
-            textAlign: "center",
-          }}
-        >
-          This is a beta app, so expect bugs and errors. We are currently
-          working on it.
-        </Text>
-      </View>
+      <View style={{ paddingTop: topInset }} />
 
       {showNavigationRow ? (
         <View
@@ -208,6 +185,8 @@ function ThemedStack() {
         <Stack.Screen name="index" />
         <Stack.Screen name="welcome" />
         <Stack.Screen name="login" />
+        <Stack.Screen name="admin" />
+        <Stack.Screen name="favorites" options={{ headerShown: false }} />
         <Stack.Screen name="terms" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen
@@ -221,6 +200,10 @@ function ThemedStack() {
         <Stack.Screen
           name="properties/edit/[id]"
           options={{ title: "Edit Property" }}
+        />
+        <Stack.Screen
+          name="rented-tenant/[id]"
+          options={{ title: "Rented Tenant" }}
         />
       </Stack>
     </View>

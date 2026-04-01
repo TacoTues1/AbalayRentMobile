@@ -2,17 +2,17 @@ import { Ionicons } from "@expo/vector-icons";
 import { Tabs, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  AppState,
-  Image,
-  Platform,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    AppState,
+    Image,
+    Platform,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import Animated, {
-  useAnimatedStyle,
-  withTiming,
+    useAnimatedStyle,
+    withTiming,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
@@ -41,6 +41,7 @@ function NotificationsTabIcon({
   color: string;
   focused: boolean;
 }) {
+  const { isDark, colors } = useTheme();
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const appState = useRef(AppState.currentState);
 
@@ -140,7 +141,7 @@ function NotificationsTabIcon({
             alignItems: "center",
             justifyContent: "center",
             borderWidth: 1.5,
-            borderColor: "white",
+            borderColor: isDark ? colors.tabBarBg : "white",
             paddingHorizontal: 3,
           }}
         >
@@ -160,6 +161,7 @@ function MessagesTabIcon({
   color: string;
   focused: boolean;
 }) {
+  const { isDark, colors } = useTheme();
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const appState = useRef(AppState.currentState);
 
@@ -259,7 +261,7 @@ function MessagesTabIcon({
             alignItems: "center",
             justifyContent: "center",
             borderWidth: 1.5,
-            borderColor: "#fff",
+            borderColor: isDark ? colors.tabBarBg : "#fff",
             paddingHorizontal: 3,
           }}
         >
@@ -279,6 +281,7 @@ function ProfileTabIcon({
   color: string;
   focused: boolean;
 }) {
+  const { isDark, colors } = useTheme();
   const [avatarUrl, setAvatarUrl] = useState<string>("");
   const [fallbackInitial, setFallbackInitial] = useState<string>("U");
 
@@ -347,7 +350,13 @@ function ProfileTabIcon({
           borderRadius: 12,
           overflow: "hidden",
           borderWidth: focused ? 2 : 1,
-          borderColor: focused ? "#111" : "#d1d5db",
+          borderColor: focused
+            ? isDark
+              ? colors.iconActive
+              : "#111"
+            : isDark
+              ? colors.cardBorder
+              : "#d1d5db",
         }}
       >
         <Image
@@ -367,13 +376,31 @@ function ProfileTabIcon({
         alignItems: "center",
         justifyContent: "center",
         borderWidth: focused ? 2 : 1,
-        borderColor: focused ? "#111" : "#d1d5db",
-        backgroundColor: focused ? "#111" : "#f3f4f6",
+        borderColor: focused
+          ? isDark
+            ? colors.iconActive
+            : "#111"
+          : isDark
+            ? colors.cardBorder
+            : "#d1d5db",
+        backgroundColor: focused
+          ? isDark
+            ? colors.iconActive
+            : "#111"
+          : isDark
+            ? colors.card
+            : "#f3f4f6",
       }}
     >
       <Text
         style={{
-          color: focused ? "#fff" : "#374151",
+          color: focused
+            ? isDark
+              ? "#111"
+              : "#fff"
+            : isDark
+              ? colors.text
+              : "#374151",
           fontSize: 11,
           fontWeight: "700",
         }}
@@ -386,8 +413,15 @@ function ProfileTabIcon({
 
 const VISIBLE_TABS = ["index", "messages", "notifications", "profile"];
 
-const TabBarItem = ({ route, options, isFocused, onPress, isDark }: any) => {
-  const activeColor = isDark ? "rgba(255,255,255,0.1)" : "rgba(240,241,243,1)";
+const TabBarItem = ({
+  route,
+  options,
+  isFocused,
+  onPress,
+  isDark,
+  colors,
+}: any) => {
+  const activeColor = isDark ? "rgba(255,255,255,0.12)" : colors.badge;
 
   const itemSizeStyle = useAnimatedStyle(() => {
     return {
@@ -432,13 +466,7 @@ const TabBarItem = ({ route, options, isFocused, onPress, isDark }: any) => {
         {options.tabBarIcon
           ? options.tabBarIcon({
               focused: isFocused,
-              color: isFocused
-                ? isDark
-                  ? "#fff"
-                  : "#111"
-                : isDark
-                  ? "rgba(255,255,255,0.4)"
-                  : "#9ca3af",
+              color: isFocused ? colors.iconActive : colors.iconDefault,
               size: 20,
             })
           : null}
@@ -538,6 +566,7 @@ const CustomTabBar = ({ state, descriptors, navigation }: any) => {
               isFocused={isFocused}
               onPress={onPress}
               isDark={isDark}
+              colors={colors}
             />
           );
         })}
@@ -550,7 +579,9 @@ const CustomTabBar = ({ state, descriptors, navigation }: any) => {
             width: 48,
             height: 48,
             borderRadius: 24,
-            backgroundColor: "#000",
+            backgroundColor: isDark ? colors.card : "#000",
+            borderWidth: isDark ? 1 : 0,
+            borderColor: isDark ? colors.tabBarBorder : "transparent",
             elevation: 5,
             shadowColor: "#000",
             shadowOffset: { width: 0, height: 2 },
@@ -561,7 +592,11 @@ const CustomTabBar = ({ state, descriptors, navigation }: any) => {
           }}
           onPress={() => router.push("/properties/new")}
         >
-          <Ionicons name="add" size={24} color="#fff" />
+          <Ionicons
+            name="add"
+            size={24}
+            color={isDark ? colors.text : "#fff"}
+          />
         </TouchableOpacity>
       )}
     </View>
@@ -622,7 +657,11 @@ export default function TabLayout() {
         name="profile"
         options={{
           tabBarIcon: ({ color, focused }) => (
-            <ProfileTabIcon color={color} focused={focused} />
+            <Ionicons
+              name={focused ? "settings" : "settings-outline"}
+              size={22}
+              color={color}
+            />
           ),
         }}
       />
@@ -635,6 +674,12 @@ export default function TabLayout() {
       <Tabs.Screen name="applications" options={{ href: null }} />
       <Tabs.Screen name="terms" options={{ href: null }} />
       <Tabs.Screen name="assigntenant" options={{ href: null }} />
+      <Tabs.Screen name="landlords" options={{ href: null }} />
+      <Tabs.Screen name="landlord/[id]" options={{ href: null }} />
+      <Tabs.Screen name="active-properties" options={{ href: null }} />
+      <Tabs.Screen name="rented-tenant/[id]" options={{ href: null }} />
+      <Tabs.Screen name="add-family" options={{ href: null }} />
+      <Tabs.Screen name="properties/edit/[id]" options={{ href: null }} />
     </Tabs>
   );
 }
