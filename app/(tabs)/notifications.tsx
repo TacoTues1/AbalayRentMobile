@@ -2,14 +2,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Alert,
+    Animated,
+    Easing,
+    FlatList,
+    RefreshControl,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
@@ -23,6 +24,59 @@ export default function NotificationsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [session, setSession] = useState<any>(null);
+  const shimmerAnim = useState(new Animated.Value(0))[0];
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.timing(shimmerAnim, {
+        toValue: 1,
+        duration: 900,
+        easing: Easing.inOut(Easing.ease),
+        useNativeDriver: true,
+      }),
+    ).start();
+  }, [shimmerAnim]);
+
+  const SkeletonBlock = ({
+    width,
+    height,
+    style,
+  }: {
+    width: string | number;
+    height: number;
+    style?: any;
+  }) => {
+    const translateX = shimmerAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [-160, 160],
+    });
+
+    return (
+      <View
+        style={[
+          styles.skeletonBase,
+          {
+            width,
+            height,
+            backgroundColor: isDark ? "#1f2937" : "#e5e7eb",
+          },
+          style,
+        ]}
+      >
+        <Animated.View
+          style={[
+            styles.skeletonShimmer,
+            {
+              transform: [{ translateX }],
+              backgroundColor: isDark
+                ? "rgba(255,255,255,0.08)"
+                : "rgba(255,255,255,0.6)",
+            },
+          ]}
+        />
+      </View>
+    );
+  };
 
   // 1. Check Session & Load Data
   useEffect(() => {
@@ -268,6 +322,48 @@ export default function NotificationsPage() {
     return { color: "#666" };
   };
 
+  const renderSkeletonCard = (index: number) => (
+    <View
+      key={`notification-skeleton-${index}`}
+      style={[
+        styles.card,
+        {
+          backgroundColor: isDark ? colors.card : "white",
+          borderColor: isDark ? colors.cardBorder : "#eee",
+        },
+      ]}
+    >
+      <View style={styles.cardPressArea}>
+        <View style={styles.cardContent}>
+          <View style={styles.headerRow}>
+            <SkeletonBlock
+              width={96}
+              height={12}
+              style={{ borderRadius: 6, marginRight: 8 }}
+            />
+            <SkeletonBlock width={8} height={8} style={{ borderRadius: 4 }} />
+          </View>
+          <SkeletonBlock
+            width="95%"
+            height={12}
+            style={{ borderRadius: 6, marginBottom: 6 }}
+          />
+          <SkeletonBlock
+            width="80%"
+            height={12}
+            style={{ borderRadius: 6, marginBottom: 10 }}
+          />
+          <SkeletonBlock width={120} height={10} style={{ borderRadius: 5 }} />
+        </View>
+      </View>
+
+      <View style={styles.cardActions}>
+        <SkeletonBlock width={82} height={28} style={{ borderRadius: 8 }} />
+        <SkeletonBlock width={20} height={20} style={{ borderRadius: 10 }} />
+      </View>
+    </View>
+  );
+
   const hasUnread = notifications.some((n) => !n.read);
   const hasRead = notifications.some((n) => n.read);
 
@@ -353,11 +449,11 @@ export default function NotificationsPage() {
       </View>
 
       {loading ? (
-        <ActivityIndicator
-          size="large"
-          color={isDark ? colors.text : "black"}
-          style={{ marginTop: 50 }}
-        />
+        <View style={{ padding: 20, paddingBottom: 80 }}>
+          {Array.from({ length: 6 }).map((_, index) =>
+            renderSkeletonCard(index),
+          )}
+        </View>
       ) : (
         <FlatList
           data={notifications}
@@ -495,6 +591,14 @@ const styles = StyleSheet.create({
   },
   bulkActionTextDisabled: {
     color: "#9ca3af",
+  },
+
+  skeletonBase: {
+    overflow: "hidden",
+  },
+  skeletonShimmer: {
+    width: "45%",
+    height: "100%",
   },
 
   card: {

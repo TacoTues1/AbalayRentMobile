@@ -1,25 +1,26 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import Constants from "expo-constants";
 import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { getUserRouteById } from "../../lib/authRedirect";
 import { supabase } from "../../lib/supabase";
 
 WebBrowser.maybeCompleteAuthSession();
-const GOOGLE_OAUTH_ENABLED = false;
+const GOOGLE_OAUTH_ENABLED =
+  (process.env.EXPO_PUBLIC_GOOGLE_OAUTH_ENABLED ?? "true").toLowerCase() !==
+  "false";
 
 export default function LoginForm({
   loading,
@@ -106,7 +107,7 @@ export default function LoginForm({
     }
   };
 
-  const performOAuth = async (provider: "google" | "facebook") => {
+  const performOAuth = async () => {
     const waitForSession = async () => {
       for (let i = 0; i < 20; i += 1) {
         const {
@@ -155,62 +156,110 @@ export default function LoginForm({
       }
     };
 
+    const callbackContainsOAuthResult = (callbackUrl: string) => {
+      const [beforeHash, hash = ""] = callbackUrl.split("#");
+      const query = beforeHash.includes("?") ? beforeHash.split("?")[1] : "";
+      const queryParams = new URLSearchParams(query);
+      const hashParams = new URLSearchParams(hash);
+
+      hashParams.forEach((value, key) => {
+        queryParams.set(key, value);
+      });
+
+      return Boolean(
+        queryParams.get("code") ||
+        queryParams.get("access_token") ||
+        queryParams.get("refresh_token") ||
+        queryParams.get("error") ||
+        queryParams.get("error_description"),
+      );
+    };
+
     try {
       setLoading(true);
 
-      const isExpoGo = Constants.executionEnvironment === "storeClient";
-      const hostUri = (Constants as any)?.expoConfig?.hostUri as
-        | string
-        | undefined;
-      const normalizedHostUri = hostUri
-        ? hostUri.replace(/^exps?:\/\//, "").replace(/\/+$/, "")
-        : undefined;
-
-      const redirectUrl = isExpoGo
-        ? normalizedHostUri
-          ? `exp://${normalizedHostUri}/--/`
-          : Linking.createURL("")
-        : "abalay://auth/callback";
-
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider,
-        options: {
-          redirectTo: redirectUrl,
-          skipBrowserRedirect: true,
-        },
+      const redirectUrl = Linking.createURL("auth/callback", {
+        scheme: "abalay",
       });
+      const supabaseProjectUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 
-      if (error) throw error;
-      if (!data?.url) throw new Error("Unable to start OAuth login.");
+      if (!supabaseProjectUrl || supabaseProjectUrl.includes("placeholder")) {
+        throw new Error(
+          "EXPO_PUBLIC_SUPABASE_URL is missing. Cannot start Google sign-in.",
+        );
+      }
 
-      const callbackUrlPromise = new Promise<string | null>((resolve) => {
-        const sub = Linking.addEventListener("url", ({ url }) => {
-          sub.remove();
-          resolve(url);
+      const edgeCallbackUrl = `${supabaseProjectUrl.replace(/\/+$/, "")}/functions/v1/oauth-mobile-callback?redirect_to=${encodeURIComponent(redirectUrl)}`;
+
+      const startOAuthFlow = async (oauthRedirectTo: string) => {
+        const oauthOptions = {
+          redirectTo: oauthRedirectTo,
+          skipBrowserRedirect: true,
+        };
+
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider: "google",
+          options: oauthOptions,
         });
 
-        setTimeout(() => {
-          sub.remove();
-          resolve(null);
-        }, 12000);
-      });
+        if (error) throw error;
+        if (!data?.url) throw new Error("Unable to start OAuth login.");
 
-      const result = await WebBrowser.openAuthSessionAsync(
-        data.url,
-        redirectUrl,
-      );
+        const callbackUrlPromise = new Promise<string | null>((resolve) => {
+          const sub = Linking.addEventListener("url", ({ url }) => {
+            sub.remove();
+            resolve(url);
+          });
 
-      let callbackUrl: string | null =
-        result.type === "success" && result.url ? result.url : null;
+          setTimeout(() => {
+            sub.remove();
+            resolve(null);
+          }, 20000);
+        });
 
-      if (!callbackUrl) {
-        callbackUrl = await callbackUrlPromise;
+        const result = await WebBrowser.openAuthSessionAsync(
+          data.url,
+          redirectUrl,
+        );
+
+        let callbackUrl: string | null =
+          result.type === "success" && result.url ? result.url : null;
+
+        if (!callbackUrl) {
+          callbackUrl = await callbackUrlPromise;
+        }
+
+        if (!callbackUrl) {
+          const initialUrl = await Linking.getInitialURL();
+          if (initialUrl) {
+            callbackUrl = initialUrl;
+          }
+        }
+
+        return { callbackUrl, resultType: result.type };
+      };
+
+      // Primary: through edge callback. Fallback: direct app callback.
+      let { callbackUrl, resultType } = await startOAuthFlow(edgeCallbackUrl);
+
+      if (callbackUrl && !callbackContainsOAuthResult(callbackUrl)) {
+        callbackUrl = null;
       }
 
       if (!callbackUrl) {
-        const initialUrl = await Linking.getInitialURL();
-        if (initialUrl) {
-          callbackUrl = initialUrl;
+        const quickSessionCheck = await waitForSession();
+        if (quickSessionCheck) {
+          const destination = await getUserRouteById(quickSessionCheck.user.id);
+          router.replace(destination as any);
+          return;
+        }
+
+        const fallback = await startOAuthFlow(redirectUrl);
+        callbackUrl = fallback.callbackUrl;
+        resultType = fallback.resultType;
+
+        if (callbackUrl && !callbackContainsOAuthResult(callbackUrl)) {
+          callbackUrl = null;
         }
       }
 
@@ -221,7 +270,7 @@ export default function LoginForm({
       const session = await waitForSession();
       if (!session) {
         throw new Error(
-          `No session returned using redirect URL: ${redirectUrl}. Result type: ${result.type}`,
+          `No session returned using redirect URL: ${redirectUrl}. Result type: ${resultType}`,
         );
       }
 
@@ -309,7 +358,7 @@ export default function LoginForm({
             styles.socialBtn,
             (loading || !GOOGLE_OAUTH_ENABLED) && styles.disabled,
           ]}
-          onPress={() => performOAuth("google")}
+          onPress={performOAuth}
           disabled={loading || !GOOGLE_OAUTH_ENABLED}
         >
           <Image
@@ -318,20 +367,11 @@ export default function LoginForm({
           />
           <Text style={styles.socialText}>Google</Text>
         </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.socialBtn, { opacity: 0.5 }]}
-          onPress={() => performOAuth("facebook")}
-          disabled={true}
-        >
-          <Ionicons name="logo-facebook" size={24} color="#1877F2" />
-          <Text style={styles.socialText}>Facebook</Text>
-        </TouchableOpacity>
       </View>
 
       {!GOOGLE_OAUTH_ENABLED && (
         <Text style={styles.tempDisabledNote}>
-          Google & Facebook sign-in is temporarily unavailable.
+          Google sign-in is temporarily unavailable.
         </Text>
       )}
 

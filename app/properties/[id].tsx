@@ -110,16 +110,72 @@ export default function PropertyDetail() {
   };
 
   const checkActiveOccupancy = async (userId: string) => {
-    const { data } = await supabase
+    setHasActiveOccupancy(false);
+    setOccupiedPropertyTitle("");
+
+    const { data: primaryOccupancy } = await supabase
       .from("tenant_occupancies")
-      .select("*, property:properties(title)")
+      .select("property:properties(title)")
       .eq("tenant_id", userId)
       .eq("status", "active")
       .maybeSingle();
 
-    if (data) {
+    if (primaryOccupancy) {
       setHasActiveOccupancy(true);
-      setOccupiedPropertyTitle(data.property?.title || "a property");
+      setOccupiedPropertyTitle(
+        primaryOccupancy.property?.title || "a property",
+      );
+      return;
+    }
+
+    const { data: familyLink } = await supabase
+      .from("family_members")
+      .select("parent_occupancy_id")
+      .eq("member_id", userId)
+      .maybeSingle();
+
+    if (familyLink?.parent_occupancy_id) {
+      const { data: parentOccupancy } = await supabase
+        .from("tenant_occupancies")
+        .select("property:properties(title)")
+        .eq("id", familyLink.parent_occupancy_id)
+        .eq("status", "active")
+        .maybeSingle();
+
+      if (parentOccupancy) {
+        setHasActiveOccupancy(true);
+        setOccupiedPropertyTitle(
+          parentOccupancy.property?.title || "a property",
+        );
+        return;
+      }
+    }
+
+    if (!API_URL) return;
+
+    try {
+      const urlPrefix = API_URL.endsWith("/") ? API_URL.slice(0, -1) : API_URL;
+      const response = await fetch(
+        `${urlPrefix}/api/family-members?member_id=${encodeURIComponent(userId)}`,
+      );
+      if (!response.ok) return;
+
+      const data = await response.json();
+      const occupancy = data?.occupancy;
+      const occupancyStatus = String(occupancy?.status || "")
+        .trim()
+        .toLowerCase();
+
+      if (occupancy && occupancyStatus === "active") {
+        setHasActiveOccupancy(true);
+        setOccupiedPropertyTitle(
+          occupancy?.property?.title ||
+            occupancy?.property_title ||
+            "a property",
+        );
+      }
+    } catch (error) {
+      console.log("checkActiveOccupancy family lookup error:", error);
     }
   };
 
@@ -399,15 +455,23 @@ export default function PropertyDetail() {
 
         // Notify API (Email/System)
         try {
-          fetch(`${API_URL}/api/notify`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              type: "booking_new",
-              recordId: newBooking.id,
-              actorId: session.user.id,
-            }),
-          });
+          const notifyTypes = ["new_booking", "booking_request", "booking_new"];
+          for (const notifyType of notifyTypes) {
+            const notifyRes = await fetch(`${API_URL}/api/notify`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                type: notifyType,
+                recordId: newBooking.id,
+                bookingId: newBooking.id,
+                actorId: session.user.id,
+              }),
+            });
+
+            if (notifyRes.ok) {
+              break;
+            }
+          }
         } catch (e) {
           console.log("Notify API Error:", e);
         }
@@ -1057,7 +1121,9 @@ export default function PropertyDetail() {
                       color: isDark ? colors.text : "#111",
                     }}
                   >
-                    {includesAdvance ? `₱${Number(property.advance_amount || property.price || 0).toLocaleString()}` : "Excluded"}
+                    {includesAdvance
+                      ? `₱${Number(property.advance_amount || property.price || 0).toLocaleString()}`
+                      : "Excluded"}
                   </Text>
                 </View>
                 <View style={styles.rowBetween}>
@@ -1072,7 +1138,9 @@ export default function PropertyDetail() {
                       color: isDark ? colors.text : "#111",
                     }}
                   >
-                    {includesSecurityDeposit ? `₱${Number(property.security_deposit_amount || property.price || 0).toLocaleString()}` : "Excluded"}
+                    {includesSecurityDeposit
+                      ? `₱${Number(property.security_deposit_amount || property.price || 0).toLocaleString()}`
+                      : "Excluded"}
                   </Text>
                 </View>
               </View>

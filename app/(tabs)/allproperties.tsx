@@ -3,11 +3,13 @@ import Constants from "expo-constants";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Location from "expo-location";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
     Alert,
+    Animated,
     Dimensions,
+    Easing,
+    FlatList,
     Image,
     Modal,
     Platform,
@@ -25,6 +27,63 @@ import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
 
 const { width } = Dimensions.get("window");
+const ALL_PROPERTIES_PAGE_SIZE = 6;
+const ALL_PROPERTIES_LOADING_SKELETON_COUNT = 6;
+
+function SkeletonBlock({
+  width = "100%",
+  height,
+  borderRadius = 10,
+  backgroundColor,
+  style,
+}: {
+  width?: number | string;
+  height: number;
+  borderRadius?: number;
+  backgroundColor: string;
+  style?: any;
+}) {
+  const opacity = useRef(new Animated.Value(0.55)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0.55,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    animation.start();
+    return () => {
+      animation.stop();
+    };
+  }, [opacity]);
+
+  return (
+    <Animated.View
+      style={[
+        {
+          width,
+          height,
+          borderRadius,
+          backgroundColor,
+          opacity,
+        },
+        style,
+      ]}
+    />
+  );
+}
 
 const canUseNativeMapLibre =
   Platform.OS !== "web" && Constants.appOwnership !== "expo";
@@ -79,6 +138,7 @@ const extractCoordinates = (link: string | null) => {
 export default function AllProperties() {
   const router = useRouter();
   const { isDark, colors } = useTheme();
+  const skeletonColor = isDark ? "rgba(148, 163, 184, 0.22)" : "#e5e7eb";
 
   // -- STATE --
   const [properties, setProperties] = useState<any[]>([]);
@@ -107,6 +167,9 @@ export default function AllProperties() {
   const [showMapView, setShowMapView] = useState(false);
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(
     null,
+  );
+  const [visiblePropertyCount, setVisiblePropertyCount] = useState(
+    ALL_PROPERTIES_PAGE_SIZE,
   );
 
   const availableAmenities = [
@@ -362,6 +425,27 @@ export default function AllProperties() {
   };
 
   const filteredData = getFilteredProperties();
+  const visibleFilteredData = filteredData.slice(0, visiblePropertyCount);
+
+  useEffect(() => {
+    setVisiblePropertyCount(ALL_PROPERTIES_PAGE_SIZE);
+  }, [
+    searchQuery,
+    priceRange.min,
+    priceRange.max,
+    selectedAmenities,
+    minRating,
+    filterMostFavorite,
+    sortBy,
+    filterNearMe,
+    userLocation,
+    properties.length,
+  ]);
+
+  const loadMoreProperties = () => {
+    if (visiblePropertyCount >= filteredData.length) return;
+    setVisiblePropertyCount((prev) => prev + ALL_PROPERTIES_PAGE_SIZE);
+  };
 
   // Compute Top Rated & Most Favorite property IDs
   const statsArray = Object.values(propertyStats) as any[];
@@ -603,6 +687,54 @@ export default function AllProperties() {
     );
   };
 
+  const renderSkeletonCard = (cardKey: string) => (
+    <View
+      key={cardKey}
+      style={[styles.card, { backgroundColor: isDark ? colors.card : "white" }]}
+    >
+      <SkeletonBlock
+        width="100%"
+        height={140}
+        borderRadius={0}
+        backgroundColor={skeletonColor}
+      />
+      <View
+        style={[
+          styles.cardContent,
+          { borderTopColor: isDark ? colors.border : "#f3f4f6" },
+        ]}
+      >
+        <SkeletonBlock
+          width="72%"
+          height={12}
+          borderRadius={6}
+          backgroundColor={skeletonColor}
+        />
+        <SkeletonBlock
+          width="56%"
+          height={10}
+          borderRadius={5}
+          backgroundColor={skeletonColor}
+          style={{ marginTop: 8 }}
+        />
+        <SkeletonBlock
+          width="40%"
+          height={12}
+          borderRadius={6}
+          backgroundColor={skeletonColor}
+          style={{ marginTop: 10 }}
+        />
+        <SkeletonBlock
+          width="100%"
+          height={14}
+          borderRadius={7}
+          backgroundColor={skeletonColor}
+          style={{ marginTop: 10 }}
+        />
+      </View>
+    </View>
+  );
+
   return (
     <SafeAreaView
       style={[
@@ -759,9 +891,18 @@ export default function AllProperties() {
 
       {/* Main Content */}
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="black" />
-        </View>
+        <FlatList
+          data={Array.from(
+            { length: ALL_PROPERTIES_LOADING_SKELETON_COUNT },
+            (_, index) => `property-skeleton-${index}`,
+          )}
+          keyExtractor={(item) => item}
+          numColumns={2}
+          contentContainerStyle={{ padding: 10, paddingBottom: 130 }}
+          columnWrapperStyle={styles.gridContainer}
+          renderItem={({ item }) => renderSkeletonCard(item)}
+          showsVerticalScrollIndicator={false}
+        />
       ) : showMapView && filterNearMe && Platform.OS !== "web" && MapLibreGL ? (
         <View style={{ flex: 1 }}>
           <MapLibreGL.MapView
@@ -949,19 +1090,32 @@ export default function AllProperties() {
           )}
         </View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={visibleFilteredData}
+          keyExtractor={(item) => item.id}
+          numColumns={2}
           contentContainerStyle={{ padding: 10, paddingBottom: 130 }}
+          columnWrapperStyle={styles.gridContainer}
+          onEndReached={loadMoreProperties}
+          onEndReachedThreshold={0.2}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={() => loadProperties(session?.user?.id)}
             />
           }
-        >
-          <View style={styles.gridContainer}>
-            {filteredData.map(renderCard)}
-          </View>
-          {filteredData.length === 0 && (
+          renderItem={({ item }) => renderCard(item)}
+          ListFooterComponent={
+            visiblePropertyCount < filteredData.length ? (
+              <View style={styles.listFooterLoading}>
+                <View style={styles.gridContainer}>
+                  {renderSkeletonCard("property-footer-skeleton-1")}
+                  {renderSkeletonCard("property-footer-skeleton-2")}
+                </View>
+              </View>
+            ) : null
+          }
+          ListEmptyComponent={
             <View style={styles.emptyState}>
               <View style={styles.emptyIcon}>
                 <Ionicons name="home-outline" size={40} color="#d1d5db" />
@@ -971,8 +1125,8 @@ export default function AllProperties() {
                 Try adjusting your search or filters.
               </Text>
             </View>
-          )}
-        </ScrollView>
+          }
+        />
       )}
 
       {/* Map/List Toggle Float Button */}
@@ -1433,10 +1587,16 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   gridContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
     justifyContent: "space-between",
+    marginBottom: 10,
   },
+  listFooterLoading: {
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  listFooterText: { fontSize: 12, color: "#9ca3af" },
   imageContainer: { height: 140, position: "relative" },
   cardImage: { width: "100%", height: "100%" },
   gradient: { position: "absolute", bottom: 0, left: 0, right: 0, height: 80 },

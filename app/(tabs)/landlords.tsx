@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-    ActivityIndicator,
+    Animated,
+    Easing,
     Image,
     RefreshControl,
     SafeAreaView,
@@ -15,6 +16,63 @@ import {
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
+
+const LANDLORDS_LOADING_SKELETON_COUNT = 6;
+
+function SkeletonBlock({
+  width = "100%",
+  height,
+  borderRadius = 10,
+  backgroundColor,
+  style,
+}: {
+  width?: number | string;
+  height: number;
+  borderRadius?: number;
+  backgroundColor: string;
+  style?: any;
+}) {
+  const opacity = useRef(new Animated.Value(0.55)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0.55,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    animation.start();
+    return () => {
+      animation.stop();
+    };
+  }, [opacity]);
+
+  return (
+    <Animated.View
+      style={[
+        {
+          width,
+          height,
+          borderRadius,
+          backgroundColor,
+          opacity,
+        },
+        style,
+      ]}
+    />
+  );
+}
 
 type PropertyPreview = {
   id: string;
@@ -39,6 +97,7 @@ type LandlordCard = {
 export default function LandlordsSearchScreen() {
   const router = useRouter();
   const { isDark, colors } = useTheme();
+  const skeletonColor = isDark ? "rgba(148, 163, 184, 0.22)" : "#e5e7eb";
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -169,15 +228,108 @@ export default function LandlordsSearchScreen() {
     });
   }, [landlords, search]);
 
+  const renderLandlordSkeletonCard = (cardKey: string) => (
+    <View
+      key={cardKey}
+      style={[
+        styles.card,
+        {
+          backgroundColor: isDark ? colors.card : "#fff",
+          borderColor: isDark ? colors.border : "#e5e7eb",
+        },
+      ]}
+    >
+      <View style={styles.cardTopRow}>
+        <SkeletonBlock
+          width={40}
+          height={40}
+          borderRadius={20}
+          backgroundColor={skeletonColor}
+        />
+        <View style={{ flex: 1 }}>
+          <SkeletonBlock
+            width="50%"
+            height={14}
+            borderRadius={7}
+            backgroundColor={skeletonColor}
+          />
+          <SkeletonBlock
+            width="36%"
+            height={11}
+            borderRadius={6}
+            backgroundColor={skeletonColor}
+            style={{ marginTop: 6 }}
+          />
+        </View>
+      </View>
+
+      <SkeletonBlock
+        width="58%"
+        height={11}
+        borderRadius={6}
+        backgroundColor={skeletonColor}
+        style={{ marginTop: 12 }}
+      />
+      <SkeletonBlock
+        width="62%"
+        height={11}
+        borderRadius={6}
+        backgroundColor={skeletonColor}
+        style={{ marginTop: 8 }}
+      />
+      <SkeletonBlock
+        width="46%"
+        height={11}
+        borderRadius={6}
+        backgroundColor={skeletonColor}
+        style={{ marginTop: 8 }}
+      />
+    </View>
+  );
+
   if (loading) {
     return (
       <SafeAreaView
         style={[
-          styles.center,
+          styles.container,
           { backgroundColor: isDark ? colors.background : "#f9fafb" },
         ]}
       >
-        <ActivityIndicator size="large" color={isDark ? colors.text : "#111"} />
+        <View style={styles.headerRow}>
+          <View style={[styles.backBtn, { marginTop: 40 }]} />
+          <SkeletonBlock
+            width={170}
+            height={18}
+            borderRadius={8}
+            backgroundColor={skeletonColor}
+            style={{ marginTop: 40 }}
+          />
+          <View style={{ width: 36 }} />
+        </View>
+
+        <View
+          style={[
+            styles.searchBox,
+            {
+              backgroundColor: isDark ? colors.card : "#fff",
+              borderColor: isDark ? colors.border : "#e5e7eb",
+            },
+          ]}
+        >
+          <SkeletonBlock
+            width="100%"
+            height={16}
+            borderRadius={8}
+            backgroundColor={skeletonColor}
+          />
+        </View>
+
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+          {Array.from(
+            { length: LANDLORDS_LOADING_SKELETON_COUNT },
+            (_, index) => `landlord-skeleton-${index}`,
+          ).map((key) => renderLandlordSkeletonCard(key))}
+        </ScrollView>
       </SafeAreaView>
     );
   }

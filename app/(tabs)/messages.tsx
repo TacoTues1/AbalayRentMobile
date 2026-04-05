@@ -3,12 +3,15 @@ import { decode } from "base64-arraybuffer";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
+import { useNavigation } from "expo-router";
 import * as Sharing from "expo-sharing";
 import React, { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
+    Animated,
     Dimensions,
+    Easing,
     FlatList,
     Image,
     KeyboardAvoidingView,
@@ -25,23 +28,108 @@ import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
 
 const { width } = Dimensions.get("window");
+const CHAT_MESSAGES_PAGE_SIZE = 20;
+const MESSAGES_LOADING_SKELETON_COUNT = 6;
+
+function SkeletonBlock({
+  width = "100%",
+  height,
+  borderRadius = 10,
+  backgroundColor,
+  style,
+}: {
+  width?: number | string;
+  height: number;
+  borderRadius?: number;
+  backgroundColor: string;
+  style?: any;
+}) {
+  const opacity = useRef(new Animated.Value(0.55)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0.55,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    animation.start();
+    return () => {
+      animation.stop();
+    };
+  }, [opacity]);
+
+  return (
+    <Animated.View
+      style={[
+        {
+          width,
+          height,
+          borderRadius,
+          backgroundColor,
+          opacity,
+        },
+        style,
+      ]}
+    />
+  );
+}
 
 export default function Messages() {
+  const navigation = useNavigation<any>();
   const { isDark, colors } = useTheme();
+  const skeletonColor = isDark ? "rgba(148, 163, 184, 0.22)" : "#e5e7eb";
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [allowedRecipientIds, setAllowedRecipientIds] = useState<string[]>([]);
   const [conversations, setConversations] = useState<any[]>([]);
   const [selectedConv, setSelectedConv] = useState<any>(null);
   const [messages, setMessages] = useState<any[]>([]);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [loadingMoreMessages, setLoadingMoreMessages] = useState(false);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+  const messagePaginationLockRef = useRef(false);
+  const latestMessagesRef = useRef<any[]>([]);
+  const shouldAutoScrollRef = useRef(false);
 
   // Shared files panel
   const [showFilesPanel, setShowFilesPanel] = useState(false);
   const [sharedMedia, setSharedMedia] = useState<any[]>([]);
+
+  useEffect(() => {
+    latestMessagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    navigation.setOptions({
+      tabBarStyle: selectedConv ? { display: "none" } : undefined,
+    });
+
+    return () => {
+      navigation.setOptions({ tabBarStyle: undefined });
+    };
+  }, [navigation, selectedConv]);
+
+  const requestAutoScrollToBottom = (animated: boolean = true) => {
+    shouldAutoScrollRef.current = true;
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToEnd({ animated });
+    });
+  };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -256,6 +344,8 @@ export default function Messages() {
 
   useEffect(() => {
     if (selectedConv) {
+      setMessages([]);
+      setHasMoreMessages(true);
       loadMessages(selectedConv.id);
       markAsRead(selectedConv.id);
       const channel = supabase
@@ -269,11 +359,13 @@ export default function Messages() {
             filter: `conversation_id=eq.${selectedConv.id}`,
           },
           (payload) => {
-            setMessages((prev) => [...prev, payload.new]);
-            setTimeout(
-              () => flatListRef.current?.scrollToEnd({ animated: true }),
-              150,
-            );
+            setMessages((prev) => {
+              if (prev.some((msg) => msg.id === payload.new.id)) {
+                return prev;
+              }
+              return [...prev, payload.new];
+            });
+            requestAutoScrollToBottom(true);
             // Mark incoming message as read since we're viewing the chat
             markAsRead(selectedConv.id);
           },
@@ -293,17 +385,70 @@ export default function Messages() {
     }
   }, [allowedRecipientIds, selectedConv]);
 
-  const loadMessages = async (convId: string) => {
-    const { data } = await supabase
-      .from("messages")
-      .select("*")
-      .eq("conversation_id", convId)
-      .order("created_at", { ascending: true });
-    setMessages(data || []);
-    setTimeout(
-      () => flatListRef.current?.scrollToEnd({ animated: false }),
-      200,
-    );
+  const loadMessages = async (convId: string, loadOlder: boolean = false) => {
+    if (!convId) return;
+    if (messagePaginationLockRef.current) return;
+
+    if (loadOlder) {
+      if (loadingMoreMessages || !hasMoreMessages) return;
+      const oldestMessage = latestMessagesRef.current[0];
+      if (!oldestMessage?.created_at) {
+        setHasMoreMessages(false);
+        return;
+      }
+      setLoadingMoreMessages(true);
+    }
+
+    messagePaginationLockRef.current = true;
+
+    try {
+      if (loadOlder) {
+        const oldestMessage = latestMessagesRef.current[0];
+        const { data } = await supabase
+          .from("messages")
+          .select("*")
+          .eq("conversation_id", convId)
+          .lt("created_at", oldestMessage.created_at)
+          .order("created_at", { ascending: false })
+          .limit(CHAT_MESSAGES_PAGE_SIZE);
+
+        const olderRows = (data || []).reverse();
+
+        setMessages((prev) => {
+          const existingIds = new Set(prev.map((msg) => msg.id));
+          const dedupedOlderRows = olderRows.filter(
+            (row) => !existingIds.has(row.id),
+          );
+          return [...dedupedOlderRows, ...prev];
+        });
+        setHasMoreMessages((data || []).length === CHAT_MESSAGES_PAGE_SIZE);
+      } else {
+        const { data } = await supabase
+          .from("messages")
+          .select("*")
+          .eq("conversation_id", convId)
+          .order("created_at", { ascending: false })
+          .limit(CHAT_MESSAGES_PAGE_SIZE);
+
+        const initialRows = (data || []).reverse();
+        setMessages(initialRows);
+        setHasMoreMessages((data || []).length === CHAT_MESSAGES_PAGE_SIZE);
+        requestAutoScrollToBottom(false);
+      }
+    } finally {
+      if (loadOlder) {
+        setLoadingMoreMessages(false);
+      }
+      messagePaginationLockRef.current = false;
+    }
+  };
+
+  const handleChatScroll = (event: any) => {
+    if (!selectedConv?.id) return;
+    const offsetY = event?.nativeEvent?.contentOffset?.y ?? 0;
+    if (offsetY <= 80) {
+      loadMessages(selectedConv.id, true);
+    }
   };
 
   const sendMessage = async (
@@ -338,6 +483,7 @@ export default function Messages() {
       if (fileName) msg.file_name = fileName;
       const currentText = text;
       setText("");
+      requestAutoScrollToBottom(true);
       const { error } = await supabase.from("messages").insert(msg);
       if (error) {
         console.error("Send message error:", error);
@@ -506,6 +652,68 @@ export default function Messages() {
     );
   };
 
+  const renderConversationSkeletonCard = (cardKey: string) => (
+    <View
+      key={cardKey}
+      style={[
+        styles.convItem,
+        {
+          backgroundColor: isDark ? colors.surface : "white",
+          borderBottomColor: isDark ? colors.border : "#f9fafb",
+        },
+      ]}
+    >
+      <SkeletonBlock
+        width={52}
+        height={52}
+        borderRadius={26}
+        backgroundColor={skeletonColor}
+      />
+      <View style={{ flex: 1 }}>
+        <View
+          style={{
+            flexDirection: "row",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <SkeletonBlock
+            width="56%"
+            height={14}
+            borderRadius={7}
+            backgroundColor={skeletonColor}
+          />
+          <SkeletonBlock
+            width={42}
+            height={10}
+            borderRadius={5}
+            backgroundColor={skeletonColor}
+          />
+        </View>
+        <SkeletonBlock
+          width="40%"
+          height={12}
+          borderRadius={6}
+          backgroundColor={skeletonColor}
+          style={{ marginTop: 7 }}
+        />
+        <SkeletonBlock
+          width="74%"
+          height={12}
+          borderRadius={6}
+          backgroundColor={skeletonColor}
+          style={{ marginTop: 8 }}
+        />
+      </View>
+      <SkeletonBlock
+        width={32}
+        height={32}
+        borderRadius={8}
+        backgroundColor={skeletonColor}
+      />
+    </View>
+  );
+
   // ===================== CHAT VIEW =====================
   if (selectedConv) {
     return (
@@ -516,7 +724,11 @@ export default function Messages() {
         ]}
         edges={["top"]}
       >
-        <View style={{ flex: 1, marginBottom: 100 }}>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+        >
           {/* Chat Header */}
           <View
             style={[
@@ -599,6 +811,34 @@ export default function Messages() {
             keyExtractor={(i) => i.id}
             contentContainerStyle={styles.messageList}
             showsVerticalScrollIndicator={false}
+            keyboardDismissMode="on-drag"
+            keyboardShouldPersistTaps="handled"
+            onScroll={handleChatScroll}
+            scrollEventThrottle={16}
+            onContentSizeChange={() => {
+              if (shouldAutoScrollRef.current) {
+                flatListRef.current?.scrollToEnd({ animated: true });
+                shouldAutoScrollRef.current = false;
+              }
+            }}
+            ListHeaderComponent={
+              loadingMoreMessages ? (
+                <View style={styles.olderLoadingWrap}>
+                  <SkeletonBlock
+                    width={148}
+                    height={10}
+                    borderRadius={5}
+                    backgroundColor={skeletonColor}
+                  />
+                  <SkeletonBlock
+                    width={96}
+                    height={10}
+                    borderRadius={5}
+                    backgroundColor={skeletonColor}
+                  />
+                </View>
+              ) : null
+            }
             renderItem={({ item, index }) => {
               const isMe = item.sender_id === session.user.id;
               const showDate =
@@ -737,76 +977,71 @@ export default function Messages() {
           />
 
           {/* Input Bar */}
-          <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-            keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+          <View
+            style={[
+              styles.inputBar,
+              {
+                backgroundColor: isDark ? colors.surface : "white",
+                borderTopColor: isDark ? colors.border : "#f3f4f6",
+              },
+            ]}
           >
-            <View
+            <TouchableOpacity
+              onPress={pickFile}
               style={[
-                styles.inputBar,
-                {
-                  backgroundColor: isDark ? colors.surface : "white",
-                  borderTopColor: isDark ? colors.border : "#f3f4f6",
-                },
+                styles.inputAction,
+                { backgroundColor: isDark ? colors.card : "#f3f4f6" },
               ]}
             >
-              <TouchableOpacity
-                onPress={pickFile}
-                style={[
-                  styles.inputAction,
-                  { backgroundColor: isDark ? colors.card : "#f3f4f6" },
-                ]}
-              >
-                <Ionicons
-                  name="attach-outline"
-                  size={22}
-                  color={isDark ? colors.textSecondary : "#9ca3af"}
-                />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={pickImage}
-                style={[
-                  styles.inputAction,
-                  { backgroundColor: isDark ? colors.card : "#f3f4f6" },
-                ]}
-              >
-                <Ionicons
-                  name="image-outline"
-                  size={22}
-                  color={isDark ? colors.textSecondary : "#9ca3af"}
-                />
-              </TouchableOpacity>
-              <TextInput
-                style={[
-                  styles.textInput,
-                  {
-                    backgroundColor: isDark ? colors.card : "#f3f4f6",
-                    color: isDark ? colors.text : "#111",
-                  },
-                ]}
-                value={text}
-                onChangeText={setText}
-                placeholder="Type a message..."
-                placeholderTextColor={isDark ? colors.textMuted : "#c4c4c4"}
-                multiline
+              <Ionicons
+                name="attach-outline"
+                size={22}
+                color={isDark ? colors.textSecondary : "#9ca3af"}
               />
-              <TouchableOpacity
-                onPress={() => sendMessage()}
-                disabled={sending || !text.trim()}
-                style={[
-                  styles.sendBtn,
-                  (!text.trim() || sending) && { opacity: 0.4 },
-                ]}
-              >
-                {sending ? (
-                  <ActivityIndicator color="white" size="small" />
-                ) : (
-                  <Ionicons name="send" size={18} color="white" />
-                )}
-              </TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
-        </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={pickImage}
+              style={[
+                styles.inputAction,
+                { backgroundColor: isDark ? colors.card : "#f3f4f6" },
+              ]}
+            >
+              <Ionicons
+                name="image-outline"
+                size={22}
+                color={isDark ? colors.textSecondary : "#9ca3af"}
+              />
+            </TouchableOpacity>
+            <TextInput
+              style={[
+                styles.textInput,
+                {
+                  backgroundColor: isDark ? colors.card : "#f3f4f6",
+                  color: isDark ? colors.text : "#111",
+                },
+              ]}
+              value={text}
+              onChangeText={setText}
+              placeholder="Type a message..."
+              placeholderTextColor={isDark ? colors.textMuted : "#c4c4c4"}
+              multiline
+            />
+            <TouchableOpacity
+              onPress={() => sendMessage()}
+              disabled={sending || !text.trim()}
+              style={[
+                styles.sendBtn,
+                (!text.trim() || sending) && { opacity: 0.4 },
+              ]}
+            >
+              {sending ? (
+                <ActivityIndicator color="white" size="small" />
+              ) : (
+                <Ionicons name="send" size={18} color="white" />
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
 
         {/* Shared Files Panel */}
         <Modal
@@ -1003,20 +1238,16 @@ export default function Messages() {
       </View>
 
       {loading ? (
-        <View style={styles.loadingBox}>
-          <ActivityIndicator
-            size="large"
-            color={isDark ? colors.text : "#111"}
-          />
-          <Text
-            style={[
-              styles.loadingText,
-              { color: isDark ? colors.textMuted : "#9ca3af" },
-            ]}
-          >
-            Loading conversations...
-          </Text>
-        </View>
+        <FlatList
+          data={Array.from(
+            { length: MESSAGES_LOADING_SKELETON_COUNT },
+            (_, index) => `messages-conversation-skeleton-${index}`,
+          )}
+          keyExtractor={(item) => item}
+          contentContainerStyle={{ paddingBottom: 130 }}
+          renderItem={({ item }) => renderConversationSkeletonCard(item)}
+          showsVerticalScrollIndicator={false}
+        />
       ) : conversations.length === 0 ? (
         <View style={styles.emptyState}>
           <View
@@ -1297,6 +1528,17 @@ const styles = StyleSheet.create({
 
   // Messages
   messageList: { paddingHorizontal: 16, paddingVertical: 12, paddingBottom: 8 },
+  olderLoadingWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 8,
+  },
+  olderLoadingText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#9ca3af",
+  },
   dateSeparator: {
     flexDirection: "row",
     alignItems: "center",

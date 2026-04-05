@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import 'react-native-url-polyfill/auto';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
@@ -13,19 +13,29 @@ if (!process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY) {
   console.warn('EXPO_PUBLIC_SUPABASE_ANON_KEY is not set. Supabase will not work correctly.');
 }
 
-// Mock AsyncStorage for SSR / static rendering on web to avoid 'window is not defined'
-const storage = typeof window !== 'undefined' ? AsyncStorage : {
-  getItem: async () => null,
-  setItem: async () => {},
-  removeItem: async () => {},
+const webStorage = {
+  getItem: async (key: string) => {
+    if (typeof window === 'undefined') return null;
+    return window.localStorage.getItem(key);
+  },
+  setItem: async (key: string, value: string) => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(key, value);
+  },
+  removeItem: async (key: string) => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.removeItem(key);
+  },
 };
+
+const storage = Platform.OS === 'web' ? webStorage : AsyncStorage;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: storage as any,
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: true,
+    detectSessionInUrl: Platform.OS === 'web',
   },
 });
 

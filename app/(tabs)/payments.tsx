@@ -1,25 +1,28 @@
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker, {
-    DateTimePickerAndroid,
+  DateTimePickerAndroid,
 } from "@react-native-community/datetimepicker";
 import { decode } from "base64-arraybuffer";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Modal,
-    Platform,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Easing,
+  FlatList,
+  Image,
+  Modal,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { createNotification } from "../../lib/notifications";
@@ -45,9 +48,68 @@ function formatCurrencyAmount(value: string | number) {
   });
 }
 
+const PAYMENT_LIST_PAGE_SIZE = 5;
+const PAYMENT_LOADING_SKELETON_COUNT = 5;
+
+function SkeletonBlock({
+  width = "100%",
+  height,
+  borderRadius = 10,
+  backgroundColor,
+  style,
+}: {
+  width?: number | string;
+  height: number;
+  borderRadius?: number;
+  backgroundColor: string;
+  style?: any;
+}) {
+  const opacity = useRef(new Animated.Value(0.55)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0.55,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    animation.start();
+    return () => {
+      animation.stop();
+    };
+  }, [opacity]);
+
+  return (
+    <Animated.View
+      style={[
+        {
+          width,
+          height,
+          borderRadius,
+          backgroundColor,
+          opacity,
+        },
+        style,
+      ]}
+    />
+  );
+}
+
 export default function Payments() {
   const router = useRouter();
   const { isDark, colors } = useTheme();
+  const skeletonColor = isDark ? "rgba(148, 163, 184, 0.22)" : "#e5e7eb";
 
   // -- State --
   const [session, setSession] = useState<any>(null);
@@ -55,6 +117,9 @@ export default function Payments() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState("all"); // 'all', 'pending', 'verify', 'paid', 'cancelled'
+  const [visibleBillCount, setVisibleBillCount] = useState(
+    PAYMENT_LIST_PAGE_SIZE,
+  );
 
   // Data State
   const [paymentRequests, setPaymentRequests] = useState<any[]>([]);
@@ -130,15 +195,16 @@ export default function Payments() {
     }, 10000);
 
     try {
-      console.log(`Loading payments for ${role} ${userId}`);
+      const normalizedRole = String(role || "").toLowerCase();
+      console.log(`Loading payments for ${normalizedRole || role} ${userId}`);
       let detectedFamilyMember = false;
 
-      if (role !== "tenant") {
+      if (normalizedRole !== "tenant") {
         setIsFamilyMember(false);
       }
 
       // 1. Check if user is a family member (Tenant only)
-      if (role === "tenant" && API_URL) {
+      if (normalizedRole === "tenant" && API_URL) {
         try {
           // Ensure we don't have double slashes
           const urlPrefix = API_URL.endsWith("/")
@@ -165,7 +231,64 @@ export default function Payments() {
         }
       }
 
-      if (role === "tenant" && !detectedFamilyMember) {
+      // 1b. Fallback family-member resolution via Supabase
+      // if API is unavailable or stale.
+      if (normalizedRole === "tenant" && !detectedFamilyMember) {
+        try {
+          const { data: familyLink } = await supabase
+            .from("family_members")
+            .select("parent_occupancy_id")
+            .eq("member_id", userId)
+            .maybeSingle();
+
+          if (familyLink?.parent_occupancy_id) {
+            const { data: parentOccupancy } = await supabase
+              .from("tenant_occupancies")
+              .select("id, tenant_id")
+              .eq("id", familyLink.parent_occupancy_id)
+              .maybeSingle();
+
+            const parentTenantId = parentOccupancy?.tenant_id;
+
+            if (parentTenantId && parentTenantId !== userId) {
+              detectedFamilyMember = true;
+              setIsFamilyMember(true);
+
+              const { data: fallbackBills } = await supabase
+                .from("payment_requests")
+                .select(
+                  `
+                  *,
+                  properties(title, address),
+                  tenant_profile:profiles!payment_requests_tenant_fkey(first_name, middle_name, last_name, phone),
+                  landlord_profile:profiles!payment_requests_landlord_fkey(first_name, middle_name, last_name, phone)
+                `,
+                )
+                .eq("tenant", parentTenantId)
+                .order("created_at", { ascending: false });
+
+              const { data: fallbackPayments } = await supabase
+                .from("payments")
+                .select(
+                  "*, properties(title), profiles!payments_tenant_fkey(first_name, middle_name, last_name)",
+                )
+                .eq("tenant", parentTenantId)
+                .order("paid_at", { ascending: false });
+
+              setPaymentRequests(fallbackBills || []);
+              setPayments(fallbackPayments || []);
+              return;
+            }
+          }
+        } catch (fallbackErr) {
+          console.error(
+            "Family member fallback error in payments:",
+            fallbackErr,
+          );
+        }
+      }
+
+      if (normalizedRole === "tenant" && !detectedFamilyMember) {
         setIsFamilyMember(false);
       }
 
@@ -182,7 +305,7 @@ export default function Payments() {
         )
         .order("created_at", { ascending: false });
 
-      if (role === "landlord") {
+      if (normalizedRole === "landlord") {
         query = query.eq("landlord", userId);
       } else {
         query = query.eq("tenant", userId);
@@ -207,9 +330,9 @@ export default function Payments() {
         )
         .order("paid_at", { ascending: false });
 
-      if (role === "tenant") {
+      if (normalizedRole === "tenant") {
         paymentsQuery = paymentsQuery.eq("tenant", userId);
-      } else if (role === "landlord") {
+      } else if (normalizedRole === "landlord") {
         paymentsQuery = paymentsQuery.eq("landlord", userId);
       }
 
@@ -1609,8 +1732,54 @@ export default function Payments() {
   };
 
   // Total Income calculated from payment_requests (matching website logic)
-  const totalIncome = paymentRequests
-    .filter((p: any) => p.status === "paid")
+  const paidPaymentIdsInRequests = new Set(
+    paymentRequests
+      .filter(
+        (p: any) =>
+          String(p?.status || "").toLowerCase() === "paid" && p?.payment_id,
+      )
+      .map((p: any) => String(p.payment_id)),
+  );
+
+  const paymentHistoryBills = payments
+    .filter((p: any) => !paidPaymentIdsInRequests.has(String(p?.id || "")))
+    .map((p: any) => {
+      const paidAmount =
+        Number(
+          p?.amount_paid ?? p?.amount ?? p?.total_amount ?? p?.paid_amount ?? 0,
+        ) || 0;
+
+      return {
+        id: `history-${p?.id || Math.random().toString(36).slice(2)}`,
+        status: "paid",
+        amount_paid: paidAmount,
+        other_bills: paidAmount,
+        due_date: p?.paid_at || p?.created_at || null,
+        paid_at: p?.paid_at || p?.created_at || null,
+        payment_method: p?.method || p?.payment_method || null,
+        bills_description: p?.notes || p?.description || "Payment history",
+        properties: p?.properties || null,
+        tenant_profile: p?.profiles || p?.tenant_profile || null,
+        landlord_profile: p?.landlord_profile || null,
+        is_history_only: true,
+      };
+    });
+
+  const billsForDisplay = [...paymentRequests, ...paymentHistoryBills].sort(
+    (a: any, b: any) => {
+      const aTime = new Date(
+        a?.created_at || a?.paid_at || a?.due_date || 0,
+      ).getTime();
+      const bTime = new Date(
+        b?.created_at || b?.paid_at || b?.due_date || 0,
+      ).getTime();
+      return bTime - aTime;
+    },
+  );
+
+  // Total Income calculated from payment_requests + payment history fallback
+  const totalIncome = billsForDisplay
+    .filter((p: any) => String(p?.status || "").toLowerCase() === "paid")
     .reduce((sum: number, p: any) => {
       const t =
         parseFloat(p.amount_paid || 0) ||
@@ -2258,6 +2427,148 @@ export default function Payments() {
     );
   };
 
+  const renderBillSkeletonCard = (cardKey: string) => (
+    <View
+      key={cardKey}
+      style={[
+        styles.billCard,
+        {
+          backgroundColor: isDark ? colors.card : "white",
+          borderColor: isDark ? colors.cardBorder : "#f0f0f0",
+        },
+      ]}
+    >
+      <View
+        style={{
+          flexDirection: "row",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          marginBottom: 10,
+        }}
+      >
+        <View style={{ flex: 1, marginRight: 10 }}>
+          <SkeletonBlock
+            width="62%"
+            height={16}
+            borderRadius={8}
+            backgroundColor={skeletonColor}
+          />
+          <SkeletonBlock
+            width="72%"
+            height={11}
+            borderRadius={6}
+            backgroundColor={skeletonColor}
+            style={{ marginTop: 8 }}
+          />
+          <SkeletonBlock
+            width="66%"
+            height={11}
+            borderRadius={6}
+            backgroundColor={skeletonColor}
+            style={{ marginTop: 6 }}
+          />
+        </View>
+        <SkeletonBlock
+          width={86}
+          height={24}
+          borderRadius={12}
+          backgroundColor={skeletonColor}
+        />
+      </View>
+
+      <View
+        style={{
+          backgroundColor: isDark ? colors.surface : "#fafafa",
+          padding: 10,
+          borderRadius: 8,
+          marginBottom: 10,
+          borderWidth: 1,
+          borderColor: isDark ? colors.cardBorder : "#f0f0f0",
+        }}
+      >
+        <SkeletonBlock
+          width="94%"
+          height={11}
+          borderRadius={6}
+          backgroundColor={skeletonColor}
+        />
+        <SkeletonBlock
+          width="88%"
+          height={11}
+          borderRadius={6}
+          backgroundColor={skeletonColor}
+          style={{ marginTop: 8 }}
+        />
+        <SkeletonBlock
+          width="100%"
+          height={12}
+          borderRadius={6}
+          backgroundColor={skeletonColor}
+          style={{ marginTop: 10 }}
+        />
+      </View>
+
+      <SkeletonBlock
+        width="42%"
+        height={11}
+        borderRadius={6}
+        backgroundColor={skeletonColor}
+        style={{ marginBottom: 10 }}
+      />
+
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <SkeletonBlock
+          width={112}
+          height={32}
+          borderRadius={8}
+          backgroundColor={skeletonColor}
+        />
+        <SkeletonBlock
+          width={86}
+          height={32}
+          borderRadius={8}
+          backgroundColor={skeletonColor}
+        />
+      </View>
+    </View>
+  );
+
+  const normalizeBillStatus = (status: any) =>
+    String(status || "")
+      .trim()
+      .toLowerCase();
+
+  const filteredBills = billsForDisplay.filter((p: any) => {
+    const status = normalizeBillStatus(p.status);
+    if (filter === "all") return true;
+    if (filter === "pending") {
+      return (
+        !status ||
+        status === "pending" ||
+        status === "rejected" ||
+        status === "recorded" ||
+        status === "unpaid"
+      );
+    }
+    if (filter === "verify") return status === "pending_confirmation";
+    if (filter === "paid") return status === "paid";
+    if (filter === "cancelled") return status === "cancelled";
+    return true;
+  });
+
+  const visibleBills = filteredBills.slice(0, visibleBillCount);
+
+  useEffect(() => {
+    setVisibleBillCount(PAYMENT_LIST_PAGE_SIZE);
+  }, [filter, paymentRequests]);
+
+  const loadMoreBills = () => {
+    if (visibleBillCount >= filteredBills.length) return;
+    setVisibleBillCount((prev) =>
+      Math.min(prev + PAYMENT_LIST_PAGE_SIZE, filteredBills.length),
+    );
+  };
+
   return (
     <SafeAreaView
       style={{
@@ -2419,67 +2730,74 @@ export default function Payments() {
       </View>
 
       <View style={{ flex: 1 }}>
-        <ScrollView
-          contentContainerStyle={{ padding: 15, paddingBottom: 130 }}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => loadData(session.user.id, profile.role)}
-            />
-          }
-        >
-          {loading ? (
-            <ActivityIndicator color="black" style={{ marginTop: 20 }} />
-          ) : (
-            (() => {
-              const filtered = paymentRequests.filter((p: any) => {
-                if (filter === "all") return true;
-                if (filter === "pending") {
-                  return (
-                    !p.status ||
-                    p.status === "pending" ||
-                    p.status === "rejected" ||
-                    p.status === "recorded" ||
-                    p.status === "unpaid"
-                  );
-                }
-                if (filter === "verify")
-                  return p.status === "pending_confirmation";
-                if (filter === "paid") return p.status === "paid";
-                if (filter === "cancelled") return p.status === "cancelled";
-                return true;
-              });
-
-              if (filtered.length === 0) {
-                return (
-                  <View style={{ alignItems: "center", marginTop: 50 }}>
-                    <Ionicons name="documents-outline" size={48} color="#ccc" />
-                    <Text
-                      style={{
-                        textAlign: "center",
-                        marginTop: 10,
-                        color: "#999",
-                        fontWeight: "600",
-                      }}
-                    >
-                      {filter === "all"
-                        ? "No bills found"
-                        : filter === "pending"
-                          ? "No pending bills"
-                          : filter === "verify"
-                            ? "No payments to verify"
-                            : filter === "cancelled"
-                              ? "No cancelled bills"
-                              : "No paid history"}
-                    </Text>
-                  </View>
-                );
-              }
-              return filtered.map(renderBillCard);
-            })()
-          )}
-          <View style={{ height: 40 }} />
-        </ScrollView>
+        {loading ? (
+          <FlatList
+            data={Array.from(
+              { length: PAYMENT_LOADING_SKELETON_COUNT },
+              (_, index) => `payment-skeleton-${index}`,
+            )}
+            keyExtractor={(item) => item}
+            renderItem={({ item }) => renderBillSkeletonCard(item)}
+            contentContainerStyle={{
+              padding: 15,
+              paddingBottom: 130,
+            }}
+            showsVerticalScrollIndicator={false}
+          />
+        ) : (
+          <FlatList
+            data={visibleBills}
+            keyExtractor={(item) => String(item.id)}
+            renderItem={({ item }) => renderBillCard(item)}
+            contentContainerStyle={{
+              padding: 15,
+              paddingBottom: 130,
+              flexGrow: 1,
+            }}
+            initialNumToRender={PAYMENT_LIST_PAGE_SIZE}
+            onEndReached={loadMoreBills}
+            onEndReachedThreshold={0.2}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => loadData(session.user.id, profile.role)}
+              />
+            }
+            ListFooterComponent={
+              visibleBillCount < filteredBills.length ? (
+                <View style={styles.lazyLoadFooter}>
+                  {renderBillSkeletonCard("payment-footer-skeleton-1")}
+                  {renderBillSkeletonCard("payment-footer-skeleton-2")}
+                </View>
+              ) : (
+                <View style={{ height: 40 }} />
+              )
+            }
+            ListEmptyComponent={
+              <View style={{ alignItems: "center", marginTop: 50 }}>
+                <Ionicons name="documents-outline" size={48} color="#ccc" />
+                <Text
+                  style={{
+                    textAlign: "center",
+                    marginTop: 10,
+                    color: "#999",
+                    fontWeight: "600",
+                  }}
+                >
+                  {filter === "all"
+                    ? "No bills found"
+                    : filter === "pending"
+                      ? "No pending bills"
+                      : filter === "verify"
+                        ? "No payments to verify"
+                        : filter === "cancelled"
+                          ? "No cancelled bills"
+                          : "No paid history"}
+                </Text>
+              </View>
+            }
+          />
+        )}
       </View>
 
       {/* CREATE MODAL */}
@@ -3893,6 +4211,16 @@ const styles = StyleSheet.create({
   tabActive: { backgroundColor: "black" },
   tabText: { color: "#666", fontWeight: "bold", fontSize: 12 },
   tabTextActive: { color: "white" },
+  lazyLoadFooter: {
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  lazyLoadFooterText: {
+    fontSize: 12,
+    color: "#9ca3af",
+    fontWeight: "600",
+  },
   label: {
     fontSize: 12,
     fontWeight: "bold",

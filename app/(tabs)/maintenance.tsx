@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker, {
-  DateTimePickerAndroid,
+    DateTimePickerAndroid,
 } from "@react-native-community/datetimepicker";
 import { decode } from "base64-arraybuffer";
 import { ResizeMode, Video } from "expo-av";
@@ -8,19 +8,21 @@ import * as ImagePicker from "expo-image-picker";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Image,
-  Modal,
-  Platform,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Easing,
+    FlatList,
+    Image,
+    Modal,
+    Platform,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRealtime } from "../../hooks/useRealtime";
@@ -29,10 +31,70 @@ import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
 
 const isVideoUrl = (url: string) => /\.(mp4|mov|webm)(\?.*)?$/i.test(url);
+const ACTIVE_MAINTENANCE_REQUEST_LIMIT = 2;
+const ACTIVE_MAINTENANCE_STATUSES = ["pending", "scheduled", "in_progress"];
+const MAINTENANCE_PAGE_SIZE = 5;
+const MAINTENANCE_LOADING_SKELETON_COUNT = 5;
+
+function SkeletonBlock({
+  width = "100%",
+  height,
+  borderRadius = 10,
+  backgroundColor,
+  style,
+}: {
+  width?: number | string;
+  height: number;
+  borderRadius?: number;
+  backgroundColor: string;
+  style?: any;
+}) {
+  const opacity = useRef(new Animated.Value(0.55)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0.55,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    animation.start();
+    return () => {
+      animation.stop();
+    };
+  }, [opacity]);
+
+  return (
+    <Animated.View
+      style={[
+        {
+          width,
+          height,
+          borderRadius,
+          backgroundColor,
+          opacity,
+        },
+        style,
+      ]}
+    />
+  );
+}
 
 export default function MaintenanceScreen() {
   const router = useRouter();
   const { isDark, colors } = useTheme();
+  const skeletonColor = isDark ? "rgba(148, 163, 184, 0.22)" : "#e5e7eb";
   const API_URL = process.env.EXPO_PUBLIC_API_URL || "";
   const syncInFlightRef = useRef(false);
   const [session, setSession] = useState<any>(null);
@@ -42,6 +104,9 @@ export default function MaintenanceScreen() {
   const [occupiedProperty, setOccupiedProperty] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [requestsPage, setRequestsPage] = useState(0);
+  const [hasMoreRequests, setHasMoreRequests] = useState(true);
+  const [loadingMoreRequests, setLoadingMoreRequests] = useState(false);
 
   // Modals
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -138,14 +203,29 @@ export default function MaintenanceScreen() {
     low: { bg: "#eff6ff", text: "#1d4ed8", border: "#bfdbfe" },
   };
 
-  async function loadRequestsWithProfile(sess: any, prof: any) {
+  async function loadRequestsWithProfile(
+    sess: any,
+    prof: any,
+    options: { append?: boolean; page?: number } = {},
+  ) {
+    const append = options.append === true;
+    const targetPage = options.page ?? 0;
+
+    if (append) {
+      setLoadingMoreRequests(true);
+    }
+
     try {
       let query = supabase
         .from("maintenance_requests")
         .select(
           "*, properties(title, landlord), tenant_profile:profiles!maintenance_requests_tenant_fkey(first_name, last_name)",
         )
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .range(
+          targetPage * MAINTENANCE_PAGE_SIZE,
+          targetPage * MAINTENANCE_PAGE_SIZE + MAINTENANCE_PAGE_SIZE - 1,
+        );
 
       if (prof.role === "tenant") {
         let tenantIds = [sess.user.id];
@@ -200,7 +280,10 @@ export default function MaintenanceScreen() {
             myProps.map((p: any) => p.id),
           );
         } else {
-          setRequests([]);
+          if (!append) {
+            setRequests([]);
+          }
+          setHasMoreRequests(false);
           return;
         }
       }
@@ -208,9 +291,14 @@ export default function MaintenanceScreen() {
       const { data, error } = await query;
       if (error) {
         console.log("Load requests error:", error);
-      } else if (data && data.length > 0) {
+        return;
+      }
+
+      const pageRows = data || [];
+
+      if (pageRows.length > 0) {
         // Resolve family members via API lookup to show tags
-        const tenantIdsInRequests = [...new Set(data.map((r) => r.tenant))];
+        const tenantIdsInRequests = [...new Set(pageRows.map((r) => r.tenant))];
         let fmMap = {};
         try {
           const API_URL = process.env.EXPO_PUBLIC_API_URL || "";
@@ -233,7 +321,7 @@ export default function MaintenanceScreen() {
           }
         } catch (err) {}
 
-        const enrichedRequests = data.map((req: any) => ({
+        const enrichedRequests = pageRows.map((req: any) => ({
           ...req,
           is_family_member: !!(fmMap as any)[req.tenant],
           primary_tenant_name: (fmMap as any)[req.tenant]
@@ -259,12 +347,32 @@ export default function MaintenanceScreen() {
           return req;
         });
 
-        setRequests(finalRequests);
+        if (append) {
+          setRequests((prev) => {
+            const existingIds = new Set(prev.map((req) => req.id));
+            const nextRows = finalRequests.filter(
+              (req) => !existingIds.has(req.id),
+            );
+            return [...prev, ...nextRows];
+          });
+        } else {
+          setRequests(finalRequests);
+        }
+
+        setRequestsPage(targetPage);
+        setHasMoreRequests(pageRows.length === MAINTENANCE_PAGE_SIZE);
       } else {
-        setRequests([]);
+        if (!append) {
+          setRequests([]);
+        }
+        setHasMoreRequests(false);
       }
     } catch (e) {
       console.log("Load requests exception:", e);
+    } finally {
+      if (append) {
+        setLoadingMoreRequests(false);
+      }
     }
   }
 
@@ -458,6 +566,128 @@ export default function MaintenanceScreen() {
   const isPendingLikeStatus = (value: any) =>
     normalizeStatus(value).includes("pending");
 
+  const resolveHouseholdTenantIds = async (userId: string) => {
+    const tenantIds = new Set<string>([userId]);
+    let parentOccupancyId: string | null = null;
+
+    const { data: primaryOccupancy } = await supabase
+      .from("tenant_occupancies")
+      .select("id")
+      .eq("tenant_id", userId)
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (primaryOccupancy?.id) {
+      parentOccupancyId = primaryOccupancy.id;
+    }
+
+    if (!parentOccupancyId) {
+      const { data: familyLinkRows } = await supabase
+        .from("family_members")
+        .select("parent_occupancy_id")
+        .eq("member_id", userId)
+        .limit(1);
+
+      if (familyLinkRows?.[0]?.parent_occupancy_id) {
+        parentOccupancyId = familyLinkRows[0].parent_occupancy_id;
+      }
+    }
+
+    if (!parentOccupancyId && API_URL) {
+      try {
+        const urlPrefix = API_URL.endsWith("/")
+          ? API_URL.slice(0, -1)
+          : API_URL;
+        const res = await fetch(
+          `${urlPrefix}/api/family-members?member_id=${encodeURIComponent(userId)}`,
+        );
+        if (res.ok) {
+          const fmData = await res.json();
+          const occupancy = fmData?.occupancy;
+          if (occupancy?.parent_occupancy_id) {
+            parentOccupancyId = occupancy.parent_occupancy_id;
+          } else if (occupancy?.id) {
+            parentOccupancyId = occupancy.id;
+          }
+        }
+      } catch (err) {
+        console.log("Family member resolution error:", err);
+      }
+    }
+
+    if (!parentOccupancyId) {
+      return Array.from(tenantIds);
+    }
+
+    const { data: occupancy } = await supabase
+      .from("tenant_occupancies")
+      .select("tenant_id")
+      .eq("id", parentOccupancyId)
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (occupancy?.tenant_id) {
+      tenantIds.add(occupancy.tenant_id);
+    }
+
+    const { data: familyMembers } = await supabase
+      .from("family_members")
+      .select("member_id")
+      .eq("parent_occupancy_id", parentOccupancyId);
+
+    (familyMembers || []).forEach((member: any) => {
+      if (member?.member_id) {
+        tenantIds.add(member.member_id);
+      }
+    });
+
+    return Array.from(tenantIds);
+  };
+
+  const getActiveHouseholdMaintenanceCount = async (userId: string) => {
+    const householdTenantIds = await resolveHouseholdTenantIds(userId);
+    const { count, error } = await supabase
+      .from("maintenance_requests")
+      .select("id", { count: "exact", head: true })
+      .in("tenant", householdTenantIds)
+      .in("status", ACTIVE_MAINTENANCE_STATUSES);
+
+    if (error) {
+      throw error;
+    }
+
+    return count || 0;
+  };
+
+  const isCreateRequestDisabled = loading || uploading;
+
+  const openCreateRequestModal = async () => {
+    if (loading) {
+      Alert.alert("Please wait", "Maintenance list is still loading.");
+      return;
+    }
+
+    if (!session?.user?.id) return;
+
+    try {
+      const activeCount = await getActiveHouseholdMaintenanceCount(
+        session.user.id,
+      );
+
+      if (activeCount >= ACTIVE_MAINTENANCE_REQUEST_LIMIT) {
+        Alert.alert(
+          "Limit Reached",
+          `Your household can only have ${ACTIVE_MAINTENANCE_REQUEST_LIMIT} active maintenance requests at a time.`,
+        );
+        return;
+      }
+
+      setShowCreateModal(true);
+    } catch (err) {
+      Alert.alert("Error", "Unable to validate maintenance request limit.");
+    }
+  };
+
   const canTenantEditRequest = (request: any) =>
     isPendingLikeStatus(request?.status) && !request?.scheduled_date;
 
@@ -483,6 +713,26 @@ export default function MaintenanceScreen() {
     await refreshRequestsRealtimeSafe();
     setRefreshing(false);
   }
+
+  const loadMoreRequests = useCallback(async () => {
+    if (!session || !profile) return;
+    if (loading || refreshing || loadingMoreRequests || !hasMoreRequests) {
+      return;
+    }
+
+    await loadRequestsWithProfile(session, profile, {
+      append: true,
+      page: requestsPage + 1,
+    });
+  }, [
+    session,
+    profile,
+    loading,
+    refreshing,
+    loadingMoreRequests,
+    hasMoreRequests,
+    requestsPage,
+  ]);
 
   // --- ACTIONS ---
 
@@ -1336,6 +1586,24 @@ export default function MaintenanceScreen() {
       return;
     }
 
+    let activeHouseholdRequestCount = 0;
+    try {
+      activeHouseholdRequestCount = await getActiveHouseholdMaintenanceCount(
+        session.user.id,
+      );
+    } catch (countError) {
+      Alert.alert("Error", "Unable to validate maintenance request limit.");
+      return;
+    }
+
+    if (activeHouseholdRequestCount >= ACTIVE_MAINTENANCE_REQUEST_LIMIT) {
+      Alert.alert(
+        "Limit Reached",
+        `Your household (primary tenant and family members) can only have ${ACTIVE_MAINTENANCE_REQUEST_LIMIT} active maintenance requests at a time.`,
+      );
+      return;
+    }
+
     setUploading(true);
     try {
       const attachmentUrls = await uploadProofFiles();
@@ -1820,6 +2088,95 @@ export default function MaintenanceScreen() {
     );
   };
 
+  const renderSkeletonRequestCard = (cardKey: string) => (
+    <View
+      key={cardKey}
+      style={[
+        styles.card,
+        {
+          backgroundColor: isDark ? colors.card : "white",
+          borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+        },
+      ]}
+    >
+      <View
+        style={[
+          styles.cardHeaderStrip,
+          {
+            backgroundColor: isDark ? colors.surface : "#f9fafb",
+            borderBottomColor: isDark ? colors.border : "#f3f4f6",
+          },
+        ]}
+      >
+        <View style={styles.cardHeaderLeft}>
+          <SkeletonBlock
+            width={116}
+            height={18}
+            borderRadius={9}
+            backgroundColor={skeletonColor}
+          />
+          <SkeletonBlock
+            width={96}
+            height={18}
+            borderRadius={9}
+            backgroundColor={skeletonColor}
+            style={{ marginLeft: 8 }}
+          />
+        </View>
+        <SkeletonBlock
+          width={92}
+          height={12}
+          borderRadius={6}
+          backgroundColor={skeletonColor}
+        />
+      </View>
+
+      <View style={styles.cardBody}>
+        <SkeletonBlock
+          width="58%"
+          height={18}
+          borderRadius={8}
+          backgroundColor={skeletonColor}
+        />
+        <SkeletonBlock
+          width="76%"
+          height={13}
+          borderRadius={7}
+          backgroundColor={skeletonColor}
+          style={{ marginTop: 12 }}
+        />
+        <SkeletonBlock
+          width="44%"
+          height={13}
+          borderRadius={7}
+          backgroundColor={skeletonColor}
+          style={{ marginTop: 8 }}
+        />
+        <SkeletonBlock
+          width="100%"
+          height={64}
+          borderRadius={10}
+          backgroundColor={skeletonColor}
+          style={{ marginTop: 12 }}
+        />
+        <View style={[styles.actionRow, { marginTop: 14 }]}>
+          <SkeletonBlock
+            width={108}
+            height={34}
+            borderRadius={10}
+            backgroundColor={skeletonColor}
+          />
+          <SkeletonBlock
+            width={120}
+            height={34}
+            borderRadius={10}
+            backgroundColor={skeletonColor}
+          />
+        </View>
+      </View>
+    </View>
+  );
+
   // --- MAIN RENDER ---
   return (
     <SafeAreaView
@@ -1861,8 +2218,12 @@ export default function MaintenanceScreen() {
         </View>
         {profile?.role === "tenant" && (
           <TouchableOpacity
-            onPress={() => setShowCreateModal(true)}
-            style={styles.createBtn}
+            onPress={openCreateRequestModal}
+            disabled={isCreateRequestDisabled}
+            style={[
+              styles.createBtn,
+              isCreateRequestDisabled && { opacity: 0.45 },
+            ]}
           >
             <Ionicons name="add" size={22} color="white" />
           </TouchableOpacity>
@@ -1960,16 +2321,31 @@ export default function MaintenanceScreen() {
 
       {/* List */}
       {loading ? (
-        <View style={styles.loadingBox}>
-          <ActivityIndicator size="large" color="#111" />
-          <Text style={styles.loadingText}>Loading maintenance list...</Text>
-        </View>
+        <FlatList
+          data={Array.from(
+            { length: MAINTENANCE_LOADING_SKELETON_COUNT },
+            (_, index) => `maintenance-skeleton-${index}`,
+          )}
+          renderItem={({ item }) => renderSkeletonRequestCard(item)}
+          keyExtractor={(item) => item}
+          contentContainerStyle={{ padding: 16, paddingBottom: 130 }}
+          showsVerticalScrollIndicator={false}
+        />
       ) : (
         <FlatList
           data={filteredRequests}
           renderItem={renderItem}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ padding: 16, paddingBottom: 130 }}
+          onEndReached={loadMoreRequests}
+          onEndReachedThreshold={0.25}
+          ListFooterComponent={
+            loadingMoreRequests ? (
+              <View style={styles.loadingMoreBox}>
+                {renderSkeletonRequestCard("maintenance-footer-skeleton")}
+              </View>
+            ) : null
+          }
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
@@ -3187,6 +3563,12 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   loadingText: { fontSize: 13, color: "#9ca3af" },
+  loadingMoreBox: {
+    paddingVertical: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
   emptyState: { alignItems: "center", marginTop: 60 },
   emptyIcon: {
     width: 80,

@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
+  Animated,
+  Easing,
   Image,
   SafeAreaView,
   ScrollView,
@@ -33,6 +34,63 @@ type PropertyRow = {
   images?: any;
 };
 
+const LANDLORD_DETAILS_SKELETON_COUNT = 4;
+
+function SkeletonBlock({
+  width = "100%",
+  height,
+  borderRadius = 10,
+  backgroundColor,
+  style,
+}: {
+  width?: number | string;
+  height: number;
+  borderRadius?: number;
+  backgroundColor: string;
+  style?: any;
+}) {
+  const opacity = useRef(new Animated.Value(0.55)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0.55,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    animation.start();
+    return () => {
+      animation.stop();
+    };
+  }, [opacity]);
+
+  return (
+    <Animated.View
+      style={[
+        {
+          width,
+          height,
+          borderRadius,
+          backgroundColor,
+          opacity,
+        },
+        style,
+      ]}
+    />
+  );
+}
+
 function extractFirstImage(images: any): string | null {
   if (!images) return null;
   if (Array.isArray(images) && images.length > 0) {
@@ -47,6 +105,7 @@ export default function LandlordDetailsScreen() {
   const landlordId = Array.isArray(id) ? id[0] : id;
 
   const { isDark, colors } = useTheme();
+  const skeletonColor = isDark ? "rgba(148, 163, 184, 0.22)" : "#e5e7eb";
   const [loading, setLoading] = useState(true);
   const [landlord, setLandlord] = useState<LandlordProfile | null>(null);
   const [properties, setProperties] = useState<PropertyRow[]>([]);
@@ -122,11 +181,128 @@ export default function LandlordDetailsScreen() {
     return (
       <SafeAreaView
         style={[
-          styles.center,
+          styles.container,
           { backgroundColor: isDark ? colors.background : "#f9fafb" },
         ]}
       >
-        <ActivityIndicator size="large" color={isDark ? colors.text : "#111"} />
+        <View style={styles.headerRow}>
+          <View style={[styles.backBtn, { marginTop: 40 }]} />
+          <SkeletonBlock
+            width={150}
+            height={18}
+            borderRadius={8}
+            backgroundColor={skeletonColor}
+            style={{ marginTop: 40 }}
+          />
+          <View style={{ width: 36 }} />
+        </View>
+
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+          <View
+            style={[
+              styles.profileCard,
+              {
+                backgroundColor: isDark ? colors.card : "#fff",
+                borderColor: isDark ? colors.border : "#e5e7eb",
+              },
+            ]}
+          >
+            <SkeletonBlock
+              width={64}
+              height={64}
+              borderRadius={32}
+              backgroundColor={skeletonColor}
+              style={{ marginBottom: 8 }}
+            />
+            <SkeletonBlock
+              width={170}
+              height={18}
+              borderRadius={8}
+              backgroundColor={skeletonColor}
+            />
+            <SkeletonBlock
+              width={120}
+              height={13}
+              borderRadius={7}
+              backgroundColor={skeletonColor}
+              style={{ marginTop: 8 }}
+            />
+            <SkeletonBlock
+              width="72%"
+              height={12}
+              borderRadius={6}
+              backgroundColor={skeletonColor}
+              style={{ marginTop: 10 }}
+            />
+            <SkeletonBlock
+              width="58%"
+              height={12}
+              borderRadius={6}
+              backgroundColor={skeletonColor}
+              style={{ marginTop: 8 }}
+            />
+          </View>
+
+          <SkeletonBlock
+            width={170}
+            height={16}
+            borderRadius={8}
+            backgroundColor={skeletonColor}
+            style={{ marginBottom: 10 }}
+          />
+
+          {Array.from(
+            { length: LANDLORD_DETAILS_SKELETON_COUNT },
+            (_, index) => `landlord-detail-skeleton-${index}`,
+          ).map((cardKey) => (
+            <View
+              key={cardKey}
+              style={[
+                styles.propertyCard,
+                {
+                  backgroundColor: isDark ? colors.card : "#fff",
+                  borderColor: isDark ? colors.border : "#e5e7eb",
+                },
+              ]}
+            >
+              <SkeletonBlock
+                width={86}
+                height={86}
+                borderRadius={10}
+                backgroundColor={skeletonColor}
+              />
+              <View style={{ flex: 1 }}>
+                <SkeletonBlock
+                  width="64%"
+                  height={14}
+                  borderRadius={7}
+                  backgroundColor={skeletonColor}
+                />
+                <SkeletonBlock
+                  width="86%"
+                  height={11}
+                  borderRadius={6}
+                  backgroundColor={skeletonColor}
+                  style={{ marginTop: 8 }}
+                />
+                <SkeletonBlock
+                  width="42%"
+                  height={13}
+                  borderRadius={7}
+                  backgroundColor={skeletonColor}
+                  style={{ marginTop: 8 }}
+                />
+                <SkeletonBlock
+                  width={102}
+                  height={30}
+                  borderRadius={8}
+                  backgroundColor={skeletonColor}
+                  style={{ marginTop: 10 }}
+                />
+              </View>
+            </View>
+          ))}
+        </ScrollView>
       </SafeAreaView>
     );
   }

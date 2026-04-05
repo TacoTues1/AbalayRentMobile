@@ -9,42 +9,37 @@ export default function EntryScreen() {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    const checkSession = async () => {
-      try {
-        // First get the locally cached session
+    const wait = (ms: number) =>
+      new Promise((resolve) => setTimeout(resolve, ms));
+
+    const getRestoredSession = async () => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
         const {
           data: { session },
         } = await supabase.auth.getSession();
 
-        if (session) {
-          // Validate the session against the server (not just local cache)
-          // This prevents stale/expired sessions from auto-logging users in
-          const {
-            data: { user },
-            error,
-          } = await supabase.auth.getUser();
+        if (session) return session;
+        if (attempt < 2) await wait(250);
+      }
 
-          if (user && !error) {
-            // Session is valid on the server -> route by role
-            const destination = await getUserRouteById(user.id);
-            router.replace(destination as any);
-          } else {
-            // Session is stale/expired -> clear it and show welcome
-            await supabase.auth.signOut();
-            router.replace("/welcome");
-          }
+      return null;
+    };
+
+    const checkSession = async () => {
+      try {
+        // Allow storage hydration to complete before deciding user is logged out.
+        const session = await getRestoredSession();
+
+        if (session) {
+          const destination = await getUserRouteById(session.user.id);
+          router.replace(destination as any);
         } else {
           // No session at all -> show welcome screen
           router.replace("/welcome");
         }
       } catch (error) {
         console.log("Session check error:", error);
-        // On any error, clear session and show welcome
-        try {
-          await supabase.auth.signOut();
-        } catch (e) {
-          /* ignore */
-        }
+        // Avoid clearing persisted sessions for transient startup/network errors.
         router.replace("/welcome");
       } finally {
         setChecking(false);

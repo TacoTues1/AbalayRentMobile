@@ -6,7 +6,9 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Dimensions,
+  Easing,
   Image,
   Keyboard,
   KeyboardAvoidingView,
@@ -30,6 +32,7 @@ import { useTheme } from "../../../lib/theme";
 
 const { width } = Dimensions.get("window");
 const CARD_WIDTH = width * 0.75;
+const NO_OCCUPANCY_LOADING_SKELETON_COUNT = 6;
 
 const getApiBaseUrl = () => {
   const raw = (process.env.EXPO_PUBLIC_API_URL || "").trim();
@@ -67,6 +70,61 @@ const getNextUtilityDateText = (dayNum?: number | null) => {
     year: "numeric",
   });
 };
+
+function SkeletonBlock({
+  width = "100%",
+  height,
+  borderRadius = 10,
+  backgroundColor,
+  style,
+}: {
+  width?: number | string;
+  height: number;
+  borderRadius?: number;
+  backgroundColor: string;
+  style?: any;
+}) {
+  const opacity = useRef(new Animated.Value(0.55)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0.55,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    animation.start();
+    return () => {
+      animation.stop();
+    };
+  }, [opacity]);
+
+  return (
+    <Animated.View
+      style={[
+        {
+          width,
+          height,
+          borderRadius,
+          backgroundColor,
+          opacity,
+        },
+        style,
+      ]}
+    />
+  );
+}
 
 export default function TenantDashboard({ session, profile }: any) {
   const router = useRouter();
@@ -158,6 +216,9 @@ export default function TenantDashboard({ session, profile }: any) {
   const [securityDepositProcessing, setSecurityDepositProcessing] =
     useState(false);
   const [totalRentPaid, setTotalRentPaid] = useState(0);
+  const [occupancySectionReady, setOccupancySectionReady] = useState(false);
+  const [financialSectionsReady, setFinancialSectionsReady] = useState(false);
+  const [familySectionReady, setFamilySectionReady] = useState(false);
 
   // Family State
   const [isFamilyMember, setIsFamilyMember] = useState(false);
@@ -174,6 +235,15 @@ export default function TenantDashboard({ session, profile }: any) {
   );
   const [loadingFamily, setLoadingFamily] = useState(false);
   const FAMILY_MEMBER_LIMIT = 4;
+
+  const skeletonColor = isDark ? "rgba(148, 163, 184, 0.22)" : "#e5e7eb";
+  const showActivePropertySkeleton =
+    !!occupancy && (!occupancySectionReady || !occupancy?.property);
+  const showSecurityDepositSkeleton = !!occupancy && !financialSectionsReady;
+  const showFamilyMembersSkeleton =
+    !!occupancy && (!familySectionReady || loadingFamily);
+  const showRecentPaymentsSkeleton = !!occupancy && !financialSectionsReady;
+  const showPaymentOverviewSkeleton = !!occupancy && !financialSectionsReady;
 
   // Renewals
   const [daysUntilContractEnd, setDaysUntilContractEnd] = useState<
@@ -210,7 +280,7 @@ export default function TenantDashboard({ session, profile }: any) {
     useCallback(() => {
       if (session && !loading) {
         // Only refresh silently if it already loaded once
-        loadInitialData();
+        loadInitialData({ silentRefresh: true });
       }
     }, [session, profile, loading]),
   );
@@ -257,11 +327,12 @@ export default function TenantDashboard({ session, profile }: any) {
     loadInitialData();
   }, []);
 
-  async function loadInitialData() {
+  async function loadInitialData(options?: { silentRefresh?: boolean }) {
+    const silentRefresh = !!options?.silentRefresh;
     try {
       const [, canReview] = await Promise.all([
         loadPropertiesData(),
-        loadOccupancyData(),
+        loadOccupancyData(silentRefresh),
       ]);
       if (canReview) {
         await checkPendingReviews(true);
@@ -334,10 +405,20 @@ export default function TenantDashboard({ session, profile }: any) {
     }
   };
 
-  const loadOccupancyData = async () => {
+  const loadOccupancyData = async (silentRefresh: boolean = false) => {
     try {
+      const shouldResetSectionLoading = !silentRefresh || !occupancy;
+      if (shouldResetSectionLoading) {
+        setOccupancySectionReady(false);
+        setFinancialSectionsReady(false);
+        setFamilySectionReady(false);
+      }
+
       if (!session?.user) {
         console.log("loadOccupancyData: No session user");
+        setOccupancySectionReady(true);
+        setFinancialSectionsReady(true);
+        setFamilySectionReady(true);
         return false;
       }
       console.log("loadOccupancyData: Fetching for user:", session.user.id);
@@ -589,6 +670,9 @@ export default function TenantDashboard({ session, profile }: any) {
             (hasProcessingDeposit && !hasPaidDeposit),
           ),
         );
+        setOccupancySectionReady(Boolean(resolvedOccupancy?.property));
+        setFinancialSectionsReady(true);
+        setFamilySectionReady(false);
 
         calculateNextPayment(
           resolvedOccupancyId,
@@ -985,6 +1069,9 @@ export default function TenantDashboard({ session, profile }: any) {
             setSecurityDepositProcessing(
               hasProcessingDeposit && !hasPaidDeposit,
             );
+            setOccupancySectionReady(Boolean(normalizedFallbackOcc?.property));
+            setFinancialSectionsReady(true);
+            setFamilySectionReady(false);
 
             calculateNextPayment(
               normalizedFallbackOcc.id,
@@ -1069,14 +1156,23 @@ export default function TenantDashboard({ session, profile }: any) {
       setOccupancy(occ);
 
       if (occ) {
+        setOccupancySectionReady(Boolean(occ?.property));
         setDaysUntilContractEnd(null);
 
         // Financials
         await loadFinancials(occ.id, occ);
+        setFinancialSectionsReady(true);
+      } else {
+        setOccupancySectionReady(true);
+        setFinancialSectionsReady(true);
+        setFamilySectionReady(true);
       }
       return true;
     } catch (err) {
       console.error("loadOccupancyData Exception:", err);
+      setOccupancySectionReady(true);
+      setFinancialSectionsReady(true);
+      setFamilySectionReady(true);
       return false;
     }
   };
@@ -1410,12 +1506,20 @@ export default function TenantDashboard({ session, profile }: any) {
   // --- FAMILY MEMBERS FUNCTIONS ---
 
   const loadFamilyMembers = async () => {
-    if (!occupancy) return;
+    if (!occupancy) {
+      setFamilySectionReady(true);
+      return;
+    }
     const occId = occupancy.is_family_member
       ? occupancy.parent_occupancy_id
       : occupancy.id;
-    if (!occId) return;
+    if (!occId) {
+      setFamilyMembers([]);
+      setFamilySectionReady(true);
+      return;
+    }
 
+    setFamilySectionReady(false);
     setLoadingFamily(true);
     try {
       const API_URL = getApiBaseUrl();
@@ -1437,6 +1541,7 @@ export default function TenantDashboard({ session, profile }: any) {
       console.error("Failed to load family members:", err);
     }
     setLoadingFamily(false);
+    setFamilySectionReady(true);
   };
 
   useEffect(() => {
@@ -1487,12 +1592,29 @@ export default function TenantDashboard({ session, profile }: any) {
     return () => clearTimeout(timer);
   }, [familySearchQuery]);
 
+  const isFamilyPlanLimitError = (message: any) => {
+    const normalized = String(message || "").toLowerCase();
+    return (
+      normalized.includes("limit") ||
+      normalized.includes("slot") ||
+      normalized.includes("subscription") ||
+      normalized.includes("plan")
+    );
+  };
+
   const addFamilyMember = async (memberId: string) => {
     if (!occupancy || isFamilyMember) return;
     if (familyMembers.length >= FAMILY_MEMBER_LIMIT) {
       Alert.alert(
         "Limit reached",
-        `You can only add up to ${FAMILY_MEMBER_LIMIT} family members.`,
+        "Plan slot limit reached. Open Add Family to buy extra slots.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Open Add Family",
+            onPress: () => router.push("/(tabs)/add-family" as any),
+          },
+        ],
       );
       return;
     }
@@ -1660,6 +1782,21 @@ export default function TenantDashboard({ session, profile }: any) {
             setFamilySearchResults([]);
             loadFamilyMembers();
           } else {
+            if (isFamilyPlanLimitError(data?.error)) {
+              Alert.alert(
+                "Plan slot limit reached",
+                "Your free plan has no remaining family slots. Open Add Family to buy extra slots.",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Open Add Family",
+                    onPress: () => router.push("/(tabs)/add-family" as any),
+                  },
+                ],
+              );
+              return;
+            }
+
             const recovered = await ensureFamilyLink();
             if (recovered) {
               Alert.alert("Success", "Family member added successfully!");
@@ -2635,7 +2772,56 @@ export default function TenantDashboard({ session, profile }: any) {
     );
   };
 
-  if (loading) {
+  const renderNoOccupancySkeletonCard = (cardKey: string) => (
+    <View
+      key={cardKey}
+      style={[
+        styles.gridCard,
+        {
+          backgroundColor: isDark ? colors.card : "white",
+          borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+        },
+      ]}
+    >
+      <SkeletonBlock
+        width="100%"
+        height={120}
+        borderRadius={0}
+        backgroundColor={skeletonColor}
+      />
+      <View style={{ padding: 9 }}>
+        <SkeletonBlock
+          width="74%"
+          height={10}
+          borderRadius={5}
+          backgroundColor={skeletonColor}
+        />
+        <SkeletonBlock
+          width="52%"
+          height={9}
+          borderRadius={5}
+          backgroundColor={skeletonColor}
+          style={{ marginTop: 6 }}
+        />
+        <SkeletonBlock
+          width="38%"
+          height={9}
+          borderRadius={5}
+          backgroundColor={skeletonColor}
+          style={{ marginTop: 6 }}
+        />
+        <SkeletonBlock
+          width="100%"
+          height={11}
+          borderRadius={6}
+          backgroundColor={skeletonColor}
+          style={{ marginTop: 8 }}
+        />
+      </View>
+    </View>
+  );
+
+  if (loading && !occupancy) {
     return (
       <View
         style={[
@@ -2643,38 +2829,62 @@ export default function TenantDashboard({ session, profile }: any) {
           { backgroundColor: isDark ? colors.background : "#f8fafc" },
         ]}
       >
-        <View
-          style={{
-            flex: 1,
-            justifyContent: "center",
-            alignItems: "center",
-            paddingBottom: 60,
-          }}
-        >
-          <ActivityIndicator
-            size="large"
-            color={isDark ? colors.text : "#111827"}
-          />
-          <Text
+        <ScrollView contentContainerStyle={{ paddingBottom: 130 }}>
+          <View
             style={{
-              marginTop: 16,
-              fontSize: 15,
-              fontWeight: "600",
-              color: isDark ? colors.textSecondary : "#4b5563",
+              flexDirection: "row",
+              paddingHorizontal: 16,
+              paddingTop: 14,
+              paddingBottom: 8,
+              gap: 10,
+              alignItems: "center",
             }}
           >
-            Loading your dashboard...
-          </Text>
-          <Text
+            <SkeletonBlock
+              width="82%"
+              height={46}
+              borderRadius={14}
+              backgroundColor={skeletonColor}
+            />
+            <SkeletonBlock
+              width={46}
+              height={46}
+              borderRadius={14}
+              backgroundColor={skeletonColor}
+            />
+          </View>
+
+          <View
             style={{
-              marginTop: 6,
-              fontSize: 12,
-              color: isDark ? colors.textMuted : "#9ca3af",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              paddingHorizontal: 16,
+              paddingTop: 4,
+              paddingBottom: 10,
             }}
           >
-            Fetching property & payment data
-          </Text>
-        </View>
+            <SkeletonBlock
+              width={150}
+              height={18}
+              borderRadius={7}
+              backgroundColor={skeletonColor}
+            />
+            <SkeletonBlock
+              width={28}
+              height={18}
+              borderRadius={8}
+              backgroundColor={skeletonColor}
+            />
+          </View>
+
+          <View style={styles.browseGrid}>
+            {Array.from(
+              { length: NO_OCCUPANCY_LOADING_SKELETON_COUNT },
+              (_, index) => `no-occupancy-skeleton-${index}`,
+            ).map((itemKey) => renderNoOccupancySkeletonCard(itemKey))}
+          </View>
+        </ScrollView>
       </View>
     );
   }
@@ -2696,99 +2906,164 @@ export default function TenantDashboard({ session, profile }: any) {
           <View style={styles.dashboardContent}>
             {/* Header */}
             <View style={styles.headerRow}>
-              <View>
-                <Text
-                  style={[
-                    styles.headerTitle,
-                    { color: isDark ? colors.text : "#111" },
-                  ]}
-                >
-                  Your Active Property
-                </Text>
-                <Text
-                  style={[
-                    styles.headerSubtitle,
-                    { color: isDark ? colors.textSecondary : "#666" },
-                  ]}
-                >
-                  Manage your stay and payments.
-                </Text>
-              </View>
+              {showActivePropertySkeleton ? (
+                <View style={{ gap: 8 }}>
+                  <SkeletonBlock
+                    width={170}
+                    height={20}
+                    borderRadius={8}
+                    backgroundColor={skeletonColor}
+                  />
+                  <SkeletonBlock
+                    width={210}
+                    height={14}
+                    borderRadius={7}
+                    backgroundColor={skeletonColor}
+                  />
+                </View>
+              ) : (
+                <View>
+                  <Text
+                    style={[
+                      styles.headerTitle,
+                      { color: isDark ? colors.text : "#111" },
+                    ]}
+                  >
+                    Your Active Property
+                  </Text>
+                  <Text
+                    style={[
+                      styles.headerSubtitle,
+                      { color: isDark ? colors.textSecondary : "#666" },
+                    ]}
+                  >
+                    Manage your stay and payments.
+                  </Text>
+                </View>
+              )}
             </View>
 
             {/* 1. Main Property Card */}
-            <View
-              style={[
-                styles.activeCard,
-                {
-                  backgroundColor: isDark ? colors.card : "white",
-                  borderColor: isDark ? colors.cardBorder : "#eee",
-                },
-              ]}
-            >
-              <View style={styles.activeImageContainer}>
-                <Image
-                  source={{
-                    uri:
-                      occupancy.property?.images?.[activePropertyImageIndex] ||
-                      "https://via.placeholder.com/600",
-                  }}
-                  style={styles.activeImage}
-                />
-                <LinearGradient
-                  colors={["transparent", "rgba(0,0,0,0.7)"]}
-                  style={styles.activeGradient}
-                />
-
-                <View style={styles.activeBadge}>
-                  <View
-                    style={[
-                      styles.statusDot,
-                      occupancy.status === "pending_end"
-                        ? { backgroundColor: "#f59e0b" }
-                        : { backgroundColor: "#10b981" },
-                    ]}
-                  />
-                  <Text style={styles.activeBadgeText}>
-                    {occupancy.status === "pending_end"
-                      ? "Move-out Pending"
-                      : "Active Property"}
-                  </Text>
-                </View>
-
-                {/* Title Overlay */}
-                <View style={styles.activeInfoOverlay}>
-                  <Text style={styles.activeTitle} numberOfLines={1}>
-                    {occupancy.property?.title}
-                  </Text>
-                  <Text style={styles.activeAddress} numberOfLines={1}>
-                    {occupancy.property?.address}, {occupancy.property?.city}
-                  </Text>
-                </View>
-
-                {/* Slider Dots */}
-                {occupancy.property?.images?.length > 1 && (
-                  <View style={styles.sliderDots}>
-                    {occupancy.property.images.map((_: any, i: number) => (
-                      <View
-                        key={i}
-                        style={[
-                          styles.dot,
-                          i === activePropertyImageIndex && styles.dotActive,
-                        ]}
-                      />
-                    ))}
-                  </View>
-                )}
-              </View>
-
+            {showActivePropertySkeleton ? (
               <View
                 style={[
-                  styles.activeContent,
-                  { backgroundColor: isDark ? colors.card : "white" },
+                  styles.activeCard,
+                  {
+                    backgroundColor: isDark ? colors.card : "white",
+                    borderColor: isDark ? colors.cardBorder : "#eee",
+                  },
                 ]}
               >
-                {/* <View
+                <View style={styles.activeImageContainer}>
+                  <SkeletonBlock
+                    width="100%"
+                    height={220}
+                    borderRadius={0}
+                    backgroundColor={skeletonColor}
+                  />
+                </View>
+                <View
+                  style={[
+                    styles.activeContent,
+                    { backgroundColor: isDark ? colors.card : "white" },
+                  ]}
+                >
+                  <SkeletonBlock
+                    width="62%"
+                    height={12}
+                    borderRadius={6}
+                    backgroundColor={skeletonColor}
+                  />
+                  <SkeletonBlock
+                    width="100%"
+                    height={40}
+                    borderRadius={10}
+                    backgroundColor={skeletonColor}
+                    style={{ marginTop: 12 }}
+                  />
+                  <SkeletonBlock
+                    width="100%"
+                    height={40}
+                    borderRadius={10}
+                    backgroundColor={skeletonColor}
+                    style={{ marginTop: 10 }}
+                  />
+                </View>
+              </View>
+            ) : (
+              <View
+                style={[
+                  styles.activeCard,
+                  {
+                    backgroundColor: isDark ? colors.card : "white",
+                    borderColor: isDark ? colors.cardBorder : "#eee",
+                  },
+                ]}
+              >
+                <View style={styles.activeImageContainer}>
+                  <Image
+                    source={{
+                      uri:
+                        occupancy.property?.images?.[
+                          activePropertyImageIndex
+                        ] || "https://via.placeholder.com/600",
+                    }}
+                    style={styles.activeImage}
+                  />
+                  <LinearGradient
+                    colors={["transparent", "rgba(0,0,0,0.7)"]}
+                    style={styles.activeGradient}
+                  />
+
+                  <View style={styles.activeBadge}>
+                    <View
+                      style={[
+                        styles.statusDot,
+                        occupancy.status === "pending_end"
+                          ? { backgroundColor: "#f59e0b" }
+                          : { backgroundColor: "#10b981" },
+                      ]}
+                    />
+                    <Text style={styles.activeBadgeText}>
+                      {occupancy.status === "pending_end"
+                        ? "Move-out Pending"
+                        : "Active Property"}
+                    </Text>
+                  </View>
+
+                  {/* Title Overlay */}
+                  <View style={styles.activeInfoOverlay}>
+                    <Text style={styles.activeTitle} numberOfLines={1}>
+                      {occupancy.property?.title}
+                    </Text>
+                    <Text style={styles.activeAddress} numberOfLines={1}>
+                      {occupancy.property?.address}, {occupancy.property?.city}
+                    </Text>
+                  </View>
+
+                  {/* Slider Dots */}
+                  {occupancy.property?.images?.length > 1 && (
+                    <View style={styles.sliderDots}>
+                      {occupancy.property.images.map((_: any, i: number) => (
+                        <View
+                          key={i}
+                          style={[
+                            styles.dot,
+                            i === activePropertyImageIndex && styles.dotActive,
+                          ]}
+                        />
+                      ))}
+                    </View>
+                  )}
+                </View>
+
+                <View
+                  style={[
+                    styles.activeContent,
+                    { backgroundColor: isDark ? colors.card : "white" },
+                  ]}
+                >
+                  {/* <View
                   style={[
                     styles.leaseRow,
                     { borderBottomColor: isDark ? colors.border : "#f3f4f6" },
@@ -2814,268 +3089,180 @@ export default function TenantDashboard({ session, profile }: any) {
                   </View>
                 </View> */}
 
-                <View style={styles.gridActions}>
-                  <TouchableOpacity
-                    style={[
-                      styles.gridBtn,
-                      { backgroundColor: isDark ? colors.surface : "#f3f4f6" },
-                    ]}
-                    onPress={() =>
-                      router.push(
-                        `/properties/${occupancy.property?.id}` as any,
-                      )
-                    }
-                  >
-                    <Text
+                  <View style={styles.gridActions}>
+                    <TouchableOpacity
                       style={[
-                        styles.btnTextGray,
-                        { color: isDark ? colors.text : "#374151" },
+                        styles.gridBtn,
+                        {
+                          backgroundColor: isDark ? colors.surface : "#f3f4f6",
+                        },
                       ]}
-                    >
-                      View Details
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.gridBtn,
-                      occupancy.contract_url
-                        ? styles.btnBlack
-                        : {
-                            backgroundColor: isDark
-                              ? colors.surface
-                              : "#f3f4f6",
-                          },
-                    ]}
-                    disabled={!occupancy.contract_url}
-                    onPress={() =>
-                      occupancy.contract_url &&
-                      Linking.openURL(occupancy.contract_url)
-                    }
-                  >
-                    <Ionicons
-                      name="document-text-outline"
-                      size={16}
-                      color={
-                        occupancy.contract_url
-                          ? "white"
-                          : isDark
-                            ? colors.textMuted
-                            : "#999"
-                      }
-                      style={{ marginRight: 4 }}
-                    />
-                    <Text
-                      style={
-                        occupancy.contract_url
-                          ? styles.btnTextWhite
-                          : [
-                              styles.btnTextDisabled,
-                              { color: isDark ? colors.textMuted : "#9ca3af" },
-                            ]
+                      onPress={() =>
+                        router.push(
+                          `/properties/${occupancy.property?.id}` as any,
+                        )
                       }
                     >
-                      {occupancy.contract_url
-                        ? "View Contract"
-                        : "Contract Pending"}
-                    </Text>
-                  </TouchableOpacity>
+                      <Text
+                        style={[
+                          styles.btnTextGray,
+                          { color: isDark ? colors.text : "#374151" },
+                        ]}
+                      >
+                        View Details
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.gridBtn,
+                        occupancy.contract_url
+                          ? styles.btnBlack
+                          : {
+                              backgroundColor: isDark
+                                ? colors.surface
+                                : "#f3f4f6",
+                            },
+                      ]}
+                      disabled={!occupancy.contract_url}
+                      onPress={() =>
+                        occupancy.contract_url &&
+                        Linking.openURL(occupancy.contract_url)
+                      }
+                    >
+                      <Ionicons
+                        name="document-text-outline"
+                        size={16}
+                        color={
+                          occupancy.contract_url
+                            ? "white"
+                            : isDark
+                              ? colors.textMuted
+                              : "#999"
+                        }
+                        style={{ marginRight: 4 }}
+                      />
+                      <Text
+                        style={
+                          occupancy.contract_url
+                            ? styles.btnTextWhite
+                            : [
+                                styles.btnTextDisabled,
+                                {
+                                  color: isDark ? colors.textMuted : "#9ca3af",
+                                },
+                              ]
+                        }
+                      >
+                        {occupancy.contract_url
+                          ? "View Contract"
+                          : "Contract Pending"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                  {!isFamilyMember && (
+                    <View style={[styles.gridActions, { marginTop: 8 }]}></View>
+                  )}
+                  {occupancy.property?.terms_conditions ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.gridBtn,
+                        {
+                          marginTop: 8,
+                          backgroundColor: isDark ? colors.surface : "#f3f4f6",
+                          borderWidth: 1,
+                          borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                          width: "100%",
+                        },
+                      ]}
+                      onPress={() => {
+                        const terms = occupancy.property.terms_conditions;
+                        if (
+                          typeof terms === "string" &&
+                          terms.startsWith("http")
+                        ) {
+                          Linking.openURL(terms);
+                        } else {
+                          setShowTermsModal(true);
+                        }
+                      }}
+                    >
+                      <Ionicons
+                        name="document-text-outline"
+                        size={16}
+                        color={isDark ? colors.textSecondary : "#333"}
+                        style={{ marginRight: 6 }}
+                      />
+                      <Text
+                        style={[
+                          styles.btnTextBlack,
+                          { color: isDark ? colors.text : "#111" },
+                        ]}
+                      >
+                        View Property Terms
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
-                {!isFamilyMember && (
-                  <View style={[styles.gridActions, { marginTop: 8 }]}></View>
-                )}
-                {occupancy.property?.terms_conditions ? (
-                  <TouchableOpacity
-                    style={[
-                      styles.gridBtn,
-                      {
-                        marginTop: 8,
-                        backgroundColor: isDark ? colors.surface : "#f3f4f6",
-                        borderWidth: 1,
-                        borderColor: isDark ? colors.cardBorder : "#e5e7eb",
-                        width: "100%",
-                      },
-                    ]}
-                    onPress={() => {
-                      const terms = occupancy.property.terms_conditions;
-                      if (
-                        typeof terms === "string" &&
-                        terms.startsWith("http")
-                      ) {
-                        Linking.openURL(terms);
-                      } else {
-                        setShowTermsModal(true);
-                      }
-                    }}
-                  >
-                    <Ionicons
-                      name="document-text-outline"
-                      size={16}
-                      color={isDark ? colors.textSecondary : "#333"}
-                      style={{ marginRight: 6 }}
-                    />
-                    <Text
-                      style={[
-                        styles.btnTextBlack,
-                        { color: isDark ? colors.text : "#111" },
-                      ]}
-                    >
-                      View Property Terms
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
               </View>
-            </View>
+            )}
 
             {/* 2. Security Deposit */}
-            <View
-              style={[
-                styles.infoCard,
-                {
-                  backgroundColor: isDark ? colors.card : "white",
-                  borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                },
-              ]}
-            >
-              <View style={styles.cardHeaderSmall}>
-                <View
-                  style={[
-                    styles.iconCircle,
-                    { backgroundColor: isDark ? colors.badge : "#f3f4f6" },
-                  ]}
-                >
-                  <Ionicons
-                    name="lock-closed-outline"
-                    size={16}
-                    color={isDark ? colors.textSecondary : "#333"}
+            {showSecurityDepositSkeleton ? (
+              <View
+                style={[
+                  styles.infoCard,
+                  {
+                    backgroundColor: isDark ? colors.card : "white",
+                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                  },
+                ]}
+              >
+                <View style={styles.cardHeaderSmall}>
+                  <SkeletonBlock
+                    width={32}
+                    height={32}
+                    borderRadius={16}
+                    backgroundColor={skeletonColor}
+                  />
+                  <SkeletonBlock
+                    width="38%"
+                    height={14}
+                    borderRadius={7}
+                    backgroundColor={skeletonColor}
                   />
                 </View>
-                <Text
-                  style={[
-                    styles.cardTitleSmall,
-                    { color: isDark ? colors.text : "#111" },
-                  ]}
-                >
-                  Security Deposit
-                </Text>
+                <SkeletonBlock
+                  width="100%"
+                  height={12}
+                  borderRadius={6}
+                  backgroundColor={skeletonColor}
+                  style={{ marginBottom: 10 }}
+                />
+                <SkeletonBlock
+                  width="100%"
+                  height={12}
+                  borderRadius={6}
+                  backgroundColor={skeletonColor}
+                  style={{ marginBottom: 10 }}
+                />
+                <SkeletonBlock
+                  width="72%"
+                  height={18}
+                  borderRadius={9}
+                  backgroundColor={skeletonColor}
+                />
               </View>
-              {securityDepositPaid ? (
-                <View>
-                  <View style={styles.rowBetween}>
-                    <Text
-                      style={[
-                        styles.textLabel,
-                        { color: isDark ? colors.textMuted : "#6b7280" },
-                      ]}
-                    >
-                      Total Deposit
-                    </Text>
-                    <Text
-                      style={[
-                        styles.textValueBlack,
-                        { color: isDark ? colors.text : "#000" },
-                      ]}
-                    >
-                      ₱
-                      {Number(occupancy.security_deposit || 0).toLocaleString()}
-                    </Text>
-                  </View>
-                  <View style={styles.rowBetween}>
-                    <Text style={styles.textLabel}>Used</Text>
-                    <Text style={styles.textValueGray}>
-                      ₱
-                      {Number(
-                        occupancy.security_deposit_used || 0,
-                      ).toLocaleString()}
-                    </Text>
-                  </View>
-                  <View
-                    style={[
-                      styles.rowBetween,
-                      styles.borderTop,
-                      {
-                        paddingTop: 8,
-                        marginTop: 4,
-                        borderTopColor: isDark ? colors.border : "#f3f4f6",
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.textLabelBold,
-                        { color: isDark ? colors.text : "#374151" },
-                      ]}
-                    >
-                      Remaining Balance
-                    </Text>
-                    <Text
-                      style={[
-                        styles.textValueBig,
-                        { color: isDark ? colors.text : "#111" },
-                      ]}
-                    >
-                      ₱
-                      {Number(
-                        (occupancy.security_deposit || 0) -
-                          (occupancy.security_deposit_used || 0),
-                      ).toLocaleString()}
-                    </Text>
-                  </View>
-                  {daysUntilContractEnd !== null &&
-                    daysUntilContractEnd <= 30 && (
-                      <View style={styles.tipBox}>
-                        <Text style={styles.tipText}>
-                          💡 Deposit can be used for last month.
-                        </Text>
-                      </View>
-                    )}
-                </View>
-              ) : securityDepositProcessing ? (
-                <View style={styles.centerBox}>
-                  <Ionicons
-                    name="hourglass-outline"
-                    size={24}
-                    color="#f59e0b"
-                    style={{ marginBottom: 4 }}
-                  />
-                  <Text
-                    style={[
-                      styles.textLabel,
-                      { color: "#f59e0b", fontWeight: "bold" },
-                    ]}
-                  >
-                    Deposit Payment Processing
-                  </Text>
-                  <Text style={styles.textValueGray}>
-                    Please wait for confirmation.
-                  </Text>
-                </View>
-              ) : (
-                <View style={styles.centerBox}>
-                  <Text style={styles.textLabel}>
-                    No security deposit paid yet
-                  </Text>
-                  <Text style={styles.textValueGray}>
-                    Required: ₱
-                    {Number(occupancy.security_deposit || 0).toLocaleString()}
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            {/* Family Members Section */}
-            <View
-              style={[
-                styles.infoCard,
-                {
-                  backgroundColor: isDark ? colors.card : "white",
-                  borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                },
-              ]}
-            >
-              <View style={[styles.rowBetween, { marginBottom: 12 }]}>
-                <View
-                  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-                >
+            ) : (
+              <View
+                style={[
+                  styles.infoCard,
+                  {
+                    backgroundColor: isDark ? colors.card : "white",
+                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                  },
+                ]}
+              >
+                <View style={styles.cardHeaderSmall}>
                   <View
                     style={[
                       styles.iconCircle,
@@ -3083,844 +3270,1258 @@ export default function TenantDashboard({ session, profile }: any) {
                     ]}
                   >
                     <Ionicons
-                      name="people-outline"
+                      name="lock-closed-outline"
                       size={16}
-                      color={isDark ? colors.textSecondary : "#374151"}
+                      color={isDark ? colors.textSecondary : "#333"}
                     />
                   </View>
-                  <View>
-                    <Text
-                      style={[
-                        styles.cardTitleSmall,
-                        { color: isDark ? colors.text : "#111" },
-                      ]}
-                    >
-                      Family Members
-                    </Text>
-                    <Text
-                      style={{
-                        fontSize: 10,
-                        color: isDark ? colors.textMuted : "#6b7280",
-                      }}
-                    >
-                      {familyMembers.length + 1}/5 members
-                    </Text>
-                  </View>
-                </View>
-                {!isFamilyMember && familyMembers.length < 4 && (
-                  <TouchableOpacity
-                    onPress={() => router.push("/(tabs)/add-family" as any)}
-                    style={{
-                      backgroundColor: isDark ? colors.surface : "#f3f4f6",
-                      paddingHorizontal: 10,
-                      paddingVertical: 4,
-                      borderRadius: 12,
-                      borderWidth: 1,
-                      borderColor: isDark ? colors.cardBorder : "#e5e7eb",
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontSize: 10,
-                        fontWeight: "bold",
-                        color: isDark ? colors.text : "#111827",
-                      }}
-                    >
-                      + Add Member
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-
-              {/* Primary Tenant (Mother) */}
-              <View
-                style={{
-                  padding: 10,
-                  backgroundColor: isDark ? colors.surface : "#f9fafb",
-                  borderRadius: 12,
-                  borderWidth: 1,
-                  borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                  marginBottom: 8,
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 10,
-                }}
-              >
-                <View
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 16,
-                    backgroundColor: "#4b5563",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  {isFamilyMember && occupancy?.tenant?.avatar_url ? (
-                    <Image
-                      source={{ uri: occupancy.tenant.avatar_url }}
-                      style={{ width: 32, height: 32, borderRadius: 16 }}
-                    />
-                  ) : !isFamilyMember && profile?.avatar_url ? (
-                    <Image
-                      source={{ uri: profile.avatar_url }}
-                      style={{ width: 32, height: 32, borderRadius: 16 }}
-                    />
-                  ) : (
-                    <Text
-                      style={{
-                        color: "white",
-                        fontSize: 12,
-                        fontWeight: "bold",
-                      }}
-                    >
-                      {isFamilyMember
-                        ? `${occupancy?.tenant?.first_name?.[0] || ""}${occupancy?.tenant?.last_name?.[0] || ""}`
-                        : `${profile?.first_name?.[0] || ""}${profile?.last_name?.[0] || ""}`}
-                    </Text>
-                  )}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      fontWeight: "bold",
-                      color: isDark ? colors.text : "#111827",
-                    }}
-                  >
-                    {isFamilyMember
-                      ? `${occupancy?.tenant?.first_name || ""} ${occupancy?.tenant?.last_name || ""}`.trim() ||
-                        "Primary Tenant"
-                      : `${profile?.first_name} ${profile?.last_name}`}
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      color: isDark ? colors.textMuted : "#6b7280",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    Primary Tenant
-                  </Text>
-                </View>
-                <View
-                  style={{
-                    backgroundColor: isDark ? colors.surface : "#e5e7eb",
-                    paddingHorizontal: 8,
-                    paddingVertical: 2,
-                    borderRadius: 10,
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 9,
-                      fontWeight: "bold",
-                      color: isDark ? colors.textSecondary : "#374151",
-                    }}
-                  >
-                    Owner
-                  </Text>
-                </View>
-              </View>
-
-              {/* Members List */}
-              {loadingFamily ? (
-                <ActivityIndicator
-                  size="small"
-                  color="#6366f1"
-                  style={{ marginVertical: 10 }}
-                />
-              ) : familyMembers.length > 0 ? (
-                <View style={{ gap: 6 }}>
-                  {familyMembers.map((fm) => (
-                    <View
-                      key={fm.id}
-                      style={{
-                        padding: 10,
-                        backgroundColor: isDark ? colors.surface : "#f9fafb",
-                        borderRadius: 12,
-                        borderWidth: 1,
-                        borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 10,
-                      }}
-                    >
-                      <View
-                        style={{
-                          width: 32,
-                          height: 32,
-                          borderRadius: 16,
-                          backgroundColor: "#e5e7eb",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        {fm.member_profile?.avatar_url ? (
-                          <Image
-                            source={{ uri: fm.member_profile.avatar_url }}
-                            style={{ width: 32, height: 32, borderRadius: 16 }}
-                          />
-                        ) : (
-                          <Text
-                            style={{
-                              color: "#374151",
-                              fontSize: 10,
-                              fontWeight: "bold",
-                            }}
-                          >
-                            {`${fm.member_profile?.first_name?.[0] || ""}${fm.member_profile?.last_name?.[0] || ""}`}
-                          </Text>
-                        )}
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text
-                          style={{
-                            fontSize: 12,
-                            fontWeight: "bold",
-                            color: isDark ? colors.text : "#111827",
-                          }}
-                          numberOfLines={1}
-                        >
-                          {fm.member_profile?.first_name}{" "}
-                          {fm.member_profile?.last_name}
-                        </Text>
-                        <Text
-                          style={{
-                            fontSize: 10,
-                            color: isDark ? colors.textMuted : "#9ca3af",
-                          }}
-                          numberOfLines={1}
-                        >
-                          {fm.member_profile?.email}
-                        </Text>
-                      </View>
-                      {!isFamilyMember &&
-                        (confirmRemoveMember === fm.id ? (
-                          <View style={{ flexDirection: "row", gap: 4 }}>
-                            <TouchableOpacity
-                              onPress={() => removeFamilyMember(fm.id)}
-                              disabled={removingMember === fm.id}
-                              style={{
-                                backgroundColor: "#fef2f2",
-                                borderColor: "#fecaca",
-                                borderWidth: 1,
-                                paddingHorizontal: 6,
-                                paddingVertical: 2,
-                                borderRadius: 6,
-                              }}
-                            >
-                              <Text
-                                style={{
-                                  fontSize: 9,
-                                  fontWeight: "bold",
-                                  color: "#ef4444",
-                                }}
-                              >
-                                Yes
-                              </Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              onPress={() => setConfirmRemoveMember(null)}
-                              style={{
-                                backgroundColor: "#f3f4f6",
-                                paddingHorizontal: 6,
-                                paddingVertical: 2,
-                                borderRadius: 6,
-                              }}
-                            >
-                              <Text
-                                style={{
-                                  fontSize: 9,
-                                  fontWeight: "bold",
-                                  color: "#6b7280",
-                                }}
-                              >
-                                No
-                              </Text>
-                            </TouchableOpacity>
-                          </View>
-                        ) : (
-                          <TouchableOpacity
-                            onPress={() => setConfirmRemoveMember(fm.id)}
-                            style={{ padding: 4 }}
-                          >
-                            <Ionicons
-                              name="trash-outline"
-                              size={16}
-                              color="#ef4444"
-                            />
-                          </TouchableOpacity>
-                        ))}
-                    </View>
-                  ))}
-                </View>
-              ) : (
-                <View style={{ alignItems: "center", paddingVertical: 10 }}>
-                  <Text style={{ fontSize: 11, color: "#9ca3af" }}>
-                    No family members added yet.
-                  </Text>
-                </View>
-              )}
-
-              {isFamilyMember && (
-                <View
-                  style={{
-                    marginTop: 10,
-                    padding: 9,
-                    backgroundColor: isDark ? "rgba(180,83,9,0.12)" : "#fffbeb",
-                    borderRadius: 10,
-                    borderWidth: 1,
-                    borderColor: isDark ? "rgba(180,83,9,0.25)" : "#fde68a",
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 8,
-                  }}
-                >
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "flex-start",
-                      flex: 1,
-                      gap: 6,
-                    }}
-                  >
-                    <Ionicons
-                      name="information-circle-outline"
-                      size={14}
-                      color={isDark ? "#fbbf24" : "#b45309"}
-                      style={{ marginTop: 0 }}
-                    />
-                    <Text
-                      style={{
-                        fontSize: 10,
-                        lineHeight: 14,
-                        color: isDark ? "#fbbf24" : "#92400e",
-                        fontWeight: "700",
-                        flex: 1,
-                      }}
-                    >
-                      You are a family member. Only the primary tenant can
-                      manage family members.
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={confirmLeaveFamilyGroup}
-                    disabled={leavingFamily}
-                    style={{
-                      paddingHorizontal: 10,
-                      paddingVertical: 5,
-                      borderRadius: 10,
-                      borderWidth: 1,
-                      borderColor: isDark
-                        ? "rgba(252,165,165,0.45)"
-                        : "#fecaca",
-                      backgroundColor: isDark
-                        ? "rgba(127,29,29,0.35)"
-                        : "#fef2f2",
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 4,
-                    }}
-                  >
-                    {leavingFamily ? (
-                      <ActivityIndicator
-                        size="small"
-                        color={isDark ? "#fecaca" : "#b91c1c"}
-                      />
-                    ) : (
-                      <Ionicons
-                        name="exit-outline"
-                        size={12}
-                        color={isDark ? "#fecaca" : "#b91c1c"}
-                      />
-                    )}
-                    <Text
-                      style={{
-                        fontSize: 10,
-                        fontWeight: "bold",
-                        color: isDark ? "#fecaca" : "#b91c1c",
-                      }}
-                    >
-                      {leavingFamily ? "Leaving..." : "Leave Family"}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-
-            {/* 4. Recent Payments */}
-            <View
-              style={[
-                styles.infoCard,
-                {
-                  backgroundColor: isDark ? colors.card : "white",
-                  borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                },
-              ]}
-            >
-              <View style={[styles.rowBetween, { marginBottom: 16 }]}>
-                <View
-                  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-                >
                   <Text
                     style={[
                       styles.cardTitleSmall,
                       { color: isDark ? colors.text : "#111" },
                     ]}
                   >
-                    Recent Payments
+                    Security Deposit
                   </Text>
-                  {pendingPayments.length > 0 && (
-                    <View style={styles.badgeRed}>
-                      <Text style={styles.badgeRedText}>
-                        {pendingPayments.length} Pending
+                </View>
+                {securityDepositPaid ? (
+                  <View>
+                    <View style={styles.rowBetween}>
+                      <Text
+                        style={[
+                          styles.textLabel,
+                          { color: isDark ? colors.textMuted : "#6b7280" },
+                        ]}
+                      >
+                        Total Deposit
+                      </Text>
+                      <Text
+                        style={[
+                          styles.textValueBlack,
+                          { color: isDark ? colors.text : "#000" },
+                        ]}
+                      >
+                        ₱
+                        {Number(
+                          occupancy.security_deposit || 0,
+                        ).toLocaleString()}
                       </Text>
                     </View>
-                  )}
-                </View>
-                <TouchableOpacity
-                  onPress={() => router.push("/payments" as any)}
-                >
-                  <Text style={styles.seeAllText}>See All</Text>
-                </TouchableOpacity>
-              </View>
-
-              {pendingPayments.length > 0 ? (
-                pendingPayments.map((bill, i) => {
-                  const total =
-                    (Number(bill.rent_amount) || 0) +
-                    (Number(bill.water_bill) || 0) +
-                    (Number(bill.electrical_bill) || 0) +
-                    (Number(bill.other_bills) || 0) +
-                    (Number(bill.security_deposit_amount) || 0) +
-                    (Number(bill.advance_amount) || 0);
-                  const isMoveIn =
-                    bill.is_move_in_payment ||
-                    Number(bill.security_deposit_amount) > 0;
-                  return (
+                    <View style={styles.rowBetween}>
+                      <Text style={styles.textLabel}>Used</Text>
+                      <Text style={styles.textValueGray}>
+                        ₱
+                        {Number(
+                          occupancy.security_deposit_used || 0,
+                        ).toLocaleString()}
+                      </Text>
+                    </View>
                     <View
-                      key={i}
                       style={[
-                        styles.billRow,
+                        styles.rowBetween,
+                        styles.borderTop,
                         {
-                          backgroundColor: isDark ? colors.surface : "#f8fafc",
-                          borderColor: isDark ? colors.cardBorder : "#f1f5f9",
+                          paddingTop: 8,
+                          marginTop: 4,
+                          borderTopColor: isDark ? colors.border : "#f3f4f6",
                         },
                       ]}
                     >
-                      <View
+                      <Text
+                        style={[
+                          styles.textLabelBold,
+                          { color: isDark ? colors.text : "#374151" },
+                        ]}
+                      >
+                        Remaining Balance
+                      </Text>
+                      <Text
+                        style={[
+                          styles.textValueBig,
+                          { color: isDark ? colors.text : "#111" },
+                        ]}
+                      >
+                        ₱
+                        {Number(
+                          (occupancy.security_deposit || 0) -
+                            (occupancy.security_deposit_used || 0),
+                        ).toLocaleString()}
+                      </Text>
+                    </View>
+                    {daysUntilContractEnd !== null &&
+                      daysUntilContractEnd <= 30 && (
+                        <View style={styles.tipBox}>
+                          <Text style={styles.tipText}>
+                            💡 Deposit can be used for last month.
+                          </Text>
+                        </View>
+                      )}
+                  </View>
+                ) : securityDepositProcessing ? (
+                  <View style={styles.centerBox}>
+                    <Ionicons
+                      name="hourglass-outline"
+                      size={24}
+                      color="#f59e0b"
+                      style={{ marginBottom: 4 }}
+                    />
+                    <Text
+                      style={[
+                        styles.textLabel,
+                        { color: "#f59e0b", fontWeight: "bold" },
+                      ]}
+                    >
+                      Deposit Payment Processing
+                    </Text>
+                    <Text style={styles.textValueGray}>
+                      Please wait for confirmation.
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={styles.centerBox}>
+                    <Text style={styles.textLabel}>
+                      No security deposit paid yet
+                    </Text>
+                    <Text style={styles.textValueGray}>
+                      Required: ₱
+                      {Number(occupancy.security_deposit || 0).toLocaleString()}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* Family Members Section */}
+            {showFamilyMembersSkeleton ? (
+              <View
+                style={[
+                  styles.infoCard,
+                  {
+                    backgroundColor: isDark ? colors.card : "white",
+                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                  },
+                ]}
+              >
+                <View style={[styles.rowBetween, { marginBottom: 12 }]}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <SkeletonBlock
+                      width={32}
+                      height={32}
+                      borderRadius={16}
+                      backgroundColor={skeletonColor}
+                    />
+                    <View>
+                      <SkeletonBlock
+                        width={124}
+                        height={14}
+                        borderRadius={7}
+                        backgroundColor={skeletonColor}
+                      />
+                      <SkeletonBlock
+                        width={88}
+                        height={10}
+                        borderRadius={5}
+                        backgroundColor={skeletonColor}
+                        style={{ marginTop: 6 }}
+                      />
+                    </View>
+                  </View>
+                  {!isFamilyMember && (
+                    <SkeletonBlock
+                      width={92}
+                      height={24}
+                      borderRadius={12}
+                      backgroundColor={skeletonColor}
+                    />
+                  )}
+                </View>
+
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <View
+                    key={`family-skeleton-${index}`}
+                    style={{
+                      padding: 10,
+                      backgroundColor: isDark ? colors.surface : "#f9fafb",
+                      borderRadius: 12,
+                      borderWidth: 1,
+                      borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                      marginBottom: index === 2 ? 0 : 8,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                  >
+                    <SkeletonBlock
+                      width={32}
+                      height={32}
+                      borderRadius={16}
+                      backgroundColor={skeletonColor}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <SkeletonBlock
+                        width="54%"
+                        height={12}
+                        borderRadius={6}
+                        backgroundColor={skeletonColor}
+                      />
+                      <SkeletonBlock
+                        width="68%"
+                        height={10}
+                        borderRadius={5}
+                        backgroundColor={skeletonColor}
+                        style={{ marginTop: 6 }}
+                      />
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View
+                style={[
+                  styles.infoCard,
+                  {
+                    backgroundColor: isDark ? colors.card : "white",
+                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                  },
+                ]}
+              >
+                <View style={[styles.rowBetween, { marginBottom: 12 }]}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <View
+                      style={[
+                        styles.iconCircle,
+                        { backgroundColor: isDark ? colors.badge : "#f3f4f6" },
+                      ]}
+                    >
+                      <Ionicons
+                        name="people-outline"
+                        size={16}
+                        color={isDark ? colors.textSecondary : "#374151"}
+                      />
+                    </View>
+                    <View>
+                      <Text
+                        style={[
+                          styles.cardTitleSmall,
+                          { color: isDark ? colors.text : "#111" },
+                        ]}
+                      >
+                        Family Members
+                      </Text>
+                      <Text
                         style={{
+                          fontSize: 10,
+                          color: isDark ? colors.textMuted : "#6b7280",
+                        }}
+                      >
+                        {familyMembers.length + 1}/5 members
+                      </Text>
+                    </View>
+                  </View>
+                  {!isFamilyMember && familyMembers.length < 4 && (
+                    <TouchableOpacity
+                      onPress={() => router.push("/(tabs)/add-family" as any)}
+                      style={{
+                        backgroundColor: isDark ? colors.surface : "#f3f4f6",
+                        paddingHorizontal: 10,
+                        paddingVertical: 4,
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          fontWeight: "bold",
+                          color: isDark ? colors.text : "#111827",
+                        }}
+                      >
+                        + Add Member
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Primary Tenant (Mother) */}
+                <View
+                  style={{
+                    padding: 10,
+                    backgroundColor: isDark ? colors.surface : "#f9fafb",
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                    marginBottom: 8,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 16,
+                      backgroundColor: "#4b5563",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    {isFamilyMember && occupancy?.tenant?.avatar_url ? (
+                      <Image
+                        source={{ uri: occupancy.tenant.avatar_url }}
+                        style={{ width: 32, height: 32, borderRadius: 16 }}
+                      />
+                    ) : !isFamilyMember && profile?.avatar_url ? (
+                      <Image
+                        source={{ uri: profile.avatar_url }}
+                        style={{ width: 32, height: 32, borderRadius: 16 }}
+                      />
+                    ) : (
+                      <Text
+                        style={{
+                          color: "white",
+                          fontSize: 12,
+                          fontWeight: "bold",
+                        }}
+                      >
+                        {isFamilyMember
+                          ? `${occupancy?.tenant?.first_name?.[0] || ""}${occupancy?.tenant?.last_name?.[0] || ""}`
+                          : `${profile?.first_name?.[0] || ""}${profile?.last_name?.[0] || ""}`}
+                      </Text>
+                    )}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={{
+                        fontSize: 13,
+                        fontWeight: "bold",
+                        color: isDark ? colors.text : "#111827",
+                      }}
+                    >
+                      {isFamilyMember
+                        ? `${occupancy?.tenant?.first_name || ""} ${occupancy?.tenant?.last_name || ""}`.trim() ||
+                          "Primary Tenant"
+                        : `${profile?.first_name} ${profile?.last_name}`}
+                    </Text>
+                    <Text
+                      style={{
+                        fontSize: 10,
+                        color: isDark ? colors.textMuted : "#6b7280",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      Primary Tenant
+                    </Text>
+                  </View>
+                  <View
+                    style={{
+                      backgroundColor: isDark ? colors.surface : "#e5e7eb",
+                      paddingHorizontal: 8,
+                      paddingVertical: 2,
+                      borderRadius: 10,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 9,
+                        fontWeight: "bold",
+                        color: isDark ? colors.textSecondary : "#374151",
+                      }}
+                    >
+                      Owner
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Members List */}
+                {loadingFamily ? (
+                  <ActivityIndicator
+                    size="small"
+                    color="#6366f1"
+                    style={{ marginVertical: 10 }}
+                  />
+                ) : familyMembers.length > 0 ? (
+                  <View style={{ gap: 6 }}>
+                    {familyMembers.map((fm) => (
+                      <View
+                        key={fm.id}
+                        style={{
+                          padding: 10,
+                          backgroundColor: isDark ? colors.surface : "#f9fafb",
+                          borderRadius: 12,
+                          borderWidth: 1,
+                          borderColor: isDark ? colors.cardBorder : "#f3f4f6",
                           flexDirection: "row",
                           alignItems: "center",
                           gap: 10,
                         }}
                       >
                         <View
-                          style={[
-                            styles.billIcon,
-                            {
-                              backgroundColor: isDark ? colors.card : "white",
-                              borderColor: isDark
-                                ? colors.cardBorder
-                                : "#e2e8f0",
-                            },
-                          ]}
+                          style={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: 16,
+                            backgroundColor: "#e5e7eb",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
                         >
-                          <Ionicons
-                            name={
-                              bill.rent_amount > 0
-                                ? "home-outline"
-                                : "flash-outline"
-                            }
-                            size={18}
-                            color={isDark ? colors.textSecondary : "#333"}
-                          />
-                        </View>
-                        <View>
-                          <Text
-                            style={[
-                              styles.billTitle,
-                              { color: isDark ? colors.text : "#334155" },
-                            ]}
-                          >
-                            {isMoveIn
-                              ? "Move-in Bill"
-                              : bill.rent_amount > 0
-                                ? "House Rent"
-                                : "Utility Bill"}
-                          </Text>
-                          {bill.status === "pending_confirmation" ? (
-                            <Text
-                              style={[
-                                styles.billDate,
-                                { color: "#f59e0b", fontWeight: "bold" },
-                              ]}
-                            >
-                              Processing Payment
-                            </Text>
-                          ) : bill.status === "rejected" ? (
-                            <Text
-                              style={[
-                                styles.billDate,
-                                { color: "#ef4444", fontWeight: "bold" },
-                              ]}
-                            >
-                              Payment Rejected
-                            </Text>
+                          {fm.member_profile?.avatar_url ? (
+                            <Image
+                              source={{ uri: fm.member_profile.avatar_url }}
+                              style={{
+                                width: 32,
+                                height: 32,
+                                borderRadius: 16,
+                              }}
+                            />
                           ) : (
-                            <Text style={styles.billDate}>
-                              Due:{" "}
-                              {new Date(bill.due_date).toLocaleDateString()}
+                            <Text
+                              style={{
+                                color: "#374151",
+                                fontSize: 10,
+                                fontWeight: "bold",
+                              }}
+                            >
+                              {`${fm.member_profile?.first_name?.[0] || ""}${fm.member_profile?.last_name?.[0] || ""}`}
                             </Text>
                           )}
                         </View>
-                      </View>
-                      <View style={{ alignItems: "flex-end" }}>
-                        <Text
-                          style={[
-                            styles.billAmount,
-                            { color: isDark ? colors.text : "#0f172a" },
-                          ]}
-                        >
-                          ₱{total.toLocaleString()}
-                        </Text>
-                        {bill.status === "pending_confirmation" ? (
-                          <View
-                            style={[
-                              styles.payBtnSmall,
-                              { backgroundColor: "#fef3c7" },
-                            ]}
+                        <View style={{ flex: 1 }}>
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              fontWeight: "bold",
+                              color: isDark ? colors.text : "#111827",
+                            }}
+                            numberOfLines={1}
                           >
-                            <Text
-                              style={[styles.payBtnText, { color: "#d97706" }]}
+                            {fm.member_profile?.first_name}{" "}
+                            {fm.member_profile?.last_name}
+                          </Text>
+                          <Text
+                            style={{
+                              fontSize: 10,
+                              color: isDark ? colors.textMuted : "#9ca3af",
+                            }}
+                            numberOfLines={1}
+                          >
+                            {fm.member_profile?.email}
+                          </Text>
+                        </View>
+                        {!isFamilyMember &&
+                          (confirmRemoveMember === fm.id ? (
+                            <View style={{ flexDirection: "row", gap: 4 }}>
+                              <TouchableOpacity
+                                onPress={() => removeFamilyMember(fm.id)}
+                                disabled={removingMember === fm.id}
+                                style={{
+                                  backgroundColor: "#fef2f2",
+                                  borderColor: "#fecaca",
+                                  borderWidth: 1,
+                                  paddingHorizontal: 6,
+                                  paddingVertical: 2,
+                                  borderRadius: 6,
+                                }}
+                              >
+                                <Text
+                                  style={{
+                                    fontSize: 9,
+                                    fontWeight: "bold",
+                                    color: "#ef4444",
+                                  }}
+                                >
+                                  Yes
+                                </Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                onPress={() => setConfirmRemoveMember(null)}
+                                style={{
+                                  backgroundColor: "#f3f4f6",
+                                  paddingHorizontal: 6,
+                                  paddingVertical: 2,
+                                  borderRadius: 6,
+                                }}
+                              >
+                                <Text
+                                  style={{
+                                    fontSize: 9,
+                                    fontWeight: "bold",
+                                    color: "#6b7280",
+                                  }}
+                                >
+                                  No
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
+                          ) : (
+                            <TouchableOpacity
+                              onPress={() => setConfirmRemoveMember(fm.id)}
+                              style={{ padding: 4 }}
                             >
-                              {" "}
-                              verifying{" "}
-                            </Text>
-                          </View>
-                        ) : (
-                          <TouchableOpacity
-                            style={styles.payBtnSmall}
-                            onPress={() => router.push("/payments" as any)}
-                          >
-                            <Text style={styles.payBtnText}>
-                              {bill.status === "rejected" ? "Retry" : "Pay Now"}
-                            </Text>
-                          </TouchableOpacity>
-                        )}
+                              <Ionicons
+                                name="trash-outline"
+                                size={16}
+                                color="#ef4444"
+                              />
+                            </TouchableOpacity>
+                          ))}
                       </View>
-                    </View>
-                  );
-                })
-              ) : (
-                <View style={styles.emptyStateBox}>
-                  <Ionicons name="checkmark-circle" size={32} color="#10b981" />
-                  <Text style={styles.emptyStateText}>
-                    You're all caught up!
-                  </Text>
-                </View>
-              )}
-              <Text style={styles.noteText}>
-                Note: Landlord is not liable for late utility payments.
-              </Text>
-            </View>
+                    ))}
+                  </View>
+                ) : (
+                  <View style={{ alignItems: "center", paddingVertical: 10 }}>
+                    <Text style={{ fontSize: 11, color: "#9ca3af" }}>
+                      No family members added yet.
+                    </Text>
+                  </View>
+                )}
 
-            {/* 5. Payment Overview */}
-            <View
-              style={[
-                styles.borderCard,
-                {
-                  backgroundColor: isDark ? colors.card : "white",
-                  borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                },
-              ]}
-            >
-              <Text
+                {isFamilyMember && (
+                  <View
+                    style={{
+                      marginTop: 10,
+                      padding: 9,
+                      backgroundColor: isDark
+                        ? "rgba(180,83,9,0.12)"
+                        : "#fffbeb",
+                      borderRadius: 10,
+                      borderWidth: 1,
+                      borderColor: isDark ? "rgba(180,83,9,0.25)" : "#fde68a",
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                    }}
+                  >
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "flex-start",
+                        flex: 1,
+                        gap: 6,
+                      }}
+                    >
+                      <Ionicons
+                        name="information-circle-outline"
+                        size={14}
+                        color={isDark ? "#fbbf24" : "#b45309"}
+                        style={{ marginTop: 0 }}
+                      />
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          lineHeight: 14,
+                          color: isDark ? "#fbbf24" : "#92400e",
+                          fontWeight: "700",
+                          flex: 1,
+                        }}
+                      >
+                        You are a family member. Only the primary tenant can
+                        manage family members.
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={confirmLeaveFamilyGroup}
+                      disabled={leavingFamily}
+                      style={{
+                        paddingHorizontal: 10,
+                        paddingVertical: 5,
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: isDark
+                          ? "rgba(252,165,165,0.45)"
+                          : "#fecaca",
+                        backgroundColor: isDark
+                          ? "rgba(127,29,29,0.35)"
+                          : "#fef2f2",
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 4,
+                      }}
+                    >
+                      {leavingFamily ? (
+                        <ActivityIndicator
+                          size="small"
+                          color={isDark ? "#fecaca" : "#b91c1c"}
+                        />
+                      ) : (
+                        <Ionicons
+                          name="exit-outline"
+                          size={12}
+                          color={isDark ? "#fecaca" : "#b91c1c"}
+                        />
+                      )}
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          fontWeight: "bold",
+                          color: isDark ? "#fecaca" : "#b91c1c",
+                        }}
+                      >
+                        {leavingFamily ? "Leaving..." : "Leave Family"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* 4. Recent Payments */}
+            {showRecentPaymentsSkeleton ? (
+              <View
                 style={[
-                  styles.cardTitleSmall,
-                  { color: isDark ? colors.text : "#111" },
+                  styles.infoCard,
+                  {
+                    backgroundColor: isDark ? colors.card : "white",
+                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                  },
                 ]}
               >
-                Payment Overview
-              </Text>
-
-              <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
-                <View
-                  style={[
-                    styles.ovBox,
-                    {
-                      backgroundColor: isDark ? colors.surface : "#f9fafb",
-                      borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.ovLabel,
-                      { color: isDark ? colors.textMuted : "#9ca3af" },
-                    ]}
-                  >
-                    NEXT HOUSE DUE DATE
-                  </Text>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 6,
-                      marginVertical: 4,
-                    }}
-                  >
-                    {/* <Ionicons name="calendar-outline" size={18} color="#000" /> */}
-                    <Text
-                      style={[
-                        styles.ovDate,
-                        { fontSize: 15, color: isDark ? colors.text : "#111" },
-                      ]}
-                    >
-                      {nextPaymentDate}
-                    </Text>
-                  </View>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 6,
-                      marginBottom: 4,
-                    }}
-                  >
-                    <Ionicons
-                      name="calendar-outline"
-                      size={14}
-                      color={isDark ? colors.textSecondary : "#333"}
-                    />
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        fontWeight: "600",
-                        color: isDark ? colors.textSecondary : "#333",
-                      }}
-                    >
-                      Expected Bill: ₱
-                      {Number(occupancy.property?.price || 0).toLocaleString()}
-                    </Text>
-                  </View>
+                <View style={[styles.rowBetween, { marginBottom: 16 }]}>
+                  <SkeletonBlock
+                    width={132}
+                    height={14}
+                    borderRadius={7}
+                    backgroundColor={skeletonColor}
+                  />
+                  <SkeletonBlock
+                    width={54}
+                    height={12}
+                    borderRadius={6}
+                    backgroundColor={skeletonColor}
+                  />
                 </View>
 
-                {/* UTILITY DUE DATES BOX */}
-                <View
-                  style={[
-                    styles.ovBox,
-                    {
-                      backgroundColor: isDark ? colors.surface : "#f9fafb",
-                      borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                    },
-                  ]}
-                >
-                  <Text
+                {Array.from({ length: 2 }).map((_, index) => (
+                  <View
+                    key={`recent-payment-skeleton-${index}`}
                     style={[
-                      styles.ovLabel,
-                      { color: isDark ? colors.textMuted : "#9ca3af" },
+                      styles.billRow,
+                      {
+                        backgroundColor: isDark ? colors.surface : "#f8fafc",
+                        borderColor: isDark ? colors.cardBorder : "#f1f5f9",
+                      },
                     ]}
                   >
-                    UTILITY DUE DATES
-                  </Text>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 10,
+                      }}
+                    >
+                      <SkeletonBlock
+                        width={36}
+                        height={36}
+                        borderRadius={8}
+                        backgroundColor={skeletonColor}
+                      />
+                      <View>
+                        <SkeletonBlock
+                          width={108}
+                          height={12}
+                          borderRadius={6}
+                          backgroundColor={skeletonColor}
+                        />
+                        <SkeletonBlock
+                          width={86}
+                          height={10}
+                          borderRadius={5}
+                          backgroundColor={skeletonColor}
+                          style={{ marginTop: 6 }}
+                        />
+                      </View>
+                    </View>
+                    <View style={{ alignItems: "flex-end" }}>
+                      <SkeletonBlock
+                        width={72}
+                        height={12}
+                        borderRadius={6}
+                        backgroundColor={skeletonColor}
+                      />
+                      <SkeletonBlock
+                        width={62}
+                        height={18}
+                        borderRadius={6}
+                        backgroundColor={skeletonColor}
+                        style={{ marginTop: 6 }}
+                      />
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View
+                style={[
+                  styles.infoCard,
+                  {
+                    backgroundColor: isDark ? colors.card : "white",
+                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                  },
+                ]}
+              >
+                <View style={[styles.rowBetween, { marginBottom: 16 }]}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.cardTitleSmall,
+                        { color: isDark ? colors.text : "#111" },
+                      ]}
+                    >
+                      Recent Payments
+                    </Text>
+                    {pendingPayments.length > 0 && (
+                      <View style={styles.badgeRed}>
+                        <Text style={styles.badgeRedText}>
+                          {pendingPayments.length} Pending
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => router.push("/payments" as any)}
+                  >
+                    <Text style={styles.seeAllText}>See All</Text>
+                  </TouchableOpacity>
+                </View>
 
-                  <View style={{ marginTop: 8, gap: 8 }}>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          fontSize: 13,
-                          color: isDark ? colors.textSecondary : "#4b5563",
-                        }}
+                {pendingPayments.length > 0 ? (
+                  pendingPayments.map((bill, i) => {
+                    const total =
+                      (Number(bill.rent_amount) || 0) +
+                      (Number(bill.water_bill) || 0) +
+                      (Number(bill.electrical_bill) || 0) +
+                      (Number(bill.other_bills) || 0) +
+                      (Number(bill.security_deposit_amount) || 0) +
+                      (Number(bill.advance_amount) || 0);
+                    const isMoveIn =
+                      bill.is_move_in_payment ||
+                      Number(bill.security_deposit_amount) > 0;
+                    return (
+                      <View
+                        key={i}
+                        style={[
+                          styles.billRow,
+                          {
+                            backgroundColor: isDark
+                              ? colors.surface
+                              : "#f8fafc",
+                            borderColor: isDark ? colors.cardBorder : "#f1f5f9",
+                          },
+                        ]}
                       >
-                        Water
-                      </Text>
-                      <Text
-                        style={{
-                          fontSize: 13,
-                          fontWeight: "700",
-                          color: isDark ? colors.text : "#111",
-                        }}
-                      >
-                        {getNextUtilityDateText(occupancy.water_due_day)}
-                      </Text>
-                    </View>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          fontSize: 13,
-                          color: isDark ? colors.textSecondary : "#4b5563",
-                        }}
-                      >
-                        Electricity
-                      </Text>
-                      <Text
-                        style={{
-                          fontSize: 13,
-                          fontWeight: "700",
-                          color: isDark ? colors.text : "#111",
-                        }}
-                      >
-                        {getNextUtilityDateText(occupancy.electricity_due_day)}
-                      </Text>
-                    </View>
-                    {occupancy.wifi_due_day !== null &&
-                      occupancy.wifi_due_day !== undefined && (
                         <View
                           style={{
                             flexDirection: "row",
                             alignItems: "center",
-                            justifyContent: "space-between",
+                            gap: 10,
                           }}
                         >
-                          <Text
-                            style={{
-                              fontSize: 13,
-                              color: isDark ? colors.textSecondary : "#4b5563",
-                            }}
+                          <View
+                            style={[
+                              styles.billIcon,
+                              {
+                                backgroundColor: isDark ? colors.card : "white",
+                                borderColor: isDark
+                                  ? colors.cardBorder
+                                  : "#e2e8f0",
+                              },
+                            ]}
                           >
-                            WiFi Internet
-                          </Text>
-                          <Text
-                            style={{
-                              fontSize: 13,
-                              fontWeight: "700",
-                              color: isDark ? colors.text : "#111",
-                            }}
-                          >
-                            {getNextUtilityDateText(occupancy.wifi_due_day)}
-                          </Text>
+                            <Ionicons
+                              name={
+                                bill.rent_amount > 0
+                                  ? "home-outline"
+                                  : "flash-outline"
+                              }
+                              size={18}
+                              color={isDark ? colors.textSecondary : "#333"}
+                            />
+                          </View>
+                          <View>
+                            <Text
+                              style={[
+                                styles.billTitle,
+                                { color: isDark ? colors.text : "#334155" },
+                              ]}
+                            >
+                              {isMoveIn
+                                ? "Move-in Bill"
+                                : bill.rent_amount > 0
+                                  ? "House Rent"
+                                  : "Utility Bill"}
+                            </Text>
+                            {bill.status === "pending_confirmation" ? (
+                              <Text
+                                style={[
+                                  styles.billDate,
+                                  { color: "#f59e0b", fontWeight: "bold" },
+                                ]}
+                              >
+                                Processing Payment
+                              </Text>
+                            ) : bill.status === "rejected" ? (
+                              <Text
+                                style={[
+                                  styles.billDate,
+                                  { color: "#ef4444", fontWeight: "bold" },
+                                ]}
+                              >
+                                Payment Rejected
+                              </Text>
+                            ) : (
+                              <Text style={styles.billDate}>
+                                Due:{" "}
+                                {new Date(bill.due_date).toLocaleDateString()}
+                              </Text>
+                            )}
+                          </View>
                         </View>
-                      )}
+                        <View style={{ alignItems: "flex-end" }}>
+                          <Text
+                            style={[
+                              styles.billAmount,
+                              { color: isDark ? colors.text : "#0f172a" },
+                            ]}
+                          >
+                            ₱{total.toLocaleString()}
+                          </Text>
+                          {bill.status === "pending_confirmation" ? (
+                            <View
+                              style={[
+                                styles.payBtnSmall,
+                                { backgroundColor: "#fef3c7" },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.payBtnText,
+                                  { color: "#d97706" },
+                                ]}
+                              >
+                                {" "}
+                                verifying{" "}
+                              </Text>
+                            </View>
+                          ) : (
+                            <TouchableOpacity
+                              style={styles.payBtnSmall}
+                              onPress={() => router.push("/payments" as any)}
+                            >
+                              <Text style={styles.payBtnText}>
+                                {bill.status === "rejected"
+                                  ? "Retry"
+                                  : "Pay Now"}
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })
+                ) : (
+                  <View style={styles.emptyStateBox}>
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={32}
+                      color="#10b981"
+                    />
+                    <Text style={styles.emptyStateText}>
+                      You're all caught up!
+                    </Text>
+                  </View>
+                )}
+                <Text style={styles.noteText}>
+                  Note: Landlord is not liable for late utility payments.
+                </Text>
+              </View>
+            )}
+
+            {/* 5. Payment Overview */}
+            {showPaymentOverviewSkeleton ? (
+              <View
+                style={[
+                  styles.borderCard,
+                  {
+                    backgroundColor: isDark ? colors.card : "white",
+                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                  },
+                ]}
+              >
+                <SkeletonBlock
+                  width={138}
+                  height={14}
+                  borderRadius={7}
+                  backgroundColor={skeletonColor}
+                />
+                <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
+                  <SkeletonBlock
+                    width="48%"
+                    height={118}
+                    borderRadius={12}
+                    backgroundColor={skeletonColor}
+                  />
+                  <SkeletonBlock
+                    width="48%"
+                    height={118}
+                    borderRadius={12}
+                    backgroundColor={skeletonColor}
+                  />
+                </View>
+                <View style={styles.historySection}>
+                  <SkeletonBlock
+                    width={182}
+                    height={12}
+                    borderRadius={6}
+                    backgroundColor={skeletonColor}
+                  />
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      flexWrap: "wrap",
+                      marginTop: 10,
+                      gap: 8,
+                    }}
+                  >
+                    {Array.from({ length: 12 }).map((_, index) => (
+                      <SkeletonBlock
+                        key={`month-skeleton-${index}`}
+                        width={34}
+                        height={34}
+                        borderRadius={17}
+                        backgroundColor={skeletonColor}
+                      />
+                    ))}
                   </View>
                 </View>
               </View>
-
-              {/* Payment History Grid */}
-              <View style={styles.historySection}>
+            ) : (
+              <View
+                style={[
+                  styles.borderCard,
+                  {
+                    backgroundColor: isDark ? colors.card : "white",
+                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                  },
+                ]}
+              >
                 <Text
                   style={[
                     styles.cardTitleSmall,
-                    { marginBottom: 10, color: isDark ? colors.text : "#111" },
+                    { color: isDark ? colors.text : "#111" },
                   ]}
                 >
-                  Rent Payment History ({new Date().getFullYear()})
+                  Payment Overview
                 </Text>
-                <View style={styles.historyGrid}>
-                  {(() => {
-                    // Build a Set of all paid month indices for current year
-                    // This accounts for advance payments covering extra months
-                    const paidMonths = new Set<number>();
-                    const currentYear = new Date().getFullYear();
-                    paymentHistory.forEach((p) => {
-                      const d = new Date(p.due_date);
-                      if (d.getFullYear() !== currentYear) return;
-                      const billMonth = d.getMonth();
-                      paidMonths.add(billMonth);
-                      // If bill has advance_amount, mark additional month(s) as covered
-                      const rent = parseFloat(p.rent_amount || 0);
-                      const advance = parseFloat(p.advance_amount || 0);
-                      if (rent > 0 && advance > 0) {
-                        const extraMonths = Math.floor(advance / rent);
-                        for (let m = 1; m <= extraMonths; m++) {
-                          const coveredMonth = billMonth + m;
-                          if (coveredMonth < 12) paidMonths.add(coveredMonth);
+
+                <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
+                  <View
+                    style={[
+                      styles.ovBox,
+                      {
+                        backgroundColor: isDark ? colors.surface : "#f9fafb",
+                        borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.ovLabel,
+                        { color: isDark ? colors.textMuted : "#9ca3af" },
+                      ]}
+                    >
+                      NEXT HOUSE DUE DATE
+                    </Text>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 6,
+                        marginVertical: 4,
+                      }}
+                    >
+                      {/* <Ionicons name="calendar-outline" size={18} color="#000" /> */}
+                      <Text
+                        style={[
+                          styles.ovDate,
+                          {
+                            fontSize: 15,
+                            color: isDark ? colors.text : "#111",
+                          },
+                        ]}
+                      >
+                        {nextPaymentDate}
+                      </Text>
+                    </View>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 6,
+                        marginBottom: 4,
+                      }}
+                    >
+                      <Ionicons
+                        name="calendar-outline"
+                        size={14}
+                        color={isDark ? colors.textSecondary : "#333"}
+                      />
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          fontWeight: "600",
+                          color: isDark ? colors.textSecondary : "#333",
+                        }}
+                      >
+                        Expected Bill: ₱
+                        {Number(
+                          occupancy.property?.price || 0,
+                        ).toLocaleString()}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* UTILITY DUE DATES BOX */}
+                  <View
+                    style={[
+                      styles.ovBox,
+                      {
+                        backgroundColor: isDark ? colors.surface : "#f9fafb",
+                        borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.ovLabel,
+                        { color: isDark ? colors.textMuted : "#9ca3af" },
+                      ]}
+                    >
+                      UTILITY DUE DATES
+                    </Text>
+
+                    <View style={{ marginTop: 8, gap: 8 }}>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 13,
+                            color: isDark ? colors.textSecondary : "#4b5563",
+                          }}
+                        >
+                          Water
+                        </Text>
+                        <Text
+                          style={{
+                            fontSize: 13,
+                            fontWeight: "700",
+                            color: isDark ? colors.text : "#111",
+                          }}
+                        >
+                          {getNextUtilityDateText(occupancy.water_due_day)}
+                        </Text>
+                      </View>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 13,
+                            color: isDark ? colors.textSecondary : "#4b5563",
+                          }}
+                        >
+                          Electricity
+                        </Text>
+                        <Text
+                          style={{
+                            fontSize: 13,
+                            fontWeight: "700",
+                            color: isDark ? colors.text : "#111",
+                          }}
+                        >
+                          {getNextUtilityDateText(
+                            occupancy.electricity_due_day,
+                          )}
+                        </Text>
+                      </View>
+                      {occupancy.wifi_due_day !== null &&
+                        occupancy.wifi_due_day !== undefined && (
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                            }}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 13,
+                                color: isDark
+                                  ? colors.textSecondary
+                                  : "#4b5563",
+                              }}
+                            >
+                              WiFi Internet
+                            </Text>
+                            <Text
+                              style={{
+                                fontSize: 13,
+                                fontWeight: "700",
+                                color: isDark ? colors.text : "#111",
+                              }}
+                            >
+                              {getNextUtilityDateText(occupancy.wifi_due_day)}
+                            </Text>
+                          </View>
+                        )}
+                    </View>
+                  </View>
+                </View>
+
+                {/* Payment History Grid */}
+                <View style={styles.historySection}>
+                  <Text
+                    style={[
+                      styles.cardTitleSmall,
+                      {
+                        marginBottom: 10,
+                        color: isDark ? colors.text : "#111",
+                      },
+                    ]}
+                  >
+                    Rent Payment History ({new Date().getFullYear()})
+                  </Text>
+                  <View style={styles.historyGrid}>
+                    {(() => {
+                      // Build a Set of all paid month indices for current year
+                      // This accounts for advance payments covering extra months
+                      const paidMonths = new Set<number>();
+                      const currentYear = new Date().getFullYear();
+                      paymentHistory.forEach((p) => {
+                        const d = new Date(p.due_date);
+                        if (d.getFullYear() !== currentYear) return;
+                        const billMonth = d.getMonth();
+                        paidMonths.add(billMonth);
+                        // If bill has advance_amount, mark additional month(s) as covered
+                        const rent = parseFloat(p.rent_amount || 0);
+                        const advance = parseFloat(p.advance_amount || 0);
+                        if (rent > 0 && advance > 0) {
+                          const extraMonths = Math.floor(advance / rent);
+                          for (let m = 1; m <= extraMonths; m++) {
+                            const coveredMonth = billMonth + m;
+                            if (coveredMonth < 12) paidMonths.add(coveredMonth);
+                          }
                         }
-                      }
-                    });
-                    return (
-                      <>
-                        {[
-                          "Jan",
-                          "Feb",
-                          "Mar",
-                          "Apr",
-                          "May",
-                          "Jun",
-                          "Jul",
-                          "Aug",
-                          "Sep",
-                          "Oct",
-                          "Nov",
-                          "Dec",
-                        ].map((m, i) => {
-                          const isPaid = paidMonths.has(i);
-                          const isCurrent = new Date().getMonth() === i;
-                          return (
-                            <View key={m} style={styles.monthCol}>
-                              <Text
-                                style={[
-                                  styles.monthText,
-                                  isPaid
-                                    ? { color: isDark ? "#86efac" : "black" }
-                                    : {
-                                        color: isDark
-                                          ? colors.textMuted
-                                          : "#d1d5db",
-                                      },
-                                ]}
-                              >
-                                {m}
-                              </Text>
-                              {isPaid ? (
-                                <View
+                      });
+                      return (
+                        <>
+                          {[
+                            "Jan",
+                            "Feb",
+                            "Mar",
+                            "Apr",
+                            "May",
+                            "Jun",
+                            "Jul",
+                            "Aug",
+                            "Sep",
+                            "Oct",
+                            "Nov",
+                            "Dec",
+                          ].map((m, i) => {
+                            const isPaid = paidMonths.has(i);
+                            const isCurrent = new Date().getMonth() === i;
+                            return (
+                              <View key={m} style={styles.monthCol}>
+                                <Text
                                   style={[
-                                    styles.dotPaid,
-                                    isDark && { backgroundColor: "#22c55e" },
+                                    styles.monthText,
+                                    isPaid
+                                      ? { color: isDark ? "#86efac" : "black" }
+                                      : {
+                                          color: isDark
+                                            ? colors.textMuted
+                                            : "#d1d5db",
+                                        },
                                   ]}
                                 >
-                                  <Ionicons
-                                    name="checkmark"
-                                    size={10}
-                                    color={isDark ? "white" : "black"}
+                                  {m}
+                                </Text>
+                                {isPaid ? (
+                                  <View
+                                    style={[
+                                      styles.dotPaid,
+                                      isDark && { backgroundColor: "#22c55e" },
+                                    ]}
+                                  >
+                                    <Ionicons
+                                      name="checkmark"
+                                      size={10}
+                                      color={isDark ? "white" : "black"}
+                                    />
+                                  </View>
+                                ) : isCurrent ? (
+                                  <View
+                                    style={[
+                                      styles.dotCurrent,
+                                      {
+                                        borderColor: isDark
+                                          ? colors.text
+                                          : "#000",
+                                      },
+                                    ]}
                                   />
-                                </View>
-                              ) : isCurrent ? (
-                                <View
-                                  style={[
-                                    styles.dotCurrent,
-                                    {
-                                      borderColor: isDark
-                                        ? colors.text
-                                        : "#000",
-                                    },
-                                  ]}
-                                />
-                              ) : (
-                                <View
-                                  style={[
-                                    styles.dotEmpty,
-                                    {
-                                      borderColor: isDark
-                                        ? colors.border
-                                        : "#e5e7eb",
-                                    },
-                                  ]}
-                                />
-                              )}
-                            </View>
-                          );
-                        })}
-                      </>
-                    );
-                  })()}
+                                ) : (
+                                  <View
+                                    style={[
+                                      styles.dotEmpty,
+                                      {
+                                        borderColor: isDark
+                                          ? colors.border
+                                          : "#e5e7eb",
+                                      },
+                                    ]}
+                                  />
+                                )}
+                              </View>
+                            );
+                          })}
+                        </>
+                      );
+                    })()}
+                  </View>
                 </View>
               </View>
-            </View>
+            )}
           </View>
         ) : (
           // --- BROWSE PROPERTIES VIEW (Grid Layout) ---

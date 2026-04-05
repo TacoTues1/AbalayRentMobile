@@ -2,10 +2,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { decode } from "base64-arraybuffer";
 import * as DocumentPicker from "expo-document-picker";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
+    Animated,
+    Easing,
     Modal,
     RefreshControl,
     ScrollView,
@@ -23,10 +25,67 @@ import { useTheme } from "../../lib/theme";
 
 // Optional: Define your backend URL if you want to send actual emails like the Next.js app
 const API_URL = (process.env.EXPO_PUBLIC_API_URL || "").replace(/\/+$/, "");
+const BOOKINGS_LOADING_SKELETON_COUNT = 4;
+
+function SkeletonBlock({
+  width = "100%",
+  height,
+  borderRadius = 10,
+  backgroundColor,
+  style,
+}: {
+  width?: number | string;
+  height: number;
+  borderRadius?: number;
+  backgroundColor: string;
+  style?: any;
+}) {
+  const opacity = useRef(new Animated.Value(0.55)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0.55,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    animation.start();
+    return () => {
+      animation.stop();
+    };
+  }, [opacity]);
+
+  return (
+    <Animated.View
+      style={[
+        {
+          width,
+          height,
+          borderRadius,
+          backgroundColor,
+          opacity,
+        },
+        style,
+      ]}
+    />
+  );
+}
 
 export default function Bookings() {
   const router = useRouter();
   const { isDark, colors } = useTheme();
+  const skeletonColor = isDark ? "rgba(148, 163, 184, 0.22)" : "#e5e7eb";
 
   // -- State --
   const [session, setSession] = useState<any>(null);
@@ -462,12 +521,29 @@ export default function Bookings() {
     actorId: string,
   ) => {
     if (!API_URL) return;
+
+    const typeVariants =
+      type === "booking_new"
+        ? ["new_booking", "booking_request", "booking_new"]
+        : [type];
+
     try {
-      await fetch(`${API_URL}/api/notify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type, recordId, actorId }),
-      });
+      for (const notifyType of typeVariants) {
+        const res = await fetch(`${API_URL}/api/notify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: notifyType,
+            recordId,
+            bookingId: recordId,
+            actorId,
+          }),
+        });
+
+        if (res.ok) {
+          break;
+        }
+      }
     } catch (e) {
       console.error("Backend notify error", e);
     }
@@ -683,12 +759,24 @@ export default function Bookings() {
       }
     }
 
-    const selectedProp = availableProperties.find((p: any) => p.id === selectedPropertyId) || booking.property;
+    const selectedProp =
+      availableProperties.find((p: any) => p.id === selectedPropertyId) ||
+      booking.property;
     const rentAmount = selectedProp?.price || 0;
-    const hasAdvance = typeof selectedProp?.has_advance === 'boolean' ? selectedProp?.has_advance : (Number(selectedProp?.advance_amount || 0) > 0);
-    const advanceAmount = hasAdvance ? Number(selectedProp?.advance_amount || rentAmount) : 0;
-    const hasSecurityDeposit = typeof selectedProp?.has_security_deposit === 'boolean' ? selectedProp?.has_security_deposit : (Number(selectedProp?.security_deposit_amount || 0) > 0);
-    const securityDeposit = hasSecurityDeposit ? Number(selectedProp?.security_deposit_amount || rentAmount) : 0;
+    const hasAdvance =
+      typeof selectedProp?.has_advance === "boolean"
+        ? selectedProp?.has_advance
+        : Number(selectedProp?.advance_amount || 0) > 0;
+    const advanceAmount = hasAdvance
+      ? Number(selectedProp?.advance_amount || rentAmount)
+      : 0;
+    const hasSecurityDeposit =
+      typeof selectedProp?.has_security_deposit === "boolean"
+        ? selectedProp?.has_security_deposit
+        : Number(selectedProp?.security_deposit_amount || 0) > 0;
+    const securityDeposit = hasSecurityDeposit
+      ? Number(selectedProp?.security_deposit_amount || rentAmount)
+      : 0;
 
     try {
       // DB Updates
@@ -1453,6 +1541,115 @@ export default function Bookings() {
     );
   };
 
+  const renderBookingSkeletonCard = (cardKey: string) => (
+    <View
+      key={cardKey}
+      style={[
+        styles.card,
+        {
+          backgroundColor: isDark ? colors.card : "white",
+          borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+        },
+      ]}
+    >
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+        }}
+      >
+        <View style={{ flex: 1 }}>
+          <SkeletonBlock
+            width="58%"
+            height={17}
+            borderRadius={8}
+            backgroundColor={skeletonColor}
+          />
+          <SkeletonBlock
+            width="72%"
+            height={12}
+            borderRadius={6}
+            backgroundColor={skeletonColor}
+            style={{ marginTop: 8 }}
+          />
+          <SkeletonBlock
+            width="64%"
+            height={12}
+            borderRadius={6}
+            backgroundColor={skeletonColor}
+            style={{ marginTop: 7 }}
+          />
+          <SkeletonBlock
+            width="90%"
+            height={32}
+            borderRadius={8}
+            backgroundColor={skeletonColor}
+            style={{ marginTop: 10 }}
+          />
+        </View>
+        <SkeletonBlock
+          width={86}
+          height={24}
+          borderRadius={8}
+          backgroundColor={skeletonColor}
+          style={{ marginLeft: 10 }}
+        />
+      </View>
+
+      <View
+        style={[
+          styles.dateContainer,
+          { backgroundColor: isDark ? colors.surface : "#f9fafb" },
+        ]}
+      >
+        <SkeletonBlock
+          width={98}
+          height={10}
+          borderRadius={5}
+          backgroundColor={skeletonColor}
+        />
+        <View
+          style={{
+            flexDirection: "row",
+            justifyContent: "space-between",
+            marginTop: 8,
+          }}
+        >
+          <SkeletonBlock
+            width={108}
+            height={12}
+            borderRadius={6}
+            backgroundColor={skeletonColor}
+          />
+          <SkeletonBlock
+            width={98}
+            height={12}
+            borderRadius={6}
+            backgroundColor={skeletonColor}
+          />
+        </View>
+      </View>
+
+      <View style={styles.actionContainer}>
+        <View style={{ flexDirection: "row", gap: 10, flex: 1 }}>
+          <SkeletonBlock
+            width={120}
+            height={36}
+            borderRadius={10}
+            backgroundColor={skeletonColor}
+          />
+          <SkeletonBlock
+            width={100}
+            height={36}
+            borderRadius={10}
+            backgroundColor={skeletonColor}
+          />
+        </View>
+      </View>
+    </View>
+  );
+
   return (
     <SafeAreaView
       style={[
@@ -1599,11 +1796,14 @@ export default function Bookings() {
 
       <View style={{ flex: 1 }}>
         {loading ? (
-          <ActivityIndicator
-            size="large"
-            color="black"
-            style={{ marginTop: 50 }}
-          />
+          <ScrollView
+            contentContainerStyle={{ padding: 20, paddingBottom: 130 }}
+          >
+            {Array.from(
+              { length: BOOKINGS_LOADING_SKELETON_COUNT },
+              (_, index) => `booking-skeleton-${index}`,
+            ).map((key) => renderBookingSkeletonCard(key))}
+          </ScrollView>
         ) : (
           <ScrollView
             contentContainerStyle={{ padding: 20, paddingBottom: 130 }}
@@ -2311,11 +2511,25 @@ export default function Bookings() {
                     selectedPropInfo?.price ||
                     assignBooking?.property?.price ||
                     0;
-                  const hasAdvance = typeof selectedPropInfo?.has_advance === 'boolean' ? selectedPropInfo?.has_advance : (Number(selectedPropInfo?.advance_amount || 0) > 0);
-                  const uiAdvanceAmount = hasAdvance ? Number(selectedPropInfo?.advance_amount || rentPrice) : 0;
-                  const hasSecurityDeposit = typeof selectedPropInfo?.has_security_deposit === 'boolean' ? selectedPropInfo?.has_security_deposit : (Number(selectedPropInfo?.security_deposit_amount || 0) > 0);
-                  const uiSecurityDeposit = hasSecurityDeposit ? Number(selectedPropInfo?.security_deposit_amount || rentPrice) : 0;
-                  const uiTotalMoveIn = rentPrice + uiAdvanceAmount + uiSecurityDeposit;
+                  const hasAdvance =
+                    typeof selectedPropInfo?.has_advance === "boolean"
+                      ? selectedPropInfo?.has_advance
+                      : Number(selectedPropInfo?.advance_amount || 0) > 0;
+                  const uiAdvanceAmount = hasAdvance
+                    ? Number(selectedPropInfo?.advance_amount || rentPrice)
+                    : 0;
+                  const hasSecurityDeposit =
+                    typeof selectedPropInfo?.has_security_deposit === "boolean"
+                      ? selectedPropInfo?.has_security_deposit
+                      : Number(selectedPropInfo?.security_deposit_amount || 0) >
+                        0;
+                  const uiSecurityDeposit = hasSecurityDeposit
+                    ? Number(
+                        selectedPropInfo?.security_deposit_amount || rentPrice,
+                      )
+                    : 0;
+                  const uiTotalMoveIn =
+                    rentPrice + uiAdvanceAmount + uiSecurityDeposit;
 
                   return (
                     <View style={{ width: "100%" }}>
@@ -2615,14 +2829,25 @@ export default function Bookings() {
                           <View
                             style={[
                               styles.utilityIconBox,
-                              { backgroundColor: isWifiFree ? "#dcfce7" : "#f3f4f6" },
+                              {
+                                backgroundColor: isWifiFree
+                                  ? "#dcfce7"
+                                  : "#f3f4f6",
+                              },
                             ]}
                           >
-                            <Ionicons name={isWifiFree ? "wifi" : "wifi-outline"} size={18} color={isWifiFree ? "#10b981" : "#6b7280"} />
+                            <Ionicons
+                              name={isWifiFree ? "wifi" : "wifi-outline"}
+                              size={18}
+                              color={isWifiFree ? "#10b981" : "#6b7280"}
+                            />
                           </View>
                           <View style={{ flex: 1 }}>
                             <Text
-                              style={[styles.utilityName, { color: isWifiFree ? "#047857" : "#4b5563" }]}
+                              style={[
+                                styles.utilityName,
+                                { color: isWifiFree ? "#047857" : "#4b5563" },
+                              ]}
                             >
                               {isWifiFree ? "Free WiFi" : "WiFi not provided"}
                             </Text>

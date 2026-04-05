@@ -480,6 +480,12 @@ const CustomTabBar = ({ state, descriptors, navigation }: any) => {
   const insets = useSafeAreaInsets();
   const { isDark, colors } = useTheme();
   const [userRole, setUserRole] = useState<string | null>(null);
+  const focusedRoute = state.routes[state.index];
+  const focusedOptions = descriptors[focusedRoute?.key]?.options || {};
+  const focusedTabBarStyle = focusedOptions.tabBarStyle;
+  const shouldHideTabBar = Array.isArray(focusedTabBarStyle)
+    ? focusedTabBarStyle.some((style: any) => style?.display === "none")
+    : focusedTabBarStyle?.display === "none";
   const routes = state.routes.filter((route: any) =>
     VISIBLE_TABS.includes(route.name),
   );
@@ -507,6 +513,10 @@ const CustomTabBar = ({ state, descriptors, navigation }: any) => {
       isMounted = false;
     };
   }, []);
+
+  if (shouldHideTabBar) {
+    return null;
+  }
 
   const bottomOffset = Platform.OS === "ios" ? 22 : Math.max(insets.bottom, 10);
 
@@ -678,7 +688,10 @@ export default function TabLayout() {
       <Tabs.Screen name="landlord/[id]" options={{ href: null }} />
       <Tabs.Screen name="active-properties" options={{ href: null }} />
       <Tabs.Screen name="rented-tenant/[id]" options={{ href: null }} />
-      <Tabs.Screen name="add-family" options={{ href: null }} />
+      <Tabs.Screen
+        name="add-family"
+        options={{ href: null, tabBarStyle: { display: "none" } }}
+      />
       <Tabs.Screen name="properties/edit/[id]" options={{ href: null }} />
     </Tabs>
   );

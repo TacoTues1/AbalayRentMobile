@@ -6,6 +6,7 @@ import {
     Alert,
     Animated,
     Dimensions,
+    Easing,
     Image,
     Modal,
     RefreshControl,
@@ -26,14 +27,71 @@ import { useTheme } from "../../../lib/theme";
 const { width } = Dimensions.get("window");
 const API_URL = (process.env.EXPO_PUBLIC_API_URL || "").replace(/\/+$/, "");
 
+function SkeletonBlock({
+  width = "100%",
+  height,
+  borderRadius = 10,
+  backgroundColor,
+  style,
+}: {
+  width?: number | string;
+  height: number;
+  borderRadius?: number;
+  backgroundColor: string;
+  style?: any;
+}) {
+  const opacity = useRef(new Animated.Value(0.55)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0.55,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    animation.start();
+    return () => {
+      animation.stop();
+    };
+  }, [opacity]);
+
+  return (
+    <Animated.View
+      style={[
+        {
+          width,
+          height,
+          borderRadius,
+          backgroundColor,
+          opacity,
+        },
+        style,
+      ]}
+    />
+  );
+}
+
 export default function LandlordDashboard({ session, profile }: any) {
   const router = useRouter();
   const { isDark, colors } = useTheme();
+  const skeletonColor = isDark ? "rgba(148, 163, 184, 0.22)" : "#e5e7eb";
 
   // --- STATE MANAGEMENT ---
   const [properties, setProperties] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [sectionsLoading, setSectionsLoading] = useState(true);
 
   // Dashboard Data
   const [tasks, setTasks] = useState({ maintenance: [], payments: [] });
@@ -243,20 +301,25 @@ export default function LandlordDashboard({ session, profile }: any) {
 
   const loadDashboard = async () => {
     setRefreshing(true);
-    if (session?.user?.id) {
-      await runDailyAutomatedTasks(session.user.id);
+    setSectionsLoading(true);
+    try {
+      if (session?.user?.id) {
+        await runDailyAutomatedTasks(session.user.id);
+      }
+      const activeOccs = await loadOccupancies();
+      await Promise.all([
+        loadProperties(),
+        loadDashboardTasks(),
+        loadMonthlyIncome(),
+        loadScheduledViewings(),
+        loadOccupancyFamilyMembers(activeOccs),
+        loadEndedOccupancies(),
+      ]);
+    } finally {
+      setRefreshing(false);
+      setLoading(false);
+      setSectionsLoading(false);
     }
-    const activeOccs = await loadOccupancies();
-    await Promise.all([
-      loadProperties(),
-      loadDashboardTasks(),
-      loadMonthlyIncome(),
-      loadScheduledViewings(),
-      loadOccupancyFamilyMembers(activeOccs),
-      loadEndedOccupancies(),
-    ]);
-    setRefreshing(false);
-    setLoading(false);
   };
 
   async function loadProperties() {
@@ -1275,7 +1338,7 @@ export default function LandlordDashboard({ session, profile }: any) {
           >
             Quick Actions
           </Text>
-          {showQuickActionsHint && (
+          {!sectionsLoading && showQuickActionsHint && (
             <View
               style={[styles.quickActionsHintWrap, { marginTop: 0 }]}
               pointerEvents="none"
@@ -1303,68 +1366,90 @@ export default function LandlordDashboard({ session, profile }: any) {
             </View>
           )}
         </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.quickGrid}
-          onLayout={(event) => {
-            setQuickActionsViewportWidth(event.nativeEvent.layout.width);
-          }}
-          onContentSizeChange={(w) => {
-            setQuickActionsContentWidth(w);
-          }}
-          onScroll={(event) => {
-            if (
-              !quickActionsHintDismissed &&
-              event.nativeEvent.contentOffset.x > 14
-            ) {
-              setQuickActionsHintDismissed(true);
-            }
-          }}
-          scrollEventThrottle={16}
-        >
-          {quickActionsItems.map((item, index) => (
-            <TouchableOpacity
-              key={index}
-              style={styles.quickBtn}
-              onPress={item.action}
-            >
-              <View
-                style={[
-                  styles.quickBtnIcon,
-                  {
-                    backgroundColor: isDark ? colors.card : "#fff",
-                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                    shadowOpacity: isDark ? 0 : 0.05,
-                    elevation: isDark ? 0 : 2,
-                  },
-                ]}
-              >
-                <Ionicons name={item.icon as any} size={24} color="#dc2626" />
-                {item.badge > 0 && (
-                  <View
-                    style={[
-                      styles.quickBtnBadge,
-                      { borderColor: isDark ? colors.card : "white" },
-                    ]}
-                  >
-                    <Text style={styles.quickBtnBadgeText}>
-                      {item.badge > 99 ? "99+" : item.badge}
-                    </Text>
-                  </View>
-                )}
+        {sectionsLoading ? (
+          <View style={[styles.quickGrid, { gap: 10 }]}>
+            {Array.from({ length: 4 }).map((_, index) => (
+              <View key={`quick-skeleton-${index}`} style={styles.quickBtn}>
+                <SkeletonBlock
+                  width={56}
+                  height={56}
+                  borderRadius={18}
+                  backgroundColor={skeletonColor}
+                />
+                <SkeletonBlock
+                  width={64}
+                  height={10}
+                  borderRadius={5}
+                  backgroundColor={skeletonColor}
+                  style={{ marginTop: 8 }}
+                />
               </View>
-              <Text
-                style={[
-                  styles.quickBtnLabel,
-                  { color: isDark ? colors.textSecondary : "#4b5563" },
-                ]}
+            ))}
+          </View>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.quickGrid}
+            onLayout={(event) => {
+              setQuickActionsViewportWidth(event.nativeEvent.layout.width);
+            }}
+            onContentSizeChange={(w) => {
+              setQuickActionsContentWidth(w);
+            }}
+            onScroll={(event) => {
+              if (
+                !quickActionsHintDismissed &&
+                event.nativeEvent.contentOffset.x > 14
+              ) {
+                setQuickActionsHintDismissed(true);
+              }
+            }}
+            scrollEventThrottle={16}
+          >
+            {quickActionsItems.map((item, index) => (
+              <TouchableOpacity
+                key={index}
+                style={styles.quickBtn}
+                onPress={item.action}
               >
-                {item.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+                <View
+                  style={[
+                    styles.quickBtnIcon,
+                    {
+                      backgroundColor: isDark ? colors.card : "#fff",
+                      borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                      shadowOpacity: isDark ? 0 : 0.05,
+                      elevation: isDark ? 0 : 2,
+                    },
+                  ]}
+                >
+                  <Ionicons name={item.icon as any} size={24} color="#dc2626" />
+                  {item.badge > 0 && (
+                    <View
+                      style={[
+                        styles.quickBtnBadge,
+                        { borderColor: isDark ? colors.card : "white" },
+                      ]}
+                    >
+                      <Text style={styles.quickBtnBadgeText}>
+                        {item.badge > 99 ? "99+" : item.badge}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                <Text
+                  style={[
+                    styles.quickBtnLabel,
+                    { color: isDark ? colors.textSecondary : "#4b5563" },
+                  ]}
+                >
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
       </View>
 
       {/* --- SCHEDULED TENANTS TODAY --- */}
@@ -1386,22 +1471,31 @@ export default function LandlordDashboard({ session, profile }: any) {
           >
             Today's Viewings
           </Text>
-          <View
-            style={[
-              styles.badge,
-              { backgroundColor: isDark ? colors.surface : "#f3f4f6" },
-            ]}
-          >
-            <Text
-              style={{
-                fontSize: 10,
-                fontWeight: "bold",
-                color: isDark ? colors.text : "#111",
-              }}
+          {sectionsLoading ? (
+            <SkeletonBlock
+              width={28}
+              height={18}
+              borderRadius={9}
+              backgroundColor={skeletonColor}
+            />
+          ) : (
+            <View
+              style={[
+                styles.badge,
+                { backgroundColor: isDark ? colors.surface : "#f3f4f6" },
+              ]}
             >
-              {scheduledViewings.length}
-            </Text>
-          </View>
+              <Text
+                style={{
+                  fontSize: 10,
+                  fontWeight: "bold",
+                  color: isDark ? colors.text : "#111",
+                }}
+              >
+                {scheduledViewings.length}
+              </Text>
+            </View>
+          )}
         </View>
 
         <View
@@ -1414,7 +1508,51 @@ export default function LandlordDashboard({ session, profile }: any) {
             },
           ]}
         >
-          {scheduledViewings.length === 0 ? (
+          {sectionsLoading ? (
+            <View style={{ padding: 15, gap: 12 }}>
+              {Array.from({ length: 3 }).map((_, index) => (
+                <View
+                  key={`viewing-skeleton-${index}`}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 12,
+                    paddingBottom: 10,
+                    borderBottomWidth: index === 2 ? 0 : 1,
+                    borderBottomColor: isDark ? colors.border : "#f3f4f6",
+                  }}
+                >
+                  <SkeletonBlock
+                    width={45}
+                    height={28}
+                    borderRadius={8}
+                    backgroundColor={skeletonColor}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <SkeletonBlock
+                      width="56%"
+                      height={12}
+                      borderRadius={6}
+                      backgroundColor={skeletonColor}
+                    />
+                    <SkeletonBlock
+                      width="72%"
+                      height={10}
+                      borderRadius={5}
+                      backgroundColor={skeletonColor}
+                      style={{ marginTop: 6 }}
+                    />
+                  </View>
+                  <SkeletonBlock
+                    width={32}
+                    height={32}
+                    borderRadius={16}
+                    backgroundColor={skeletonColor}
+                  />
+                </View>
+              ))}
+            </View>
+          ) : scheduledViewings.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons
                 name="calendar-outline"
@@ -1532,7 +1670,60 @@ export default function LandlordDashboard({ session, profile }: any) {
             },
           ]}
         >
-          {billingSchedule.length === 0 ? (
+          {sectionsLoading ? (
+            <View style={{ padding: 15, gap: 10 }}>
+              {Array.from({ length: 3 }).map((_, index) => (
+                <View
+                  key={`bill-skeleton-${index}`}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 12,
+                    paddingBottom: 10,
+                    borderBottomWidth: index === 2 ? 0 : 1,
+                    borderBottomColor: isDark ? colors.border : "#f3f4f6",
+                  }}
+                >
+                  <View style={{ flex: 1 }}>
+                    <SkeletonBlock
+                      width="48%"
+                      height={12}
+                      borderRadius={6}
+                      backgroundColor={skeletonColor}
+                    />
+                    <SkeletonBlock
+                      width="66%"
+                      height={10}
+                      borderRadius={5}
+                      backgroundColor={skeletonColor}
+                      style={{ marginTop: 6 }}
+                    />
+                  </View>
+                  <View style={{ alignItems: "flex-end" }}>
+                    <SkeletonBlock
+                      width={78}
+                      height={11}
+                      borderRadius={6}
+                      backgroundColor={skeletonColor}
+                    />
+                    <SkeletonBlock
+                      width={62}
+                      height={16}
+                      borderRadius={8}
+                      backgroundColor={skeletonColor}
+                      style={{ marginTop: 6 }}
+                    />
+                  </View>
+                  <SkeletonBlock
+                    width={44}
+                    height={24}
+                    borderRadius={8}
+                    backgroundColor={skeletonColor}
+                  />
+                </View>
+              ))}
+            </View>
+          ) : billingSchedule.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={{ color: isDark ? colors.textMuted : "#999" }}>
                 No upcoming bills
@@ -1640,156 +1831,209 @@ export default function LandlordDashboard({ session, profile }: any) {
         </Text>
       </View>
       <View style={[styles.gridContainer, { marginTop: 10 }]}>
-        {/* Properties */}
-        <View
-          style={[
-            styles.metricCard,
-            {
-              backgroundColor: isDark ? colors.card : "white",
-              shadowOpacity: isDark ? 0 : 0.05,
-              elevation: isDark ? 0 : 2,
-            },
-          ]}
-        >
-          <Text
-            style={[
-              styles.metricCardTitle,
-              { color: isDark ? colors.textMuted : "#6b7280" },
+        {sectionsLoading
+          ? Array.from({ length: 4 }).map((_, index) => (
+              <View
+                key={`overview-skeleton-${index}`}
+                style={[
+                  styles.metricCard,
+                  {
+                    backgroundColor: isDark ? colors.card : "white",
+                    shadowOpacity: isDark ? 0 : 0.05,
+                    elevation: isDark ? 0 : 2,
+                  },
+                ]}
+              >
+                <SkeletonBlock
+                  width="48%"
+                  height={10}
+                  borderRadius={5}
+                  backgroundColor={skeletonColor}
+                />
+                <SkeletonBlock
+                  width={40}
+                  height={40}
+                  borderRadius={12}
+                  backgroundColor={skeletonColor}
+                  style={{ marginTop: 10 }}
+                />
+                <SkeletonBlock
+                  width="36%"
+                  height={20}
+                  borderRadius={10}
+                  backgroundColor={skeletonColor}
+                  style={{ marginTop: 10 }}
+                />
+              </View>
+            ))
+          : [
+              <View
+                key="properties-card"
+                style={[
+                  styles.metricCard,
+                  {
+                    backgroundColor: isDark ? colors.card : "white",
+                    shadowOpacity: isDark ? 0 : 0.05,
+                    elevation: isDark ? 0 : 2,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.metricCardTitle,
+                    { color: isDark ? colors.textMuted : "#6b7280" },
+                  ]}
+                >
+                  Properties
+                </Text>
+                <View
+                  style={[
+                    styles.iconBox,
+                    { backgroundColor: isDark ? colors.surface : "#f3f4f6" },
+                  ]}
+                >
+                  <Ionicons
+                    name="home-outline"
+                    size={20}
+                    color={isDark ? colors.text : "#111"}
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.metricValue,
+                    { color: isDark ? colors.text : "#111" },
+                  ]}
+                >
+                  {properties.length}
+                </Text>
+              </View>,
+              <View
+                key="tenants-card"
+                style={[
+                  styles.metricCard,
+                  {
+                    backgroundColor: isDark ? colors.card : "white",
+                    shadowOpacity: isDark ? 0 : 0.05,
+                    elevation: isDark ? 0 : 2,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.metricCardTitle,
+                    { color: isDark ? colors.textMuted : "#6b7280" },
+                  ]}
+                >
+                  Tenants
+                </Text>
+                <View
+                  style={[
+                    styles.iconBox,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(5,150,105,0.15)"
+                        : "#d1fae5",
+                    },
+                  ]}
+                >
+                  <Ionicons name="people-outline" size={20} color="#059669" />
+                </View>
+                <Text
+                  style={[
+                    styles.metricValue,
+                    { color: isDark ? colors.text : "#111" },
+                  ]}
+                >
+                  {occupancies.length}
+                </Text>
+              </View>,
+              <View
+                key="income-card"
+                style={[
+                  styles.metricCard,
+                  {
+                    backgroundColor: isDark ? colors.card : "white",
+                    shadowOpacity: isDark ? 0 : 0.05,
+                    elevation: isDark ? 0 : 2,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.metricCardTitle,
+                    { color: isDark ? colors.textMuted : "#6b7280" },
+                  ]}
+                >
+                  Income
+                </Text>
+                <View
+                  style={[
+                    styles.iconBox,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(37,99,235,0.15)"
+                        : "#dbeafe",
+                    },
+                  ]}
+                >
+                  <Ionicons name="cash-outline" size={20} color="#2563eb" />
+                </View>
+                <Text
+                  style={[
+                    styles.metricValue,
+                    { fontSize: 18, color: isDark ? colors.text : "#111" },
+                  ]}
+                >
+                  ₱{(monthlyIncome.yearTotal / 1000).toFixed(1)}k
+                </Text>
+              </View>,
+              <View
+                key="pending-card"
+                style={[
+                  styles.metricCard,
+                  {
+                    backgroundColor: isDark ? colors.card : "white",
+                    shadowOpacity: isDark ? 0 : 0.05,
+                    elevation: isDark ? 0 : 2,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.metricCardTitle,
+                    { color: isDark ? colors.textMuted : "#6b7280" },
+                  ]}
+                >
+                  Pending
+                </Text>
+                <View
+                  style={[
+                    styles.iconBox,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(225,29,72,0.15)"
+                        : "#ffe4e6",
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="alert-circle-outline"
+                    size={20}
+                    color="#e11d48"
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.metricValue,
+                    { color: isDark ? colors.text : "#111" },
+                  ]}
+                >
+                  {pendingMaintenanceCount +
+                    pendingPaymentsCount +
+                    pendingBookingsCount}
+                </Text>
+              </View>,
             ]}
-          >
-            Properties
-          </Text>
-          <View
-            style={[
-              styles.iconBox,
-              { backgroundColor: isDark ? colors.surface : "#f3f4f6" },
-            ]}
-          >
-            <Ionicons
-              name="home-outline"
-              size={20}
-              color={isDark ? colors.text : "#111"}
-            />
-          </View>
-          <Text
-            style={[
-              styles.metricValue,
-              { color: isDark ? colors.text : "#111" },
-            ]}
-          >
-            {properties.length}
-          </Text>
-        </View>
-        {/* Tenants */}
-        <View
-          style={[
-            styles.metricCard,
-            {
-              backgroundColor: isDark ? colors.card : "white",
-              shadowOpacity: isDark ? 0 : 0.05,
-              elevation: isDark ? 0 : 2,
-            },
-          ]}
-        >
-          <Text
-            style={[
-              styles.metricCardTitle,
-              { color: isDark ? colors.textMuted : "#6b7280" },
-            ]}
-          >
-            Tenants
-          </Text>
-          <View
-            style={[
-              styles.iconBox,
-              { backgroundColor: isDark ? "rgba(5,150,105,0.15)" : "#d1fae5" },
-            ]}
-          >
-            <Ionicons name="people-outline" size={20} color="#059669" />
-          </View>
-          <Text
-            style={[
-              styles.metricValue,
-              { color: isDark ? colors.text : "#111" },
-            ]}
-          >
-            {occupancies.length}
-          </Text>
-        </View>
-        {/* Income */}
-        <View
-          style={[
-            styles.metricCard,
-            {
-              backgroundColor: isDark ? colors.card : "white",
-              shadowOpacity: isDark ? 0 : 0.05,
-              elevation: isDark ? 0 : 2,
-            },
-          ]}
-        >
-          <Text
-            style={[
-              styles.metricCardTitle,
-              { color: isDark ? colors.textMuted : "#6b7280" },
-            ]}
-          >
-            Income
-          </Text>
-          <View
-            style={[
-              styles.iconBox,
-              { backgroundColor: isDark ? "rgba(37,99,235,0.15)" : "#dbeafe" },
-            ]}
-          >
-            <Ionicons name="cash-outline" size={20} color="#2563eb" />
-          </View>
-          <Text
-            style={[
-              styles.metricValue,
-              { fontSize: 18, color: isDark ? colors.text : "#111" },
-            ]}
-          >
-            ₱{(monthlyIncome.yearTotal / 1000).toFixed(1)}k
-          </Text>
-        </View>
-        {/* Tasks */}
-        <View
-          style={[
-            styles.metricCard,
-            {
-              backgroundColor: isDark ? colors.card : "white",
-              shadowOpacity: isDark ? 0 : 0.05,
-              elevation: isDark ? 0 : 2,
-            },
-          ]}
-        >
-          <Text
-            style={[
-              styles.metricCardTitle,
-              { color: isDark ? colors.textMuted : "#6b7280" },
-            ]}
-          >
-            Pending
-          </Text>
-          <View
-            style={[
-              styles.iconBox,
-              { backgroundColor: isDark ? "rgba(225,29,72,0.15)" : "#ffe4e6" },
-            ]}
-          >
-            <Ionicons name="alert-circle-outline" size={20} color="#e11d48" />
-          </View>
-          <Text
-            style={[
-              styles.metricValue,
-              { color: isDark ? colors.text : "#111" },
-            ]}
-          >
-            {pendingMaintenanceCount +
-              pendingPaymentsCount +
-              pendingBookingsCount}
-          </Text>
-        </View>
       </View>
 
       {/* --- ACTIVE PROPERTIES --- */}
@@ -1809,7 +2053,7 @@ export default function LandlordDashboard({ session, profile }: any) {
           >
             Active Properties
           </Text>
-          {occupancies.length > 0 && (
+          {!sectionsLoading && occupancies.length > 0 && (
             <TouchableOpacity
               onPress={() => router.push("/(tabs)/active-properties" as any)}
             >
@@ -1836,7 +2080,58 @@ export default function LandlordDashboard({ session, profile }: any) {
           Manage tenant details, utilities due schedule, and occupancy history.
         </Text>
 
-        {occupancies.length === 0 ? (
+        {sectionsLoading ? (
+          Array.from({ length: 2 }).map((_, index) => (
+            <View
+              key={`active-property-skeleton-${index}`}
+              style={[
+                styles.propCard,
+                {
+                  backgroundColor: isDark ? colors.card : "white",
+                  shadowOpacity: isDark ? 0 : 0.08,
+                  elevation: isDark ? 0 : 3,
+                  marginBottom: 14,
+                },
+              ]}
+            >
+              <SkeletonBlock
+                width="100%"
+                height={150}
+                borderRadius={0}
+                backgroundColor={skeletonColor}
+              />
+              <View style={styles.propContent}>
+                <SkeletonBlock
+                  width="64%"
+                  height={14}
+                  borderRadius={7}
+                  backgroundColor={skeletonColor}
+                />
+                <SkeletonBlock
+                  width="88%"
+                  height={10}
+                  borderRadius={5}
+                  backgroundColor={skeletonColor}
+                  style={{ marginTop: 8 }}
+                />
+                <SkeletonBlock
+                  width="100%"
+                  height={48}
+                  borderRadius={10}
+                  backgroundColor={skeletonColor}
+                  style={{ marginTop: 12 }}
+                />
+                <SkeletonBlock
+                  width="100%"
+                  height={28}
+                  borderRadius={8}
+                  backgroundColor={skeletonColor}
+                  style={{ marginTop: 12 }}
+                />
+              </View>
+            </View>
+          ))
+        ) : occupancies.length === 0 ? (
           <View
             style={[
               styles.card,
