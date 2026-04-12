@@ -196,7 +196,14 @@ export default function ActivePropertiesPage() {
                     ]}
                     numberOfLines={1}
                   >
-                    {occ.property?.address || "No address"}
+                    {[
+                      occ.property?.address,
+                      [occ.property?.city, occ.property?.state_province]
+                        .filter(Boolean)
+                        .join(", "),
+                    ]
+                      .filter(Boolean)
+                      .join(", ") || "No address"}
                   </Text>
                 </View>
 

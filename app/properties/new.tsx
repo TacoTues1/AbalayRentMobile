@@ -19,6 +19,10 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import {
+    getCountryOptions,
+    getStateOptionsForCountry,
+} from "../../lib/locationData";
 import { supabase } from "../../lib/supabase";
 
 const { width } = Dimensions.get("window");
@@ -32,6 +36,10 @@ export default function NewProperty() {
   const [uploadingTerms, setUploadingTerms] = useState(false); // New: PDF State
   const [showAllAmenities, setShowAllAmenities] = useState(false); // New: Amenities Toggle
   const [showStatusPicker, setShowStatusPicker] = useState(false);
+  const [showCountryPicker, setShowCountryPicker] = useState(false);
+  const [showStatePicker, setShowStatePicker] = useState(false);
+  const [countrySearch, setCountrySearch] = useState("");
+  const [stateSearch, setStateSearch] = useState("");
 
   const statuses = [
     { label: "Available", value: "available" },
@@ -48,6 +56,8 @@ export default function NewProperty() {
     street: "",
     address: "",
     city: "",
+    state_province: "",
+    country: "",
     zip: "",
     location_link: "",
     owner_phone: "",
@@ -73,6 +83,28 @@ export default function NewProperty() {
     amenities: [] as string[],
     images: [] as string[],
   });
+
+  const countryOptions = React.useMemo(() => getCountryOptions(), []);
+  const stateOptions = React.useMemo(
+    () => getStateOptionsForCountry(form.country),
+    [form.country],
+  );
+
+  const filteredCountries = React.useMemo(() => {
+    const query = countrySearch.trim().toLowerCase();
+    if (!query) return countryOptions;
+    return countryOptions.filter((country) =>
+      country.name.toLowerCase().includes(query),
+    );
+  }, [countryOptions, countrySearch]);
+
+  const filteredStates = React.useMemo(() => {
+    const query = stateSearch.trim().toLowerCase();
+    if (!query) return stateOptions;
+    return stateOptions.filter((state) =>
+      state.name.toLowerCase().includes(query),
+    );
+  }, [stateOptions, stateSearch]);
 
   const propertyTypes = [
     "House Apartment",
@@ -281,6 +313,23 @@ export default function NewProperty() {
 
   const isBlank = (value: string) => value.trim().length === 0;
 
+  const handleCountrySelect = (countryName: string) => {
+    setForm((prev) => ({
+      ...prev,
+      country: countryName,
+      state_province: "",
+    }));
+    setCountrySearch("");
+    setStateSearch("");
+    setShowCountryPicker(false);
+  };
+
+  const handleStateSelect = (stateName: string) => {
+    setForm((prev) => ({ ...prev, state_province: stateName }));
+    setStateSearch("");
+    setShowStatePicker(false);
+  };
+
   const validateStep = (step: number) => {
     if (step === 1) {
       if (isBlank(form.title)) {
@@ -292,11 +341,13 @@ export default function NewProperty() {
         isBlank(form.street) ||
         isBlank(form.address) ||
         isBlank(form.city) ||
+        isBlank(form.state_province) ||
+        isBlank(form.country) ||
         isBlank(form.zip)
       ) {
         Alert.alert(
           "Required Field",
-          "Location fields (Street, Barangay, City, ZIP) are required.",
+          "Location fields (Street, Barangay, City, State/Province, Country, ZIP) are required.",
         );
         return false;
       }
@@ -471,6 +522,69 @@ export default function NewProperty() {
                     value={form.city}
                     onChangeText={(t) => setForm({ ...form, city: t })}
                   />
+                </View>
+              </View>
+
+              <View style={styles.row}>
+                <View style={[styles.fieldGroup, { flex: 1 }]}>
+                  <Text style={styles.subLabel}>Country *</Text>
+                  <TouchableOpacity
+                    style={styles.pickerField}
+                    activeOpacity={0.8}
+                    onPress={() => setShowCountryPicker(true)}
+                  >
+                    <Text
+                      style={
+                        form.country
+                          ? styles.pickerFieldText
+                          : styles.pickerFieldPlaceholder
+                      }
+                    >
+                      {form.country || "Select country"}
+                    </Text>
+                    <Ionicons name="chevron-down" size={16} color="#6B7280" />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={[styles.fieldGroup, { flex: 1, marginLeft: 10 }]}>
+                  <Text style={styles.subLabel}>State/Province *</Text>
+                  {form.country && stateOptions.length === 0 ? (
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Type state/province"
+                      value={form.state_province}
+                      onChangeText={(t) =>
+                        setForm({ ...form, state_province: t })
+                      }
+                    />
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.pickerField}
+                      activeOpacity={0.8}
+                      disabled={!form.country}
+                      onPress={() => {
+                        if (form.country) setShowStatePicker(true);
+                      }}
+                    >
+                      <Text
+                        style={
+                          form.state_province
+                            ? styles.pickerFieldText
+                            : styles.pickerFieldPlaceholder
+                        }
+                      >
+                        {form.state_province ||
+                          (form.country
+                            ? "Select state/province"
+                            : "Select country first")}
+                      </Text>
+                      <Ionicons
+                        name="chevron-down"
+                        size={16}
+                        color={form.country ? "#6B7280" : "#9CA3AF"}
+                      />
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
 
@@ -899,53 +1013,138 @@ export default function NewProperty() {
               })}
 
               {/* WIFI SECTION */}
-              <View style={[styles.utilityRow, { flexDirection: 'column', alignItems: 'stretch' }]}>
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <View
+                style={[
+                  styles.utilityRow,
+                  { flexDirection: "column", alignItems: "stretch" },
+                ]}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
                   <View style={{ flexDirection: "row", alignItems: "center" }}>
-                    <View style={[styles.utilityIconBox, { backgroundColor: "#F3E8FF" }]}>
+                    <View
+                      style={[
+                        styles.utilityIconBox,
+                        { backgroundColor: "#F3E8FF" },
+                      ]}
+                    >
                       <Ionicons name="wifi-outline" size={18} color="#9333EA" />
                     </View>
-                    <Text style={[styles.utilityLabel, { color: '#9333EA' }]}>WiFi Internet</Text>
+                    <Text style={[styles.utilityLabel, { color: "#9333EA" }]}>
+                      WiFi Internet
+                    </Text>
                   </View>
                   <TouchableOpacity
                     style={[
                       styles.utilityBtn,
-                      (form.amenities.includes("Free WiFi") || form.amenities.includes("Paid WiFi")) && styles.utilityBtnActive
+                      (form.amenities.includes("Free WiFi") ||
+                        form.amenities.includes("Paid WiFi")) &&
+                        styles.utilityBtnActive,
                     ]}
                     onPress={() => {
-                      const hasWifi = form.amenities.includes("Free WiFi") || form.amenities.includes("Paid WiFi");
+                      const hasWifi =
+                        form.amenities.includes("Free WiFi") ||
+                        form.amenities.includes("Paid WiFi");
                       if (hasWifi) {
-                        setForm(prev => ({ ...prev, amenities: prev.amenities.filter(a => a !== "Free WiFi" && a !== "Paid WiFi") }));
+                        setForm((prev) => ({
+                          ...prev,
+                          amenities: prev.amenities.filter(
+                            (a) => a !== "Free WiFi" && a !== "Paid WiFi",
+                          ),
+                        }));
                       } else {
-                        setForm(prev => ({ ...prev, amenities: [...prev.amenities, "Paid WiFi"] }));
+                        setForm((prev) => ({
+                          ...prev,
+                          amenities: [...prev.amenities, "Paid WiFi"],
+                        }));
                       }
                     }}
                   >
-                    <Text style={[styles.utilityBtnText, (form.amenities.includes("Free WiFi") || form.amenities.includes("Paid WiFi")) && styles.utilityBtnTextActive]}>
-                      {(form.amenities.includes("Free WiFi") || form.amenities.includes("Paid WiFi")) ? "Available" : "Not Available"}
+                    <Text
+                      style={[
+                        styles.utilityBtnText,
+                        (form.amenities.includes("Free WiFi") ||
+                          form.amenities.includes("Paid WiFi")) &&
+                          styles.utilityBtnTextActive,
+                      ]}
+                    >
+                      {form.amenities.includes("Free WiFi") ||
+                      form.amenities.includes("Paid WiFi")
+                        ? "Available"
+                        : "Not Available"}
                     </Text>
                   </TouchableOpacity>
                 </View>
 
-                {(form.amenities.includes("Free WiFi") || form.amenities.includes("Paid WiFi")) && (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, paddingLeft: 46 }}>
-                    <Text style={{ fontSize: 13, color: '#4B5563', fontWeight: 'bold' }}>Is WiFi Free?</Text>
+                {(form.amenities.includes("Free WiFi") ||
+                  form.amenities.includes("Paid WiFi")) && (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginTop: 16,
+                      paddingLeft: 46,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 13,
+                        color: "#4B5563",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      Is WiFi Free?
+                    </Text>
                     <TouchableOpacity
                       style={[
                         styles.utilityBtn,
-                        form.amenities.includes("Free WiFi") && { backgroundColor: '#10B981', borderColor: '#10B981' }
+                        form.amenities.includes("Free WiFi") && {
+                          backgroundColor: "#10B981",
+                          borderColor: "#10B981",
+                        },
                       ]}
                       onPress={() => {
                         const isFree = form.amenities.includes("Free WiFi");
                         if (isFree) {
-                          setForm(prev => ({ ...prev, amenities: [...prev.amenities.filter(a => a !== "Free WiFi" && a !== "Paid WiFi"), "Paid WiFi"] }));
+                          setForm((prev) => ({
+                            ...prev,
+                            amenities: [
+                              ...prev.amenities.filter(
+                                (a) => a !== "Free WiFi" && a !== "Paid WiFi",
+                              ),
+                              "Paid WiFi",
+                            ],
+                          }));
                         } else {
-                          setForm(prev => ({ ...prev, amenities: [...prev.amenities.filter(a => a !== "Free WiFi" && a !== "Paid WiFi"), "Free WiFi"] }));
+                          setForm((prev) => ({
+                            ...prev,
+                            amenities: [
+                              ...prev.amenities.filter(
+                                (a) => a !== "Free WiFi" && a !== "Paid WiFi",
+                              ),
+                              "Free WiFi",
+                            ],
+                          }));
                         }
                       }}
                     >
-                      <Text style={[styles.utilityBtnText, form.amenities.includes("Free WiFi") && { color: 'white' }]}>
-                        {form.amenities.includes("Free WiFi") ? "Yes, Free WiFi" : "No, Tenant Pays"}
+                      <Text
+                        style={[
+                          styles.utilityBtnText,
+                          form.amenities.includes("Free WiFi") && {
+                            color: "white",
+                          },
+                        ]}
+                      >
+                        {form.amenities.includes("Free WiFi")
+                          ? "Yes, Free WiFi"
+                          : "No, Tenant Pays"}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -1139,6 +1338,74 @@ export default function NewProperty() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      <Modal visible={showCountryPicker} transparent animationType="fade">
+        <View style={styles.pickerModalOverlay}>
+          <View style={styles.pickerModalCard}>
+            <Text style={styles.pickerModalTitle}>Select Country</Text>
+            <TextInput
+              style={styles.pickerSearchInput}
+              placeholder="Search country"
+              value={countrySearch}
+              onChangeText={setCountrySearch}
+            />
+            <ScrollView style={styles.pickerOptionsList}>
+              {filteredCountries.map((country) => (
+                <TouchableOpacity
+                  key={country.isoCode}
+                  style={styles.pickerOption}
+                  onPress={() => handleCountrySelect(country.name)}
+                >
+                  <Text style={styles.pickerOptionText}>{country.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity
+              style={styles.pickerCancelBtn}
+              onPress={() => {
+                setCountrySearch("");
+                setShowCountryPicker(false);
+              }}
+            >
+              <Text style={styles.pickerCancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={showStatePicker} transparent animationType="fade">
+        <View style={styles.pickerModalOverlay}>
+          <View style={styles.pickerModalCard}>
+            <Text style={styles.pickerModalTitle}>Select State/Province</Text>
+            <TextInput
+              style={styles.pickerSearchInput}
+              placeholder="Search state/province"
+              value={stateSearch}
+              onChangeText={setStateSearch}
+            />
+            <ScrollView style={styles.pickerOptionsList}>
+              {filteredStates.map((state) => (
+                <TouchableOpacity
+                  key={state.isoCode || state.name}
+                  style={styles.pickerOption}
+                  onPress={() => handleStateSelect(state.name)}
+                >
+                  <Text style={styles.pickerOptionText}>{state.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity
+              style={styles.pickerCancelBtn}
+              onPress={() => {
+                setStateSearch("");
+                setShowStatePicker(false);
+              }}
+            >
+              <Text style={styles.pickerCancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1226,6 +1493,83 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: 16,
     color: "#111",
+  },
+  pickerField: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    minHeight: 42,
+    marginBottom: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  pickerFieldText: {
+    fontSize: 14,
+    color: "#111",
+    flex: 1,
+    paddingRight: 8,
+  },
+  pickerFieldPlaceholder: {
+    fontSize: 14,
+    color: "#9CA3AF",
+    flex: 1,
+    paddingRight: 8,
+  },
+  pickerModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  pickerModalCard: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 16,
+    maxHeight: "80%",
+  },
+  pickerModalTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 10,
+  },
+  pickerSearchInput: {
+    backgroundColor: "#F9FAFB",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: "#111",
+    marginBottom: 10,
+  },
+  pickerOptionsList: {
+    maxHeight: 320,
+  },
+  pickerOption: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+  },
+  pickerOptionText: {
+    fontSize: 14,
+    color: "#111827",
+  },
+  pickerCancelBtn: {
+    marginTop: 12,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: "#F3F4F6",
+    alignItems: "center",
+  },
+  pickerCancelBtnText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#374151",
   },
   inputBold: {
     backgroundColor: "#F9FAFB",

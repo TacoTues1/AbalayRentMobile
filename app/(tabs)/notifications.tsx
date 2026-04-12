@@ -204,7 +204,7 @@ export default function NotificationsPage() {
         break;
       case "application":
       case "application_status":
-        router.push("/(tabs)/applications");
+        router.push("/(tabs)/bookings");
         break;
       case "message":
         router.push("/(tabs)/messages");

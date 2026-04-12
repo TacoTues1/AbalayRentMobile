@@ -1,9 +1,16 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { supabase } from '../lib/supabase';
-import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import React, { useState } from "react";
+import {
+    ActivityIndicator,
+    Alert,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { supabase } from "../lib/supabase";
 
 export default function DuplicateAccount() {
   const router = useRouter();
@@ -15,39 +22,58 @@ export default function DuplicateAccount() {
       "This will permanently delete your account data. You can then sign in with your original account.",
       [
         { text: "Cancel", style: "cancel" },
-        { 
-          text: "Delete & Sign Out", 
-          style: 'destructive',
+        {
+          text: "Delete & Sign Out",
+          style: "destructive",
           onPress: async () => {
             setLoading(true);
             try {
-              const { data: { session } } = await supabase.auth.getSession();
+              const {
+                data: { session },
+              } = await supabase.auth.getSession();
               if (session) {
-                // 1. Delete Profile Data (Cascading delete usually handles related data)
-                const { error: profileError } = await supabase
-                  .from('profiles')
-                  .delete()
-                  .eq('id', session.user.id);
-                
-                if (profileError) throw profileError;
+                const { error: deleteAccountError } =
+                  await supabase.functions.invoke("delete-account", {
+                    headers: session?.access_token
+                      ? { Authorization: `Bearer ${session.access_token}` }
+                      : undefined,
+                  });
+
+                if (deleteAccountError) {
+                  const message = String(deleteAccountError.message || "");
+                  const functionUnavailable =
+                    /404|not found|delete-account/i.test(message);
+
+                  if (!functionUnavailable) throw deleteAccountError;
+
+                  const { error: profileError } = await supabase
+                    .from("profiles")
+                    .delete()
+                    .eq("id", session.user.id);
+
+                  if (profileError) throw profileError;
+                }
 
                 // 2. Sign Out
                 await supabase.auth.signOut();
-                
+
                 Alert.alert("Account Deleted", "You have been signed out.");
-                router.replace('/');
+                router.replace("/");
               }
             } catch (error: any) {
-              Alert.alert("Error", "Could not delete account. Please contact support.");
+              Alert.alert(
+                "Error",
+                "Could not delete account. Please contact support.",
+              );
               // Fallback sign out so they aren't stuck
               await supabase.auth.signOut();
-              router.replace('/');
+              router.replace("/");
             } finally {
               setLoading(false);
             }
-          }
-        }
-      ]
+          },
+        },
+      ],
     );
   };
 
@@ -55,18 +81,20 @@ export default function DuplicateAccount() {
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
         <Ionicons name="warning" size={80} color="#dc2626" />
-        
+
         <Text style={styles.title}>DUPLICATE ACCOUNT</Text>
-        
+
         <Text style={styles.subtitle}>
-          Our system detected that your phone number is already associated with another account.
+          Our system detected that your phone number is already associated with
+          another account.
         </Text>
         <Text style={styles.instruction}>
-          To maintain security, duplicate accounts are not allowed. Please delete this account and sign in with your existing credentials.
+          To maintain security, duplicate accounts are not allowed. Please
+          delete this account and sign in with your existing credentials.
         </Text>
 
-        <TouchableOpacity 
-          style={styles.deleteBtn} 
+        <TouchableOpacity
+          style={styles.deleteBtn}
           onPress={handleDeleteAccount}
           disabled={loading}
         >
@@ -82,50 +110,50 @@ export default function DuplicateAccount() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fef2f2' }, // Light red background
-  content: { 
-    flex: 1, 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    padding: 30 
+  container: { flex: 1, backgroundColor: "#fef2f2" }, // Light red background
+  content: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 30,
   },
-  title: { 
-    fontSize: 24, 
-    fontWeight: '900', 
-    color: '#991b1b', 
+  title: {
+    fontSize: 24,
+    fontWeight: "900",
+    color: "#991b1b",
     marginTop: 20,
     letterSpacing: 2,
-    marginBottom: 10
+    marginBottom: 10,
   },
   subtitle: {
     fontSize: 16,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    color: '#7f1d1d',
-    marginBottom: 10
+    fontWeight: "bold",
+    textAlign: "center",
+    color: "#7f1d1d",
+    marginBottom: 10,
   },
   instruction: {
     fontSize: 14,
-    textAlign: 'center',
-    color: '#b91c1c',
+    textAlign: "center",
+    color: "#b91c1c",
     marginBottom: 40,
-    lineHeight: 20
+    lineHeight: 20,
   },
   deleteBtn: {
-    backgroundColor: '#dc2626',
+    backgroundColor: "#dc2626",
     paddingVertical: 15,
     paddingHorizontal: 40,
     borderRadius: 12,
-    shadowColor: '#dc2626',
+    shadowColor: "#dc2626",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 5,
-    elevation: 5
+    elevation: 5,
   },
   btnText: {
-    color: 'white',
-    fontWeight: 'bold',
+    color: "white",
+    fontWeight: "bold",
     fontSize: 16,
-    textTransform: 'uppercase'
-  }
+    textTransform: "uppercase",
+  },
 });

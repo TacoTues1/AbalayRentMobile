@@ -40,7 +40,7 @@ export default function PrivacyView({ onBack }: { onBack: () => void }) {
                 <View style={{ marginBottom: 32 }}>
                     <Text style={{ fontSize: 18, fontWeight: 'bold', color: heading, marginBottom: 12 }}>2. How We Use Information</Text>
                     <Text style={{ fontSize: 15, color: body, lineHeight: 24, marginBottom: 8 }}><Text style={{ fontWeight: 'bold' }}>• Service Provision:</Text> To create bookings, generate lease agreements, and manage maintenance requests.</Text>
-                    <Text style={{ fontSize: 15, color: body, lineHeight: 24, marginBottom: 8 }}><Text style={{ fontWeight: 'bold' }}>• Communication:</Text> To send SMS notifications (via services like SMSGate) regarding booking status, maintenance updates, or security alerts.</Text>
+                    <Text style={{ fontSize: 15, color: body, lineHeight: 24, marginBottom: 8 }}><Text style={{ fontWeight: 'bold' }}>• Communication:</Text> To send SMS notifications (via services SMSgateway) regarding booking status, maintenance updates, or security alerts.</Text>
                     <Text style={{ fontSize: 15, color: body, lineHeight: 24, marginBottom: 8 }}><Text style={{ fontWeight: 'bold' }}>• Safety & Security:</Text> To detect and prevent fraud, spam, and abuse. We use data to verify that landlords own their properties and tenants are real people.</Text>
                     <Text style={{ fontSize: 15, color: body, lineHeight: 24, marginBottom: 8 }}><Text style={{ fontWeight: 'bold' }}>• Platform Improvement:</Text> To analyze usage trends and improve the Abalay user experience.</Text>
                 </View>
@@ -77,6 +77,9 @@ export default function PrivacyView({ onBack }: { onBack: () => void }) {
                     <Text style={{ fontSize: 15, color: body, lineHeight: 24, marginBottom: 8 }}>You have control over your data:</Text>
                     <Text style={{ fontSize: 15, color: body, lineHeight: 24, marginBottom: 8 }}><Text style={{ fontWeight: 'bold' }}>• Access & Update:</Text> You can edit your profile and property information directly through your dashboard.</Text>
                     <Text style={{ fontSize: 15, color: body, lineHeight: 24, marginBottom: 8 }}><Text style={{ fontWeight: 'bold' }}>• Data Portability:</Text> You may request a copy of the personal data we hold about you in a structured, machine-readable format.</Text>
+                    <Text style={{ fontSize: 15, color: body, lineHeight: 24, marginBottom: 8 }}>
+                        <Text style={{ fontWeight: 'bold' }}>• Account Deletion:</Text> You may request permanent deletion of your account and personal data. <Text style={{ color: '#ef4444', fontWeight: 'bold', textDecorationLine: 'underline' }}>Delete my Account</Text>
+                    </Text>
                 </View>
 
                 <View style={{ marginBottom: 32 }}>

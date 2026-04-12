@@ -294,7 +294,11 @@ export default function LandlordDashboard({ session, profile }: any) {
 
   // Recalculate Billing Schedule when occupancies change
   useEffect(() => {
-    if (occupancies.length > 0) calculateBillingSchedule();
+    if (occupancies.length === 0) {
+      setBillingSchedule([]);
+      return;
+    }
+    calculateBillingSchedule();
   }, [occupancies]);
 
   // --- DATA LOADING ---

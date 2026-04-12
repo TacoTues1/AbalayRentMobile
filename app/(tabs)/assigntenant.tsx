@@ -1,7 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import * as WebBrowser from "expo-web-browser";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -14,51 +13,37 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import BlockingLoader from "../../components/ui/BlockingLoader";
 import CalendarPicker from "../../components/ui/CalendarPicker";
 import { createNotification } from "../../lib/notifications";
 import { supabase } from "../../lib/supabase";
 
 const API_URL = (process.env.EXPO_PUBLIC_API_URL || "").replace(/\/+$/, "");
-const FREE_TENANT_SLOT_COUNT = 1;
-const TENANT_SLOT_PRICE_PHP = 50;
-const ACTIVE_OCCUPANCY_STATUSES = [
-  "active",
-  "pending_end",
-  "approved",
-  "signed",
-];
-const SUBSCRIPTION_TABLE_CANDIDATES = [
-  "subscribtion",
-  "subscriptions",
-  "subscription",
-];
-const SUBSCRIPTION_PAYMENT_TABLE_CANDIDATES = [
-  "subscribtion_payments",
-  "subscription_payments",
-];
-const USER_COLUMN_CANDIDATES = [
-  "landlord_id",
-  "user_id",
-  "owner_id",
-  "profile_id",
-];
-const PAID_STATUS_VALUES = [
-  "paid",
-  "completed",
-  "success",
-  "succeeded",
-  "active",
-  "approved",
-  "verified",
-  "done",
-];
 
 export default function AssignTenantScreen() {
   const router = useRouter();
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const {
+    propertyId,
+    bookingId,
+    tenantId: routeTenantId,
+    tenantName: routeTenantName,
+    tenantPhone: routeTenantPhone,
+    tenantFirstName: routeTenantFirstName,
+    tenantLastName: routeTenantLastName,
+  } = useLocalSearchParams<{
+    propertyId: string;
+    bookingId?: string;
+    tenantId?: string;
+    tenantName?: string;
+    tenantPhone?: string;
+    tenantFirstName?: string;
+    tenantLastName?: string;
+  }>();
 
   const [session, setSession] = useState<any>(null);
   const [property, setProperty] = useState<any>(null);
+  const [availableProperties, setAvailableProperties] = useState<any[]>([]);
+  const [selectedPropertyId, setSelectedPropertyId] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -72,393 +57,128 @@ export default function AssignTenantScreen() {
   );
   const [lateFee, setLateFee] = useState("");
   const [wifiDueDay, setWifiDueDay] = useState("");
+  const [waterDueDay, setWaterDueDay] = useState("");
+  const [electricityDueDay, setElectricityDueDay] = useState("");
+  const [showWaterDayPicker, setShowWaterDayPicker] = useState(false);
+  const [showElectricityDayPicker, setShowElectricityDayPicker] =
+    useState(false);
+  const [showWifiDayPicker, setShowWifiDayPicker] = useState(false);
+  const [alreadyPaid, setAlreadyPaid] = useState(false);
+
   const [contractPdf, setContractPdf] = useState<any>(null);
   const [step, setStep] = useState(0);
-  const [loadingSlots, setLoadingSlots] = useState(false);
-  const [payingSlots, setPayingSlots] = useState(false);
-  const [slotUsage, setSlotUsage] = useState({
-    used: 0,
-    paidExtra: 0,
-    total: FREE_TENANT_SLOT_COUNT,
-    remaining: FREE_TENANT_SLOT_COUNT,
-  });
   const STEPS = [
-    { label: "Tenant", icon: "1" },
-    { label: "Contract", icon: "2" },
-    { label: "Documents", icon: "3" },
+    { label: "Property", icon: "1" },
+    { label: "Schedule", icon: "2" },
+    { label: "Charges", icon: "3" },
     { label: "Utilities", icon: "4" },
   ];
-
-  const isMissingSchemaError = (error: any) => {
-    const message = String(error?.message || "").toLowerCase();
-    const details = String(error?.details || "").toLowerCase();
-    const code = String(error?.code || "").toUpperCase();
-    return (
-      code === "PGRST204" ||
-      code === "PGRST205" ||
-      message.includes("does not exist") ||
-      message.includes("could not find") ||
-      message.includes("schema cache") ||
-      details.includes("failed to parse")
-    );
-  };
-
-  const toNumber = (value: any) => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  };
-
-  const hasPaidStatus = (row: any) => {
-    const status = String(
-      row?.status || row?.payment_status || row?.state || "",
-    ).toLowerCase();
-    if (!status) return row?.is_paid !== false;
-    return PAID_STATUS_VALUES.includes(status);
-  };
-
-  const showConfirm = (title: string, message: string, okText = "Continue") =>
-    new Promise<boolean>((resolve) => {
-      Alert.alert(title, message, [
-        { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
-        { text: okText, onPress: () => resolve(true) },
-      ]);
-    });
-
-  const fetchRowsByUserColumn = async (tableName: string, userId: string) => {
-    for (const userColumn of USER_COLUMN_CANDIDATES) {
-      const { data, error } = await supabase
-        .from(tableName)
-        .select("*")
-        .eq(userColumn, userId)
-        .order("created_at", { ascending: false })
-        .limit(200);
-
-      if (!error) {
-        return data || [];
-      }
-
-      if (!isMissingSchemaError(error)) {
-        console.log(
-          `fetchRowsByUserColumn ${tableName}.${userColumn} failed`,
-          error,
-        );
-      }
-    }
-    return [];
-  };
-
-  const getPaidSlotsFromSubscriptionRows = (rows: any[]) => {
-    let maxTotalSlots = 0;
-    let summedExtraSlots = 0;
-
-    for (const row of rows || []) {
-      if (!hasPaidStatus(row)) continue;
-
-      const totalSlotsCandidate = Math.max(
-        toNumber(row?.total_slots),
-        toNumber(row?.max_slots),
-        toNumber(row?.slot_limit),
-        toNumber(row?.allowed_slots),
-      );
-      if (totalSlotsCandidate > maxTotalSlots) {
-        maxTotalSlots = totalSlotsCandidate;
-      }
-
-      const extraSlotsCandidate = Math.max(
-        toNumber(row?.additional_slots),
-        toNumber(row?.extra_slots),
-        toNumber(row?.slots),
-        toNumber(row?.slot_count),
-        toNumber(row?.quantity),
-      );
-      summedExtraSlots += Math.max(0, extraSlotsCandidate);
-    }
-
-    if (maxTotalSlots > 0) {
-      return Math.max(0, maxTotalSlots - FREE_TENANT_SLOT_COUNT);
-    }
-
-    return Math.max(0, summedExtraSlots);
-  };
-
-  const getPaidSlotsFromPaymentRows = (rows: any[]) => {
-    let paidSlots = 0;
-    for (const row of rows || []) {
-      if (!hasPaidStatus(row)) continue;
-
-      const slotQty = Math.max(
-        toNumber(row?.slots),
-        toNumber(row?.slot_count),
-        toNumber(row?.quantity),
-        toNumber(row?.additional_slots),
-      );
-
-      if (slotQty > 0) {
-        paidSlots += slotQty;
-        continue;
-      }
-
-      const amount = Math.max(
-        toNumber(row?.amount),
-        toNumber(row?.amount_paid),
-        toNumber(row?.total_amount),
-      );
-      if (amount > 0) {
-        paidSlots += Math.floor(amount / TENANT_SLOT_PRICE_PHP);
-      }
-    }
-
-    return Math.max(0, paidSlots);
-  };
-
-  const loadTenantSlotUsage = async (landlordId: string) => {
-    setLoadingSlots(true);
-    try {
-      const { count: usedCount, error: usedCountError } = await supabase
-        .from("tenant_occupancies")
-        .select("id", { count: "exact", head: true })
-        .eq("landlord_id", landlordId)
-        .in("status", ACTIVE_OCCUPANCY_STATUSES);
-
-      if (usedCountError) {
-        console.log("Failed loading tenant slot usage count:", usedCountError);
-      }
-
-      const subscriptionRowsByTable = await Promise.all(
-        SUBSCRIPTION_TABLE_CANDIDATES.map((tableName) =>
-          fetchRowsByUserColumn(tableName, landlordId),
-        ),
-      );
-
-      const subscriptionPaymentRowsByTable = await Promise.all(
-        SUBSCRIPTION_PAYMENT_TABLE_CANDIDATES.map((tableName) =>
-          fetchRowsByUserColumn(tableName, landlordId),
-        ),
-      );
-
-      const subscriptionRows = subscriptionRowsByTable.flat();
-      const paymentRows = subscriptionPaymentRowsByTable.flat();
-
-      const paidFromSubscriptions =
-        getPaidSlotsFromSubscriptionRows(subscriptionRows);
-      const paidFromPayments = getPaidSlotsFromPaymentRows(paymentRows);
-      const paidExtra = Math.max(paidFromSubscriptions, paidFromPayments, 0);
-      const totalSlots = FREE_TENANT_SLOT_COUNT + paidExtra;
-      const used = usedCount || 0;
-      const remaining = Math.max(0, totalSlots - used);
-
-      setSlotUsage({
-        used,
-        paidExtra,
-        total: totalSlots,
-        remaining,
-      });
-
-      return {
-        used,
-        paidExtra,
-        totalSlots,
-        remaining,
-      };
-    } finally {
-      setLoadingSlots(false);
-    }
-  };
-
-  const recordSlotPurchase = async (
-    landlordId: string,
-    slotsBought: number,
-    amountPaid: number,
-    checkoutSessionId?: string,
-  ) => {
-    const now = new Date().toISOString();
-    const paymentPayloadVariants = [
-      {
-        landlord_id: landlordId,
-        slots: slotsBought,
-        amount: amountPaid,
-        status: "paid",
-        payment_method: "qrph",
-        provider: "paymongo",
-        checkout_session_id: checkoutSessionId || null,
-        created_at: now,
-      },
-      {
-        user_id: landlordId,
-        slot_count: slotsBought,
-        amount_paid: amountPaid,
-        payment_status: "paid",
-        payment_method: "qrph",
-        provider: "paymongo",
-        session_id: checkoutSessionId || null,
-        created_at: now,
-      },
-    ];
-
-    for (const tableName of SUBSCRIPTION_PAYMENT_TABLE_CANDIDATES) {
-      for (const payload of paymentPayloadVariants) {
-        const { error } = await supabase.from(tableName).insert(payload);
-        if (!error) {
-          break;
-        }
-        if (!isMissingSchemaError(error)) {
-          console.log(`recordSlotPurchase failed on ${tableName}:`, error);
-        }
-      }
-    }
-
-    const nextTotalSlots =
-      FREE_TENANT_SLOT_COUNT + slotUsage.paidExtra + slotsBought;
-    const subscriptionPayloadVariants = [
-      {
-        landlord_id: landlordId,
-        plan_name: "tenant_slot_plan",
-        total_slots: nextTotalSlots,
-        additional_slots: slotUsage.paidExtra + slotsBought,
-        status: "active",
-        updated_at: now,
-      },
-      {
-        user_id: landlordId,
-        plan_type: "tenant_slot_plan",
-        slot_count: slotUsage.paidExtra + slotsBought,
-        status: "active",
-        updated_at: now,
-      },
-    ];
-
-    for (const tableName of SUBSCRIPTION_TABLE_CANDIDATES) {
-      for (const payload of subscriptionPayloadVariants) {
-        const { error } = await supabase.from(tableName).upsert(payload);
-        if (!error) {
-          break;
-        }
-        if (!isMissingSchemaError(error)) {
-          console.log(`record subscription failed on ${tableName}:`, error);
-        }
-      }
-    }
-  };
-
-  const buyTenantSlots = async (slotsToBuy: number) => {
-    if (!session?.user?.id) return false;
-    if (!API_URL) {
-      Alert.alert("Error", "API URL is not configured.");
-      return false;
-    }
-
-    const normalizedSlots = Math.max(1, Math.floor(slotsToBuy));
-    const amount = normalizedSlots * TENANT_SLOT_PRICE_PHP;
-
-    const confirmed = await showConfirm(
-      "Buy Tenant Slots",
-      `You are about to buy ${normalizedSlots} slot${normalizedSlots > 1 ? "s" : ""} for PHP ${amount}. Proceed with PayMongo QR payment?`,
-      "Pay with QR",
-    );
-
-    if (!confirmed) return false;
-
-    setPayingSlots(true);
-    try {
-      const response = await fetch(
-        `${API_URL}/api/payments/create-paymongo-checkout`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            amount,
-            description: "Tenant Slot Subscription",
-            remarks: `Landlord ${session.user.id} bought ${normalizedSlots} tenant slot(s)`,
-            allowedMethods: ["qrph"],
-            metadata: {
-              type: "tenant_slot_subscription",
-              landlordId: session.user.id,
-              slots: normalizedSlots,
-            },
-          }),
-        },
-      );
-
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data?.checkoutUrl) {
-        throw new Error(data?.error || "Failed to start PayMongo checkout.");
-      }
-
-      await WebBrowser.openBrowserAsync(data.checkoutUrl);
-
-      // Try backend verification first; if not available, fallback to manual confirmation.
-      let verified = false;
-      if (data?.checkoutSessionId) {
-        for (let attempt = 0; attempt < 12; attempt++) {
-          try {
-            const verifyResponse = await fetch(
-              `${API_URL}/api/payments/process-paymongo-success`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  sessionId: data.checkoutSessionId,
-                  type: "tenant_slot_subscription",
-                  landlordId: session.user.id,
-                  slots: normalizedSlots,
-                }),
-              },
-            );
-
-            if (verifyResponse.ok) {
-              verified = true;
-              break;
-            }
-          } catch {}
-
-          await new Promise((resolve) => setTimeout(resolve, 3000));
-        }
-      }
-
-      if (!verified) {
-        verified = await showConfirm(
-          "Confirm Payment",
-          "If you completed the QR payment, tap Confirm to apply your tenant slots.",
-          "Confirm",
-        );
-      }
-
-      if (!verified) return false;
-
-      await recordSlotPurchase(
-        session.user.id,
-        normalizedSlots,
-        amount,
-        data?.checkoutSessionId,
-      );
-
-      await loadTenantSlotUsage(session.user.id);
-      Alert.alert("Success", "Tenant slot purchase completed.");
-      return true;
-    } catch (error: any) {
-      Alert.alert(
-        "Payment Failed",
-        error?.message || "Unable to process payment.",
-      );
-      return false;
-    } finally {
-      setPayingSlots(false);
-    }
-  };
-
-  const ensureTenantSlotCapacity = async () => {
-    if (!session?.user?.id) return false;
-
-    const usage = await loadTenantSlotUsage(session.user.id);
-    const needed = Math.max(0, usage.used + 1 - usage.totalSlots);
-    if (needed <= 0) return true;
-
-    return buyTenantSlots(needed);
-  };
 
   useEffect(() => {
     loadData();
   }, []);
+
+  const loadApprovedBookingsForProperty = async (
+    targetPropertyId: string,
+    preferredBookingId?: string,
+  ) => {
+    const { data: bookings } = await supabase
+      .from("bookings")
+      .select("*")
+      .eq("property_id", targetPropertyId)
+      .in("status", ["viewing_done"]);
+
+    if (bookings && bookings.length > 0) {
+      const tenantIds = bookings.map((b: any) => b.tenant);
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("*")
+        .in("id", tenantIds);
+
+      const profileMap = (profiles || []).reduce(
+        (acc: any, p: any) => ({ ...acc, [p.id]: p }),
+        {},
+      );
+      const candidates = bookings.map((b: any) => ({
+        ...b,
+        tenant_profile: profileMap[b.tenant],
+      }));
+
+      setApprovedBookings(candidates);
+
+      if (bookingId) {
+        if (preferredBookingId) {
+          const preferred = candidates.find(
+            (candidate: any) =>
+              String(candidate.id) === String(preferredBookingId),
+          );
+          if (preferred) {
+            setSelectedTenant(preferred);
+          } else {
+            // Respect the fallback loaded in loadData if it matches
+            setSelectedTenant((prev: any) =>
+              String(prev?.id) === String(preferredBookingId) ? prev : null,
+            );
+          }
+        }
+        return;
+      }
+
+      if (preferredBookingId) {
+        const preferred = candidates.find(
+          (candidate: any) =>
+            String(candidate.id) === String(preferredBookingId),
+        );
+        if (preferred) {
+          setSelectedTenant(preferred);
+        } else {
+          // Respect current tenant if it matches
+          setSelectedTenant((prev: any) =>
+            String(prev?.id) === String(preferredBookingId) ? prev : null,
+          );
+        }
+      } else {
+        setSelectedTenant((prev: any) => {
+          if (!prev) return null;
+          return (
+            candidates.find((candidate: any) => candidate.id === prev.id) ||
+            null
+          );
+        });
+      }
+    } else {
+      setApprovedBookings([]);
+
+      // If the property has no bookings in the DB, only clear selectedTenant
+      // if it does NOT match our preferred/current bookingId (which might be a fallback).
+      setSelectedTenant((prev: any) => {
+        if (
+          preferredBookingId &&
+          String(prev?.id) === String(preferredBookingId)
+        ) {
+          return prev;
+        }
+        return null;
+      });
+    }
+  };
+
+  const selectProperty = async (
+    targetPropertyId: string,
+    preferredBookingId?: string,
+  ) => {
+    setSelectedPropertyId(String(targetPropertyId));
+    const selected = availableProperties.find(
+      (p: any) => String(p.id) === String(targetPropertyId),
+    );
+    if (selected) {
+      setProperty(selected);
+    }
+    await loadApprovedBookingsForProperty(
+      String(targetPropertyId),
+      preferredBookingId || bookingId,
+    );
+  };
 
   const loadData = async () => {
     try {
@@ -467,7 +187,6 @@ export default function AssignTenantScreen() {
       } = await supabase.auth.getSession();
       if (!s) return router.replace("/");
       setSession(s);
-      await loadTenantSlotUsage(s.user.id);
 
       if (!propertyId) {
         Alert.alert("Error", "No property selected");
@@ -475,46 +194,185 @@ export default function AssignTenantScreen() {
         return;
       }
 
-      // Load property
-      const { data: prop } = await supabase
-        .from("properties")
-        .select("*")
-        .eq("id", propertyId)
-        .single();
+      // Try fetching booking from Supabase, but prepare to use fallback route params
+      let routeBooking: any = null;
+      let usedFallback = false;
 
-      if (!prop) {
-        Alert.alert("Error", "Property not found");
+      if (bookingId) {
+        const { data, error } = await supabase
+          .from("bookings")
+          .select(
+            "id, property_id, tenant, status, landlord, landlord_id, owner_id, user_id",
+          )
+          .eq("id", bookingId)
+          .maybeSingle();
+
+        if (!error && data) {
+          routeBooking = data;
+        }
+      }
+
+      // If Supabase failed but we have params from the bookings list, rely on them!
+      if (!routeBooking && routeTenantId) {
+        usedFallback = true;
+        routeBooking = {
+          id: bookingId || "fallback_id",
+          property_id: propertyId,
+          tenant: routeTenantId,
+          status: "viewing_done",
+          landlord: s.user.id,
+        };
+      }
+
+      if (!routeBooking) {
+        Alert.alert(
+          "Invalid Access",
+          "Booking not found. Please open Assign Tenant from the Bookings page.",
+          [{ text: "OK", onPress: () => router.replace("/(tabs)/bookings") }],
+        );
+        return;
+      }
+
+      // Verify owner
+      if (!usedFallback) {
+        const bookingLandlordId =
+          routeBooking.landlord ||
+          routeBooking.landlord_id ||
+          routeBooking.owner_id ||
+          routeBooking.user_id;
+
+        if (
+          bookingLandlordId &&
+          String(bookingLandlordId) !== String(s.user.id)
+        ) {
+          Alert.alert("Error", "You are not allowed to assign this booking.", [
+            { text: "OK", onPress: () => router.replace("/(tabs)/bookings") },
+          ]);
+          return;
+        }
+      }
+
+      if (!routeBooking.tenant) {
+        Alert.alert(
+          "Invalid Access",
+          "This booking has no tenant. Please open Assign Tenant from a valid booking request.",
+          [{ text: "OK", onPress: () => router.replace("/(tabs)/bookings") }],
+        );
+        return;
+      }
+
+      const bookingStatus = String(routeBooking.status || "").toLowerCase();
+      // Added approved and accepted here because sometimes assignment happens right after approval.
+      if (
+        !["viewing_done", "approved", "accepted"].includes(bookingStatus) &&
+        !usedFallback
+      ) {
+        Alert.alert(
+          "Action Required",
+          "Mark the viewing as successful first before assigning this tenant.",
+          [{ text: "OK", onPress: () => router.replace("/(tabs)/bookings") }],
+        );
+        return;
+      }
+
+      let routeTenantProfile: any = null;
+
+      const { data: dbTenantProfile } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", routeBooking.tenant)
+        .maybeSingle();
+
+      if (dbTenantProfile) {
+        routeTenantProfile = dbTenantProfile;
+      } else if (routeTenantName || routeTenantFirstName) {
+        // Create a fallback profile using the navigation parameters
+        routeTenantProfile = {
+          id: routeBooking.tenant,
+          first_name:
+            routeTenantFirstName || (routeTenantName || "").split(" ")[0] || "",
+          last_name:
+            routeTenantLastName ||
+            (routeTenantName || "").split(" ").slice(1).join(" ") ||
+            "",
+          phone: routeTenantPhone || "",
+        };
+      }
+
+      setSelectedTenant({
+        ...routeBooking,
+        tenant_profile: routeTenantProfile || null,
+      });
+
+      const ownerColumns = ["landlord", "landlord_id", "owner_id", "user_id"];
+      const propertiesById = new Map<string, any>();
+
+      for (const ownerColumn of ownerColumns) {
+        const { data, error } = await (supabase.from("properties") as any)
+          .select("*")
+          .eq(ownerColumn, s.user.id);
+
+        if (!error) {
+          const loaded = data || [];
+          loaded.forEach((p: any) => {
+            if (p?.is_deleted === true) return;
+            propertiesById.set(String(p.id), p);
+          });
+        }
+      }
+
+      let properties: any[] = Array.from(propertiesById.values());
+
+      const requestedId = String(routeBooking.property_id || propertyId);
+      const hasRequested = properties.some(
+        (p: any) => String(p.id) === requestedId,
+      );
+
+      if (!hasRequested) {
+        const { data: requestedProp } = await supabase
+          .from("properties")
+          .select("*")
+          .eq("id", requestedId)
+          .maybeSingle();
+
+        if (requestedProp && requestedProp.is_deleted !== true) {
+          properties = [requestedProp, ...properties];
+        }
+      }
+
+      if (properties.length === 0) {
+        Alert.alert("Error", "No properties found for assignment");
         router.back();
         return;
       }
-      setProperty(prop);
 
-      // Load approved bookings for this property
-      const { data: bookings } = await supabase
-        .from("bookings")
-        .select("*")
-        .eq("property_id", propertyId)
-        .eq("status", "approved");
+      properties.sort((a, b) => {
+        if (String(a.id) === requestedId) return -1;
+        if (String(b.id) === requestedId) return 1;
+        return 0;
+      });
 
-      if (bookings && bookings.length > 0) {
-        const tenantIds = bookings.map((b: any) => b.tenant);
-        const { data: profiles } = await supabase
-          .from("profiles")
-          .select("*")
-          .in("id", tenantIds);
+      setAvailableProperties(properties);
 
-        const profileMap = (profiles || []).reduce(
-          (acc: any, p: any) => ({ ...acc, [p.id]: p }),
-          {},
-        );
-        const candidates = bookings.map((b: any) => ({
-          ...b,
-          tenant_profile: profileMap[b.tenant],
-        }));
-        setApprovedBookings(candidates);
-      } else {
-        setApprovedBookings([]);
+      const initialPropertyId =
+        properties.find((p: any) => String(p.id) === requestedId)?.id ||
+        properties[0]?.id;
+
+      if (!initialPropertyId) {
+        Alert.alert("Error", "No properties found for assignment");
+        router.back();
+        return;
       }
+
+      setProperty(
+        properties.find((p: any) => String(p.id) === String(initialPropertyId)),
+      );
+      setSelectedPropertyId(String(initialPropertyId));
+
+      await loadApprovedBookingsForProperty(
+        String(initialPropertyId),
+        String(initialPropertyId) === requestedId ? bookingId : undefined,
+      );
     } catch (err: any) {
       console.error("Error loading data:", err.message);
     } finally {
@@ -538,41 +396,81 @@ export default function AssignTenantScreen() {
   };
 
   const handleAssign = async () => {
-    if (!selectedTenant) return Alert.alert("Error", "Please select a tenant");
+    if (!selectedPropertyId)
+      return Alert.alert("Error", "Please select a property");
+    if (!selectedTenant)
+      return Alert.alert(
+        "Error",
+        "Unable to load tenant from the selected booking request.",
+      );
     if (!startDate) return Alert.alert("Error", "Please enter a start date");
 
-    const requireWifiDueDate = property?.amenities?.includes("Paid WiFi");
-    if (requireWifiDueDate && !wifiDueDay) {
-      return Alert.alert("Required", "Please select a Wifi Due Day");
+    const activeProperty =
+      availableProperties.find(
+        (p: any) => String(p.id) === String(selectedPropertyId),
+      ) || property;
+
+    if (!activeProperty) {
+      return Alert.alert("Error", "Selected property not found");
+    }
+
+    const amenities = activeProperty?.amenities || [];
+    const isWaterFree = amenities.includes("Free Water");
+    const isElecFree = amenities.includes("Free Electricity");
+    const isWifiAvailable =
+      amenities.includes("Wifi") ||
+      amenities.includes("WiFi") ||
+      amenities.includes("Free WiFi") ||
+      amenities.includes("Paid WiFi");
+    const isWifiFree = amenities.includes("Free WiFi");
+    const requireWifiDueDate = isWifiAvailable && !isWifiFree;
+
+    if (
+      !isWaterFree &&
+      (!waterDueDay || parseInt(waterDueDay) < 1 || parseInt(waterDueDay) > 31)
+    ) {
+      return Alert.alert("Error", "Please enter a valid Water Due Day (1-31)");
+    }
+    if (
+      !isElecFree &&
+      (!electricityDueDay ||
+        parseInt(electricityDueDay) < 1 ||
+        parseInt(electricityDueDay) > 31)
+    ) {
+      return Alert.alert(
+        "Error",
+        "Please enter a valid Electricity Due Day (1-31)",
+      );
+    }
+    if (
+      requireWifiDueDate &&
+      (!wifiDueDay || parseInt(wifiDueDay) < 1 || parseInt(wifiDueDay) > 31)
+    ) {
+      return Alert.alert("Error", "Please enter a valid WiFi Due Day (1-31)");
     }
 
     setSubmitting(true);
     try {
-      const hasCapacity = await ensureTenantSlotCapacity();
-      if (!hasCapacity) {
-        return;
-      }
-
-      const rentAmount = property.price || 0;
+      const rentAmount = activeProperty.price || 0;
       const hasAdvance =
-        typeof property?.has_advance === "boolean"
-          ? property?.has_advance
-          : Number(property?.advance_amount || 0) > 0;
+        typeof activeProperty?.has_advance === "boolean"
+          ? activeProperty?.has_advance
+          : Number(activeProperty?.advance_amount || 0) > 0;
       const advanceAmount = hasAdvance
-        ? Number(property?.advance_amount || rentAmount)
+        ? Number(activeProperty?.advance_amount || rentAmount)
         : 0;
       const hasSecurityDeposit =
-        typeof property?.has_security_deposit === "boolean"
-          ? property?.has_security_deposit
-          : Number(property?.security_deposit_amount || 0) > 0;
+        typeof activeProperty?.has_security_deposit === "boolean"
+          ? activeProperty?.has_security_deposit
+          : Number(activeProperty?.security_deposit_amount || 0) > 0;
       const securityDeposit = hasSecurityDeposit
-        ? Number(property?.security_deposit_amount || rentAmount)
+        ? Number(activeProperty?.security_deposit_amount || rentAmount)
         : 0;
       // Upload contract PDF if selected
       let contractUrl = null;
       if (contractPdf) {
         const fileExt = contractPdf.name.split(".").pop();
-        const fileName = `contract_${propertyId}_${Date.now()}.${fileExt}`;
+        const fileName = `contract_${selectedPropertyId}_${Date.now()}.${fileExt}`;
 
         const formData = new FormData();
         formData.append("file", {
@@ -597,7 +495,7 @@ export default function AssignTenantScreen() {
       const { data: newOccupancy, error } = await supabase
         .from("tenant_occupancies")
         .insert({
-          property_id: property.id,
+          property_id: selectedPropertyId,
           tenant_id: selectedTenant.tenant,
           landlord_id: session.user.id,
           status: "active",
@@ -605,10 +503,24 @@ export default function AssignTenantScreen() {
           security_deposit: securityDeposit,
           security_deposit_used: 0,
           wifi_due_day:
-            requireWifiDueDate && wifiDueDay ? parseInt(wifiDueDay) : null,
+            isWifiAvailable && !isWifiFree
+              ? wifiDueDay
+                ? parseInt(wifiDueDay)
+                : null
+              : null,
+          water_due_day: isWaterFree
+            ? null
+            : waterDueDay
+              ? parseInt(waterDueDay)
+              : null,
+          electricity_due_day: isElecFree
+            ? null
+            : electricityDueDay
+              ? parseInt(electricityDueDay)
+              : null,
           late_payment_fee: parseFloat(lateFee) || 0,
         })
-        .select()
+        .select("id")
         .single();
 
       if (error) throw error;
@@ -617,54 +529,124 @@ export default function AssignTenantScreen() {
       await supabase
         .from("properties")
         .update({ status: "occupied" })
-        .eq("id", property.id);
+        .eq("id", activeProperty.id);
 
       // 3. Create Move-In Bill
-      await supabase.from("payment_requests").insert({
-        landlord: session.user.id,
-        tenant: selectedTenant.tenant,
-        property_id: property.id,
-        occupancy_id: newOccupancy.id,
-        rent_amount: rentAmount,
-        security_deposit_amount: securityDeposit,
-        advance_amount: advanceAmount,
-        bills_description:
-          "Move-in Payment (Rent + Advance + Security Deposit)",
-        due_date: new Date(startDate).toISOString(),
-        status: "pending",
-        is_move_in_payment: true,
-      });
+      if (!alreadyPaid) {
+        // Tenant hasn't paid yet — create a pending bill
+        await supabase.from("payment_requests").insert({
+          landlord: session.user.id,
+          tenant: selectedTenant.tenant,
+          property_id: activeProperty.id,
+          occupancy_id: newOccupancy.id,
+          rent_amount: rentAmount,
+          security_deposit_amount: securityDeposit,
+          advance_amount: advanceAmount,
+          bills_description:
+            "Move-in Payment (Rent + Advance + Security Deposit)",
+          due_date: new Date(startDate).toISOString(),
+          status: "pending",
+          is_move_in_payment: true,
+        });
+      } else {
+        // Tenant already paid offline — record as paid so the next due date
+        // advances correctly (otherwise dashboard falls back to start_date)
+        await supabase.from("payment_requests").insert({
+          landlord: session.user.id,
+          tenant: selectedTenant.tenant,
+          property_id: activeProperty.id,
+          occupancy_id: newOccupancy.id,
+          rent_amount: rentAmount,
+          security_deposit_amount: securityDeposit,
+          advance_amount: advanceAmount,
+          bills_description:
+            "Move-in Payment (Rent + Advance + Security Deposit) - Paid Offline",
+          due_date: new Date(startDate).toISOString(),
+          status: "paid",
+          is_move_in_payment: true,
+          payment_method: "cash",
+        });
+      }
 
       // 4. Notify tenant (non-blocking - don't let notification failure block assignment)
       try {
-        const message = `You have been assigned to "${property.title}" from ${startDate}. Move-in bill sent.`;
+        let message = `You have been assigned to "${activeProperty.title}" from ${startDate}.`;
+        if (alreadyPaid)
+          message += ` Move-in fees were marked as already paid.`;
+        else message += ` Move-in bill sent.`;
+
         await createNotification(
           selectedTenant.tenant,
           "occupancy_assigned",
           message,
           { actor: session.user.id, email: true, sms: true },
         );
+
         if (API_URL) {
-          fetch(`${API_URL}/api/notify`, {
+          const tenantProfile = selectedTenant.tenant_profile || {
+            first_name: routeTenantFirstName,
+            last_name: routeTenantLastName,
+            phone: routeTenantPhone,
+          };
+          const phoneToUse = tenantProfile?.phone || routeTenantPhone;
+          const nameToUse =
+            `${tenantProfile?.first_name || ""} ${tenantProfile?.last_name || ""}`.trim() ||
+            routeTenantName ||
+            "Tenant";
+
+          if (phoneToUse) {
+            fetch(`${API_URL}/api/send-sms`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ phoneNumber: phoneToUse, message }),
+            }).catch((e) => console.log("SMS Error:", e));
+          }
+
+          fetch(`${API_URL}/api/send-email`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              type: "occupancy_assigned",
-              recordId: newOccupancy.id,
-              actorId: session.user.id,
+              bookingId: selectedTenant.id,
+              type: "assignment",
+              customMessage: message,
             }),
-          }).catch((notifyErr) =>
-            console.log("Assignment notify API failed:", notifyErr),
-          );
+          }).catch((e) => console.log("Email Error:", e));
+
+          if (!alreadyPaid) {
+            fetch(`${API_URL}/api/notify`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                type: "move_in",
+                recordId: newOccupancy.id,
+                tenantName: nameToUse,
+                tenantPhone: phoneToUse,
+                tenantEmail: null,
+                propertyTitle: activeProperty.title,
+                propertyAddress: "",
+                startDate,
+                landlordName:
+                  `${session?.user?.user_metadata?.first_name || ""} ${session?.user?.user_metadata?.last_name || ""}`.trim() ||
+                  "Landlord",
+                landlordPhone: session?.user?.user_metadata?.phone || "",
+                securityDeposit: securityDeposit,
+                rentAmount: rentAmount,
+                contractPdfUrl: contractUrl,
+              }),
+            }).catch((e) => console.log("Move-in email Error:", e));
+          }
         }
       } catch (notifErr) {
         console.log("Notification failed (non-critical):", notifErr);
       }
 
-      Alert.alert("Success", "Tenant assigned & Move-in bill created!", [
-        { text: "OK", onPress: () => router.back() },
-      ]);
-      await loadTenantSlotUsage(session.user.id);
+      Alert.alert(
+        "Success",
+        alreadyPaid
+          ? "Tenant assigned successfully!"
+          : "Tenant assigned! Move-in bill created.",
+        [{ text: "OK", onPress: () => router.back() }],
+      );
     } catch (err: any) {
       Alert.alert("Error", err.message || "Failed to assign tenant");
     } finally {
@@ -672,20 +654,25 @@ export default function AssignTenantScreen() {
     }
   };
 
-  const rentAmount = property?.price || 0;
+  const activeProperty =
+    availableProperties.find(
+      (p: any) => String(p.id) === String(selectedPropertyId),
+    ) || property;
+
+  const rentAmount = activeProperty?.price || 0;
   const hasAdvance =
-    typeof property?.has_advance === "boolean"
-      ? property?.has_advance
-      : Number(property?.advance_amount || 0) > 0;
+    typeof activeProperty?.has_advance === "boolean"
+      ? activeProperty?.has_advance
+      : Number(activeProperty?.advance_amount || 0) > 0;
   const advanceAmount = hasAdvance
-    ? Number(property?.advance_amount || rentAmount)
+    ? Number(activeProperty?.advance_amount || rentAmount)
     : 0;
   const hasSecurityDeposit =
-    typeof property?.has_security_deposit === "boolean"
-      ? property?.has_security_deposit
-      : Number(property?.security_deposit_amount || 0) > 0;
+    typeof activeProperty?.has_security_deposit === "boolean"
+      ? activeProperty?.has_security_deposit
+      : Number(activeProperty?.security_deposit_amount || 0) > 0;
   const securityDeposit = hasSecurityDeposit
-    ? Number(property?.security_deposit_amount || rentAmount)
+    ? Number(activeProperty?.security_deposit_amount || rentAmount)
     : 0;
   const totalMoveIn = rentAmount + advanceAmount + securityDeposit;
   if (loading) {
@@ -701,8 +688,13 @@ export default function AssignTenantScreen() {
   }
 
   const nextStep = () => {
+    if (step === 0 && !selectedPropertyId)
+      return Alert.alert("Error", "Please select a property");
     if (step === 0 && !selectedTenant)
-      return Alert.alert("Error", "Please select a tenant");
+      return Alert.alert(
+        "Error",
+        "Unable to load tenant from the selected booking request.",
+      );
     if (step === 1) {
       if (!startDate) return Alert.alert("Error", "Please enter a start date");
     }
@@ -713,69 +705,65 @@ export default function AssignTenantScreen() {
     setStep((s) => Math.max(s - 1, 0));
   };
 
+  const getDueDaysText = (startStr: string) => {
+    if (!startStr) return "Select";
+    const start = parseInt(startStr);
+    if (isNaN(start) || start < 1 || start > 31) return "Select";
+    const end = ((start - 1 + 2) % 31) + 1;
+    return `${start} - ${end}`;
+  };
+
   const renderStepContent = () => {
+    const activeProperty =
+      availableProperties.find(
+        (p: any) => String(p.id) === String(selectedPropertyId),
+      ) || property;
+
     switch (step) {
       case 0:
         return (
           <View style={styles.stepContainer}>
-            {approvedBookings.length === 0 ? (
-              <View style={styles.emptyTenants}>
-                <Ionicons
-                  name="alert-circle-outline"
-                  size={24}
-                  color="#f59e0b"
-                />
-                <Text style={styles.emptyTenantsText}>
-                  No approved bookings found.
-                </Text>
-              </View>
-            ) : (
-              approvedBookings.map((item) => {
-                const isSelected = selectedTenant?.id === item.id;
-                const name =
-                  `${item.tenant_profile?.first_name || ""} ${item.tenant_profile?.last_name || ""}`.trim();
+            <Text style={styles.label}>Select Property *</Text>
+            <ScrollView nestedScrollEnabled style={styles.propertyPickerScroll}>
+              {availableProperties.map((p: any) => {
+                const normalizedId = String(p.id);
+                const isSelected = String(selectedPropertyId) === normalizedId;
+                const isRequested = normalizedId === String(propertyId);
+
                 return (
                   <TouchableOpacity
-                    key={item.id}
+                    key={normalizedId}
                     style={[
-                      styles.tenantCard,
-                      isSelected && styles.tenantCardSelected,
+                      styles.propertyItem,
+                      isSelected && styles.propertyItemSelected,
+                      isRequested &&
+                        !isSelected &&
+                        styles.propertyItemRequested,
                     ]}
-                    onPress={() => setSelectedTenant(item)}
+                    onPress={() => {
+                      void selectProperty(normalizedId);
+                    }}
                     activeOpacity={0.8}
                   >
-                    <View
-                      style={[
-                        styles.tenantAvatar,
-                        isSelected && { backgroundColor: "#111" },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.tenantAvatarText,
-                          isSelected && { color: "white" },
-                        ]}
-                      >
-                        {(item.tenant_profile?.first_name ||
-                          "?")[0].toUpperCase()}
-                      </Text>
-                    </View>
                     <View style={{ flex: 1 }}>
                       <Text
                         style={[
-                          styles.tenantName,
+                          styles.propertyItemTitle,
                           isSelected && { color: "white" },
                         ]}
                       >
-                        {name || "Unknown"}
+                        {p.title || "Untitled Property"}
+                        {isRequested && !isSelected ? " (Requested)" : ""}
                       </Text>
                       <Text
                         style={[
-                          styles.tenantPhone,
-                          isSelected && { color: "rgba(255,255,255,0.7)" },
+                          styles.propertyItemMeta,
+                          isSelected && { color: "rgba(255,255,255,0.75)" },
                         ]}
                       >
-                        {item.tenant_profile?.phone || "No phone"}
+                        {[p.city, p.state_province].filter(Boolean).join(", ")}
+                        {p.city || p.state_province ? " • " : ""}₱
+                        {Number(p.price || 0).toLocaleString()}
                       </Text>
                     </View>
                     <View
@@ -788,7 +776,39 @@ export default function AssignTenantScreen() {
                     </View>
                   </TouchableOpacity>
                 );
-              })
+              })}
+            </ScrollView>
+
+            {selectedTenant ? (
+              <View style={[styles.tenantCard, styles.lockedTenantCard]}>
+                <View style={styles.tenantAvatar}>
+                  <Text style={styles.tenantAvatarText}>
+                    {(selectedTenant?.tenant_profile?.first_name ||
+                      "?")[0].toUpperCase()}
+                  </Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.tenantName}>
+                    {`${selectedTenant?.tenant_profile?.first_name || ""} ${selectedTenant?.tenant_profile?.last_name || ""}`.trim() ||
+                      "Selected Tenant"}
+                  </Text>
+                  <Text style={styles.tenantPhone}>
+                    {selectedTenant?.tenant_profile?.phone || "No phone"}
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.emptyTenants}>
+                <Ionicons
+                  name="alert-circle-outline"
+                  size={24}
+                  color="#f59e0b"
+                />
+                <Text style={styles.emptyTenantsText}>
+                  Unable to load tenant from this booking request. Go back to
+                  Bookings and tap Assign Tenant again.
+                </Text>
+              </View>
             )}
           </View>
         );
@@ -872,113 +892,237 @@ export default function AssignTenantScreen() {
           </View>
         );
       case 3:
-        const requireWifiDueDate = property?.amenities?.includes("Paid WiFi");
+        const amenities = activeProperty?.amenities || [];
+        const isWaterFree = amenities.includes("Free Water");
+        const isElecFree = amenities.includes("Free Electricity");
+        const isWifiAvailable =
+          amenities.includes("Wifi") ||
+          amenities.includes("WiFi") ||
+          amenities.includes("Free WiFi") ||
+          amenities.includes("Paid WiFi");
+        const isWifiFree = amenities.includes("Free WiFi");
+        const requireWifiDueDate = isWifiAvailable && !isWifiFree;
+
         return (
-          <View style={styles.stepContainer}>
+          <View style={{ width: "100%" }}>
             <View style={styles.infoBox}>
-              <Ionicons name="information-circle" size={16} color="#6366f1" />
+              <Ionicons name="information-circle" size={16} color="#4f46e5" />
               <Text style={styles.infoText}>
-                Utilities: Tenants receive reminders 3 days before due dates.
+                Select a due day for each utility. A 4-day notification window
+                allows you to prepare for upcoming billing.
               </Text>
             </View>
 
-            {requireWifiDueDate ? (
-              <>
-                <Text style={styles.label}>Wifi Due Day *</Text>
+            {/* Water */}
+            {!isWaterFree ? (
+              <View style={styles.utilityInputCard}>
                 <View
-                  style={{
-                    flexDirection: "row",
-                    flexWrap: "wrap",
-                    gap: 6,
-                    justifyContent: "flex-start",
-                    marginTop: 5,
-                  }}
-                >
-                  {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
-                    <TouchableOpacity
-                      key={day}
-                      onPress={() => setWifiDueDay(day.toString())}
-                      style={{
-                        width: 36,
-                        height: 36,
-                        borderRadius: 18,
-                        backgroundColor:
-                          wifiDueDay === day.toString() ? "black" : "white",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        borderWidth: 1,
-                        borderColor:
-                          wifiDueDay === day.toString() ? "black" : "#e5e7eb",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          fontSize: 12,
-                          fontWeight: "bold",
-                          color:
-                            wifiDueDay === day.toString() ? "white" : "#374151",
-                        }}
-                      >
-                        {day}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </>
-            ) : (
-              <View
-                style={[
-                  styles.infoBox,
-                  {
-                    backgroundColor: property?.amenities?.includes("Free WiFi")
-                      ? "#d1fae5"
-                      : "#f3f4f6",
-                    marginTop: 15,
-                  },
-                ]}
-              >
-                <Ionicons
-                  name={
-                    property?.amenities?.includes("Free WiFi")
-                      ? "wifi"
-                      : "wifi-outline"
-                  }
-                  size={16}
-                  color={
-                    property?.amenities?.includes("Free WiFi")
-                      ? "#059669"
-                      : "#6b7280"
-                  }
-                />
-                <Text
                   style={[
-                    styles.infoText,
-                    {
-                      color: property?.amenities?.includes("Free WiFi")
-                        ? "#059669"
-                        : "#6b7280",
-                    },
+                    styles.utilityIconBox,
+                    { backgroundColor: "#eff6ff" },
                   ]}
                 >
-                  {property?.amenities?.includes("Free WiFi")
-                    ? "WiFi is Free! No due date needed."
-                    : "WiFi not provided for this property."}
-                </Text>
+                  <Ionicons name="water" size={18} color="#3b82f6" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.utilityName}>Water Due Day</Text>
+                  <Text style={styles.utilityDesc}>Day of month (1-31)</Text>
+                </View>
+                <TouchableOpacity
+                  style={[
+                    styles.utilityInput,
+                    { width: 90, justifyContent: "center" },
+                  ]}
+                  onPress={() => setShowWaterDayPicker(true)}
+                >
+                  <Text
+                    style={{
+                      textAlign: "center",
+                      fontWeight: "bold",
+                      color: "#111",
+                    }}
+                  >
+                    {getDueDaysText(waterDueDay)}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.utilityFreeCard}>
+                <View
+                  style={[
+                    styles.utilityIconBox,
+                    { backgroundColor: "#dcfce7" },
+                  ]}
+                >
+                  <Ionicons name="water" size={18} color="#10b981" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.utilityName, { color: "#047857" }]}>
+                    Free Water
+                  </Text>
+                </View>
+                <View style={styles.utilityBadge}>
+                  <Text style={styles.utilityBadgeText}>Included</Text>
+                </View>
               </View>
             )}
 
-            <View
-              style={[
-                styles.infoBox,
-                { backgroundColor: "#fef3c7", marginTop: 15 },
-              ]}
-            >
-              <Ionicons name="flash" size={16} color="#d97706" />
-              <Text style={[styles.infoText, { color: "#92400e" }]}>
-                Note: Electricity and Water reminders are sent automatically
-                (due date is always 1st week of the month).
-              </Text>
+            {/* Electricity */}
+            {!isElecFree ? (
+              <View style={styles.utilityInputCard}>
+                <View
+                  style={[
+                    styles.utilityIconBox,
+                    { backgroundColor: "#fef3c7" },
+                  ]}
+                >
+                  <Ionicons name="flash" size={18} color="#f59e0b" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.utilityName}>Electricity Due Day</Text>
+                  <Text style={styles.utilityDesc}>Day of month (1-31)</Text>
+                </View>
+                <TouchableOpacity
+                  style={[
+                    styles.utilityInput,
+                    { width: 90, justifyContent: "center" },
+                  ]}
+                  onPress={() => setShowElectricityDayPicker(true)}
+                >
+                  <Text
+                    style={{
+                      textAlign: "center",
+                      fontWeight: "bold",
+                      color: "#111",
+                    }}
+                  >
+                    {getDueDaysText(electricityDueDay)}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.utilityFreeCard}>
+                <View
+                  style={[
+                    styles.utilityIconBox,
+                    { backgroundColor: "#dcfce7" },
+                  ]}
+                >
+                  <Ionicons name="flash" size={18} color="#10b981" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.utilityName, { color: "#047857" }]}>
+                    Free Electricity
+                  </Text>
+                </View>
+                <View style={styles.utilityBadge}>
+                  <Text style={styles.utilityBadgeText}>Included</Text>
+                </View>
+              </View>
+            )}
+
+            {/* WiFi */}
+            {requireWifiDueDate ? (
+              <View style={styles.utilityInputCard}>
+                <View
+                  style={[
+                    styles.utilityIconBox,
+                    { backgroundColor: "#e0e7ff" },
+                  ]}
+                >
+                  <Ionicons name="wifi" size={18} color="#4f46e5" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.utilityName}>WiFi Due Day</Text>
+                  <Text style={styles.utilityDesc}>Day of month (1-31)</Text>
+                </View>
+                <TouchableOpacity
+                  style={[
+                    styles.utilityInput,
+                    { width: 90, justifyContent: "center" },
+                  ]}
+                  onPress={() => setShowWifiDayPicker(true)}
+                >
+                  <Text
+                    style={{
+                      textAlign: "center",
+                      fontWeight: "bold",
+                      color: "#111",
+                    }}
+                  >
+                    {getDueDaysText(wifiDueDay)}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.utilityFreeCard}>
+                <View
+                  style={[
+                    styles.utilityIconBox,
+                    {
+                      backgroundColor: isWifiFree ? "#dcfce7" : "#f3f4f6",
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name={isWifiFree ? "wifi" : "wifi-outline"}
+                    size={18}
+                    color={isWifiFree ? "#10b981" : "#6b7280"}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={[
+                      styles.utilityName,
+                      { color: isWifiFree ? "#047857" : "#4b5563" },
+                    ]}
+                  >
+                    {isWifiFree ? "Free WiFi" : "WiFi not provided"}
+                  </Text>
+                </View>
+                <View style={styles.utilityBadge}>
+                  <Text style={styles.utilityBadgeText}>
+                    {isWifiFree ? "Included" : "N/A"}
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* Already Paid Toggle UI */}
+            <View style={styles.alreadyPaidCard}>
+              <View style={{ flex: 1, paddingRight: 10 }}>
+                <Text style={styles.alreadyPaidTitle}>
+                  Tenant already paid move in fee?
+                </Text>
+                <Text style={styles.alreadyPaidDesc}>
+                  Skip auto-billing move-in fees if payment was received
+                  offline.
+                </Text>
+              </View>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => setAlreadyPaid(!alreadyPaid)}
+              >
+                <View
+                  style={[
+                    styles.switchTrack,
+                    alreadyPaid && styles.switchTrackActive,
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.switchThumb,
+                      alreadyPaid && styles.switchThumbActive,
+                    ]}
+                  />
+                </View>
+              </TouchableOpacity>
             </View>
+            {alreadyPaid && (
+              <Text style={styles.alreadyPaidNote}>
+                ✓ First bill will be generated for next month
+              </Text>
+            )}
           </View>
         );
       default:
@@ -1027,42 +1171,6 @@ export default function AssignTenantScreen() {
               Select a tenant and setup the contract
             </Text>
           </View>
-        </View>
-
-        <View style={styles.slotCard}>
-          <View style={styles.slotCardHeader}>
-            <Text style={styles.slotTitle}>Tenant Slots</Text>
-            {loadingSlots ? (
-              <ActivityIndicator size="small" color="#6b7280" />
-            ) : (
-              <Text style={styles.slotUsageText}>
-                {slotUsage.used}/{slotUsage.total} used
-              </Text>
-            )}
-          </View>
-          <Text style={styles.slotMetaText}>
-            Free plan: {FREE_TENANT_SLOT_COUNT} slot. Extra slots: PHP{" "}
-            {TENANT_SLOT_PRICE_PHP} each.
-          </Text>
-          <Text
-            style={[
-              styles.slotRemainingText,
-              slotUsage.remaining <= 0 && { color: "#dc2626" },
-            ]}
-          >
-            Remaining slots: {slotUsage.remaining}
-          </Text>
-          <TouchableOpacity
-            style={[styles.buySlotBtn, payingSlots && { opacity: 0.6 }]}
-            onPress={() => buyTenantSlots(1)}
-            disabled={payingSlots || loadingSlots}
-          >
-            {payingSlots ? (
-              <ActivityIndicator size="small" color="white" />
-            ) : (
-              <Text style={styles.buySlotBtnText}>Buy +1 Slot (PHP 50)</Text>
-            )}
-          </TouchableOpacity>
         </View>
 
         {/* Stepper Pills */}
@@ -1155,6 +1263,110 @@ export default function AssignTenantScreen() {
           </TouchableOpacity>
         )}
       </View>
+
+      <BlockingLoader
+        visible={submitting}
+        message="Please wait, we are assigning the tenant. Please do not close this app."
+      />
+      {/* Day Picker Overlay */}
+      {(showWaterDayPicker ||
+        showElectricityDayPicker ||
+        showWifiDayPicker) && (
+        <View
+          style={[
+            StyleSheet.absoluteFillObject,
+            {
+              backgroundColor: "rgba(0,0,0,0.5)",
+              justifyContent: "center",
+              alignItems: "center",
+              zIndex: 999,
+            },
+          ]}
+        >
+          <View
+            style={{
+              backgroundColor: "white",
+              borderRadius: 24,
+              padding: 24,
+              alignItems: "center",
+              width: "85%",
+              maxWidth: 350,
+            }}
+          >
+            <Text style={{ fontSize: 18, fontWeight: "800", color: "#111" }}>
+              Select Due Day
+            </Text>
+            <Text
+              style={{
+                textAlign: "center",
+                color: "#9ca3af",
+                marginTop: 4,
+                fontSize: 13,
+              }}
+            >
+              Auto sets a 4-day billing period
+            </Text>
+
+            <View style={{ height: 260, marginTop: 20, width: "100%" }}>
+              <ScrollView
+                contentContainerStyle={{
+                  flexDirection: "row",
+                  flexWrap: "wrap",
+                  gap: 10,
+                  justifyContent: "center",
+                }}
+              >
+                {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                  <TouchableOpacity
+                    key={day}
+                    style={{
+                      width: 55,
+                      height: 40,
+                      backgroundColor: "#f3f4f6",
+                      borderRadius: 8,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                    onPress={() => {
+                      if (showWaterDayPicker) setWaterDueDay(day.toString());
+                      if (showElectricityDayPicker)
+                        setElectricityDueDay(day.toString());
+                      if (showWifiDayPicker) setWifiDueDay(day.toString());
+
+                      setShowWaterDayPicker(false);
+                      setShowElectricityDayPicker(false);
+                      setShowWifiDayPicker(false);
+                    }}
+                  >
+                    <Text style={{ fontWeight: "bold", color: "#111" }}>
+                      {day}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+            <TouchableOpacity
+              style={{
+                marginTop: 20,
+                padding: 14,
+                backgroundColor: "#f3f4f6",
+                borderRadius: 12,
+                width: "100%",
+                alignItems: "center",
+              }}
+              onPress={() => {
+                setShowWaterDayPicker(false);
+                setShowElectricityDayPicker(false);
+                setShowWifiDayPicker(false);
+              }}
+            >
+              <Text style={{ fontWeight: "700", color: "#374151" }}>
+                Cancel
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -1222,53 +1434,6 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
   },
   pageSubtitle: { fontSize: 13, color: "#6b7280", marginTop: 2 },
-  slotCard: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 16,
-  },
-  slotCardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 8,
-  },
-  slotTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#111827",
-  },
-  slotUsageText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  slotMetaText: {
-    fontSize: 12,
-    color: "#6b7280",
-    marginBottom: 4,
-  },
-  slotRemainingText: {
-    fontSize: 12,
-    color: "#059669",
-    fontWeight: "700",
-    marginBottom: 10,
-  },
-  buySlotBtn: {
-    backgroundColor: "#111",
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  buySlotBtnText: {
-    color: "white",
-    fontSize: 12,
-    fontWeight: "800",
-  },
 
   // Stepper
   stepperContainer: { flexDirection: "row", marginBottom: 24 },
@@ -1315,6 +1480,80 @@ const styles = StyleSheet.create({
   },
   emptyTenantsText: { fontSize: 13, color: "#92400e", fontWeight: "600" },
 
+  propertyPickerScroll: {
+    maxHeight: 220,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderRadius: 14,
+    backgroundColor: "#f9fafb",
+  },
+  propertyItem: {
+    padding: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  propertyItemSelected: {
+    backgroundColor: "#111",
+    borderBottomColor: "#111",
+  },
+  propertyItemRequested: {
+    backgroundColor: "#dcfce7",
+  },
+  propertyItemTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#111827",
+  },
+  propertyItemMeta: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginTop: 2,
+  },
+
+  selectedPropertyCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    padding: 14,
+    marginBottom: 10,
+    borderRadius: 14,
+    backgroundColor: "#eff6ff",
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+  },
+  selectedPropertyLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#1d4ed8",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  selectedPropertyTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#111827",
+    marginTop: 3,
+  },
+  selectedPropertyMeta: {
+    fontSize: 12,
+    color: "#475569",
+    marginTop: 2,
+  },
+  selectedPropertyBadge: {
+    backgroundColor: "#1d4ed8",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  selectedPropertyBadgeText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "white",
+  },
+
   tenantCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -1327,8 +1566,24 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   tenantCardSelected: {
-    backgroundColor: "#f9fafb",
+    backgroundColor: "#111",
     borderColor: "#111",
+  },
+  lockedTenantCard: {
+    backgroundColor: "#f8fafc",
+    borderColor: "#dbeafe",
+  },
+  lockedTenantBadge: {
+    backgroundColor: "#111827",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  lockedTenantBadgeText: {
+    color: "white",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.5,
   },
   tenantAvatar: {
     width: 44,
@@ -1489,4 +1744,101 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   wizardBtnSecondaryText: { fontSize: 15, fontWeight: "700", color: "#374151" },
+
+  // Utility Picker Styles
+  utilityInputCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "white",
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    marginTop: 12,
+    gap: 12,
+  },
+  utilityFreeCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f9fafb",
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#f3f4f6",
+    marginTop: 12,
+    gap: 12,
+  },
+  utilityIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  utilityName: { fontSize: 14, fontWeight: "700", color: "#111" },
+  utilityDesc: { fontSize: 11, color: "#6b7280", marginTop: 2 },
+  utilityInput: {
+    backgroundColor: "#f3f4f6",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+  },
+  utilityBadge: {
+    backgroundColor: "white",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+  },
+  utilityBadgeText: { fontSize: 10, fontWeight: "700", color: "#6b7280" },
+
+  // Already Paid Toggle
+  alreadyPaidCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "white",
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    marginTop: 16,
+  },
+  alreadyPaidTitle: { fontSize: 14, fontWeight: "700", color: "#111" },
+  alreadyPaidDesc: {
+    fontSize: 11,
+    color: "#6b7280",
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  alreadyPaidNote: {
+    fontSize: 11,
+    color: "#059669",
+    fontWeight: "700",
+    marginTop: 8,
+    marginLeft: 4,
+  },
+  switchTrack: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#e5e7eb",
+    padding: 2,
+    justifyContent: "center",
+  },
+  switchTrackActive: { backgroundColor: "#10b981" },
+  switchThumb: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "white",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  switchThumbActive: { transform: [{ translateX: 20 }] },
 });

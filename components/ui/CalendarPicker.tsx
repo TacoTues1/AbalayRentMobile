@@ -5,9 +5,10 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 interface CalendarPickerProps {
     selectedDate: string;
     onDateSelect: (date: string) => void;
+    allowPastDates?: boolean;
 }
 
-export default function CalendarPicker({ selectedDate, onDateSelect }: CalendarPickerProps) {
+export default function CalendarPicker({ selectedDate, onDateSelect, allowPastDates = false }: CalendarPickerProps) {
     const [currentDate, setCurrentDate] = useState(selectedDate ? new Date(selectedDate) : new Date());
 
     const year = currentDate.getFullYear();
@@ -47,11 +48,12 @@ export default function CalendarPicker({ selectedDate, onDateSelect }: CalendarP
             const isSelected = selectedDate === dateString;
             const isToday = cellDate.toDateString() === today.toDateString();
             const isPast = cellDate < today;
+            const isDisabled = !allowPastDates && isPast;
 
             days.push(
                 <TouchableOpacity
                     key={day}
-                    disabled={isPast}
+                    disabled={isDisabled}
                     style={[
                         styles.dayCell,
                         isSelected && styles.selectedDay
@@ -60,7 +62,7 @@ export default function CalendarPicker({ selectedDate, onDateSelect }: CalendarP
                 >
                     <Text style={[
                         styles.dayText,
-                        isPast && styles.disabledDayText,
+                        isDisabled && styles.disabledDayText,
                         isToday && styles.todayText,
                         isSelected && styles.selectedDayText
                     ]}>

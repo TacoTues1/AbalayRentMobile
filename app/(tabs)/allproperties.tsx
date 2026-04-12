@@ -5,21 +5,21 @@ import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    Alert,
-    Animated,
-    Dimensions,
-    Easing,
-    FlatList,
-    Image,
-    Modal,
-    Platform,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  Animated,
+  Dimensions,
+  Easing,
+  FlatList,
+  Image,
+  Modal,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import WebViewMap from "../../components/WebViewMap";
@@ -161,6 +161,9 @@ export default function AllProperties() {
   const [comparisonList, setComparisonList] = useState<any[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [propertyStats, setPropertyStats] = useState<any>({});
+  const [cityCoordinateMap, setCityCoordinateMap] = useState<
+    Record<string, { lat: number; lng: number }>
+  >({});
 
   // UI State
   const [showFilterModal, setShowFilterModal] = useState(false);
@@ -173,26 +176,86 @@ export default function AllProperties() {
   );
 
   const availableAmenities = [
-    "Wifi",
-    "Air Condition",
-    "Washing Machine",
-    "Parking",
-    "Hot Shower",
-    "Bathroom",
-    "Smoke Alarm",
-    "Veranda",
-    "Fire Extinguisher",
-    "Outside Garden",
-    "Furnished",
-    "Semi-Furnished",
-    "Pet Friendly",
     "Kitchen",
-    "Smart TV",
+    "Pool",
+    "TV",
+    "Elevator",
+    "Air conditioning",
+    "Heating",
+    "Basketball court",
+    "Washing machine",
+    "Dryer",
+    "Parking",
+    "Gym",
+    "Security",
+    "Balcony",
+    "Garden",
+    "Kid's Playground",
+    "Pet friendly",
+    "Furnished",
+    "Carbon monoxide alarm",
+    "Smoke alarm",
+    "Fire extinguisher",
+    "First aid kit",
   ];
 
   useEffect(() => {
     checkAuthAndLoad();
   }, []);
+
+  const normalizeLocationKey = (
+    address: string | null | undefined,
+    barangay: string | null | undefined,
+    city: string | null | undefined,
+    stateProvince: string | null | undefined,
+    country: string | null | undefined,
+  ) =>
+    [address, barangay, city, stateProvince, country]
+      .map((value) =>
+        String(value || "")
+          .trim()
+          .toLowerCase(),
+      )
+      .filter(Boolean)
+      .join("|");
+
+  const buildGeocodeQuery = (item: any) => {
+    const address = String(item?.address || "").trim();
+    const barangay = String(item?.barangay || "").trim();
+    const city = String(item?.city || "").trim();
+    const stateProvince = String(item?.state_province || "").trim();
+    const country = String(item?.country || "").trim();
+
+    const parts = [address, barangay, city, stateProvince, country].filter(
+      Boolean,
+    );
+    if (!city) return "";
+    if (!country) parts.push("Philippines");
+
+    return parts.join(", ");
+  };
+
+  const getPropertyCoordinates = (item: any) => {
+    if (item.latitude && item.longitude) {
+      return { lat: item.latitude, lng: item.longitude };
+    }
+
+    const linkCoords = extractCoordinates(item.location_link);
+    if (linkCoords && linkCoords.lat && linkCoords.lng) {
+      return linkCoords;
+    }
+
+    const locationKey = normalizeLocationKey(
+      item.address,
+      item.barangay,
+      item.city,
+      item.state_province,
+      item.country,
+    );
+    if (!locationKey) return null;
+
+    return cityCoordinateMap[locationKey] || null;
+  };
 
   const checkAuthAndLoad = async () => {
     const {
@@ -255,6 +318,60 @@ export default function AllProperties() {
       setRefreshing(false);
     }
   };
+
+  useEffect(() => {
+    const geocodeMissingCities = async () => {
+      const uniqueLocations = Array.from(
+        new Map(
+          properties
+            .map((item) => {
+              const key = normalizeLocationKey(
+                item.address,
+                item.barangay,
+                item.city,
+                item.state_province,
+                item.country,
+              );
+              return {
+                key,
+                query: buildGeocodeQuery(item),
+              };
+            })
+            .filter((entry) => entry.key && entry.query)
+            .map((entry) => [entry.key, entry]),
+        ).values(),
+      );
+
+      const missingLocations = uniqueLocations.filter(
+        (entry) => !cityCoordinateMap[entry.key],
+      );
+
+      if (missingLocations.length === 0) return;
+
+      const nextCoordinates: Record<string, { lat: number; lng: number }> = {};
+
+      for (const locationEntry of missingLocations) {
+        try {
+          const results = await Location.geocodeAsync(locationEntry.query);
+          const first = results?.[0];
+          if (first) {
+            nextCoordinates[locationEntry.key] = {
+              lat: first.latitude,
+              lng: first.longitude,
+            };
+          }
+        } catch (error) {
+          console.error("City geocode error:", locationEntry.query, error);
+        }
+      }
+
+      if (Object.keys(nextCoordinates).length > 0) {
+        setCityCoordinateMap((prev) => ({ ...prev, ...nextCoordinates }));
+      }
+    };
+
+    geocodeMissingCities();
+  }, [properties, cityCoordinateMap]);
 
   // --- ACTIONS ---
 
@@ -357,75 +474,149 @@ export default function AllProperties() {
   };
 
   // --- FILTERING LOGIC ---
+  const isWithinNearbyRange = (item: any) => {
+    if (!userLocation) return false;
+
+    const hasPreciseCoordinates =
+      !!(item.latitude && item.longitude) ||
+      !!extractCoordinates(item.location_link);
+
+    if (!hasPreciseCoordinates) {
+      // City-level geocode is approximate, so don't exclude these from nearby mode.
+      return !!getPropertyCoordinates(item);
+    }
+
+    const coords = getPropertyCoordinates(item);
+
+    if (!coords || !coords.lat || !coords.lng) return false;
+
+    const dist = getDistanceFromLatLonInKm(
+      userLocation.latitude,
+      userLocation.longitude,
+      coords.lat,
+      coords.lng,
+    );
+
+    return dist <= 1;
+  };
+
+  const sortFilteredProperties = (a: any, b: any) => {
+    const statsA = propertyStats[a.id] || {};
+    const statsB = propertyStats[b.id] || {};
+
+    switch (sortBy) {
+      case "price_asc":
+        return a.price - b.price;
+      case "price_desc":
+        return b.price - a.price;
+      case "rating":
+        return (statsB.avg_rating || 0) - (statsA.avg_rating || 0);
+      default:
+        return (
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+    }
+  };
+
+  const matchesBaseFilters = (item: any) => {
+    const stats = propertyStats[item.id] || {
+      avg_rating: 0,
+      review_count: 0,
+      favorite_count: 0,
+    };
+
+    const matchSearch =
+      item.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.city?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.state_province?.toLowerCase().includes(searchQuery.toLowerCase());
+    if (!matchSearch) return false;
+
+    if (priceRange.min && item.price < parseFloat(priceRange.min)) {
+      return false;
+    }
+    if (priceRange.max && item.price > parseFloat(priceRange.max)) {
+      return false;
+    }
+
+    if (selectedAmenities.length > 0) {
+      const itemAmenities = item.amenities || [];
+      const hasAll = selectedAmenities.every((a) => itemAmenities.includes(a));
+      if (!hasAll) return false;
+    }
+
+    if (minRating > 0 && (stats.avg_rating || 0) < minRating) return false;
+    if (filterMostFavorite && (stats.favorite_count || 0) < 1) return false;
+
+    return true;
+  };
+
   const getFilteredProperties = () => {
     return properties
       .filter((item) => {
-        const stats = propertyStats[item.id] || {
-          avg_rating: 0,
-          review_count: 0,
-          favorite_count: 0,
-        };
+        if (!matchesBaseFilters(item)) return false;
 
-        const matchSearch =
-          item.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          item.city?.toLowerCase().includes(searchQuery.toLowerCase());
-        if (!matchSearch) return false;
-
-        if (priceRange.min && item.price < parseFloat(priceRange.min))
+        if (filterNearMe && userLocation && !isWithinNearbyRange(item)) {
           return false;
-        if (priceRange.max && item.price > parseFloat(priceRange.max))
-          return false;
-
-        if (selectedAmenities.length > 0) {
-          const itemAmenities = item.amenities || [];
-          const hasAll = selectedAmenities.every((a) =>
-            itemAmenities.includes(a),
-          );
-          if (!hasAll) return false;
-        }
-
-        if (minRating > 0 && (stats.avg_rating || 0) < minRating) return false;
-        if (filterMostFavorite && (stats.favorite_count || 0) < 1) return false;
-
-        if (filterNearMe && userLocation) {
-          const coords =
-            item.latitude && item.longitude
-              ? { lat: item.latitude, lng: item.longitude }
-              : extractCoordinates(item.location_link);
-          if (!coords || !coords.lat || !coords.lng) return false;
-          const dist = getDistanceFromLatLonInKm(
-            userLocation.latitude,
-            userLocation.longitude,
-            coords.lat,
-            coords.lng,
-          );
-          if (dist > 1) return false; // within 1km
         }
 
         return true;
       })
-      .sort((a, b) => {
-        const statsA = propertyStats[a.id] || {};
-        const statsB = propertyStats[b.id] || {};
+      .sort(sortFilteredProperties);
+  };
 
-        switch (sortBy) {
-          case "price_asc":
-            return a.price - b.price;
-          case "price_desc":
-            return b.price - a.price;
-          case "rating":
-            return (statsB.avg_rating || 0) - (statsA.avg_rating || 0);
-          default:
-            return (
-              new Date(b.created_at).getTime() -
-              new Date(a.created_at).getTime()
-            );
-        }
-      });
+  const getMapProperties = () => {
+    const baseFiltered = properties
+      .filter((item) => matchesBaseFilters(item))
+      .sort(sortFilteredProperties);
+
+    // Map should show all matching properties. Nearby mode is for list filtering.
+    return baseFiltered;
   };
 
   const filteredData = getFilteredProperties();
+  const mapData = getMapProperties();
   const visibleFilteredData = filteredData.slice(0, visiblePropertyCount);
+  const mapPoints = (() => {
+    const groupedIndex: Record<string, number> = {};
+
+    return mapData
+      .map((item) => {
+        const coords = getPropertyCoordinates(item);
+        if (!coords || !coords.lat || !coords.lng) return null;
+
+        const groupKey = `${coords.lat.toFixed(6)}|${coords.lng.toFixed(6)}`;
+        const duplicateIndex = groupedIndex[groupKey] || 0;
+        groupedIndex[groupKey] = duplicateIndex + 1;
+
+        const jitterOffset = 0.00018;
+        const angle = duplicateIndex * (Math.PI / 4);
+        const adjustedLat =
+          coords.lat +
+          (duplicateIndex > 0 ? jitterOffset * Math.sin(angle) : 0);
+        const adjustedLng =
+          coords.lng +
+          (duplicateIndex > 0 ? jitterOffset * Math.cos(angle) : 0);
+
+        return {
+          item,
+          lat: adjustedLat,
+          lng: adjustedLng,
+        };
+      })
+      .filter(Boolean) as Array<{ item: any; lat: number; lng: number }>;
+  })();
+
+  const firstMapCoordinate =
+    mapPoints.length > 0
+      ? { lat: mapPoints[0].lat, lng: mapPoints[0].lng }
+      : null;
+  const mapCenterCoordinate =
+    userLocation && filterNearMe
+      ? [userLocation.longitude, userLocation.latitude]
+      : firstMapCoordinate
+        ? [firstMapCoordinate.lng, firstMapCoordinate.lat]
+        : [123.8854, 10.3157];
+  const mapZoomLevel = userLocation && filterNearMe ? 14 : 12;
 
   useEffect(() => {
     setVisiblePropertyCount(ALL_PROPERTIES_PAGE_SIZE);
@@ -610,7 +801,8 @@ export default function AllProperties() {
               ]}
               numberOfLines={1}
             >
-              {item.city}
+              {[item.city, item.state_province].filter(Boolean).join(", ") ||
+                "Location not set"}
             </Text>
           </View>
           {/* Rating */}
@@ -843,7 +1035,7 @@ export default function AllProperties() {
           >
             {filterNearMe && (
               <View style={styles.activeFilterChip}>
-                <Text style={styles.activeFilterText}>📍 Near Me &lt;1km</Text>
+                <Text style={styles.activeFilterText}>Near Me &lt;1km</Text>
                 <TouchableOpacity onPress={() => handleToggleNearMe()}>
                   <Ionicons name="close" size={12} color="white" />
                 </TouchableOpacity>
@@ -903,7 +1095,7 @@ export default function AllProperties() {
           renderItem={({ item }) => renderSkeletonCard(item)}
           showsVerticalScrollIndicator={false}
         />
-      ) : showMapView && filterNearMe && Platform.OS !== "web" && MapLibreGL ? (
+      ) : showMapView && Platform.OS !== "web" && MapLibreGL ? (
         <View style={{ flex: 1 }}>
           <MapLibreGL.MapView
             style={StyleSheet.absoluteFillObject}
@@ -911,48 +1103,16 @@ export default function AllProperties() {
             {...MAPLIBRE_LOW_MEMORY_PROPS}
           >
             <MapLibreGL.Camera
-              centerCoordinate={
-                userLocation
-                  ? [userLocation.longitude, userLocation.latitude]
-                  : [123.8854, 10.3157]
-              }
-              zoomLevel={filterNearMe ? 14 : 12}
+              centerCoordinate={mapCenterCoordinate}
+              zoomLevel={mapZoomLevel}
             />
 
-            {filteredData.map((item, index) => {
-              const coords =
-                item.latitude && item.longitude
-                  ? { lat: item.latitude, lng: item.longitude }
-                  : extractCoordinates(item.location_link);
-              if (!coords || !coords.lat || !coords.lng) return null;
-
-              let matches = 0;
-              for (let i = 0; i < index; i++) {
-                const otherItem = filteredData[i];
-                const otherCoords =
-                  otherItem.latitude && otherItem.longitude
-                    ? { lat: otherItem.latitude, lng: otherItem.longitude }
-                    : extractCoordinates(otherItem.location_link);
-                if (
-                  otherCoords &&
-                  Math.abs(otherCoords.lat - coords.lat) < 0.00001 &&
-                  Math.abs(otherCoords.lng - coords.lng) < 0.00001
-                ) {
-                  matches++;
-                }
-              }
-              const jitterOffset = 0.00015;
-              const angle = matches * (Math.PI / 4);
-              const adjustedLat =
-                coords.lat + (matches > 0 ? jitterOffset * Math.sin(angle) : 0);
-              const adjustedLng =
-                coords.lng + (matches > 0 ? jitterOffset * Math.cos(angle) : 0);
-
+            {mapPoints.map(({ item, lat, lng }) => {
               return (
                 <MapLibreGL.PointAnnotation
                   key={`marker-${item.id}`}
                   id={`marker-${item.id}`}
-                  coordinate={[adjustedLng, adjustedLat]}
+                  coordinate={[lng, lat]}
                   onSelected={() => setSelectedPropertyId(item.id)}
                 >
                   <View
@@ -1030,42 +1190,24 @@ export default function AllProperties() {
 
           {selectedPropertyId && (
             <View style={styles.mapCardOverlay}>
-              {filteredData.find((p) => p.id === selectedPropertyId) &&
-                renderCard(
-                  filteredData.find((p) => p.id === selectedPropertyId),
-                )}
+              {mapData.find((p) => p.id === selectedPropertyId) &&
+                renderCard(mapData.find((p) => p.id === selectedPropertyId))}
             </View>
           )}
         </View>
-      ) : showMapView &&
-        filterNearMe &&
-        Platform.OS !== "web" &&
-        !MapLibreGL ? (
+      ) : showMapView && Platform.OS !== "web" && !MapLibreGL ? (
         <View style={{ flex: 1 }}>
           <WebViewMap
-            center={
-              userLocation
-                ? [userLocation.longitude, userLocation.latitude]
-                : [123.8854, 10.3157]
-            }
-            zoom={14}
+            center={mapCenterCoordinate as [number, number]}
+            zoom={mapZoomLevel}
             interactive={true}
             markers={
-              filteredData
-                .map((item) => {
-                  const coords =
-                    item.latitude && item.longitude
-                      ? { lat: item.latitude, lng: item.longitude }
-                      : extractCoordinates(item.location_link);
-                  if (!coords || !coords.lat || !coords.lng) return null;
-                  return {
-                    id: `marker-${item.id}`,
-                    coordinate: [coords.lng, coords.lat] as [number, number],
-                    title: `₱${item.price >= 1000 ? (item.price / 1000).toFixed(1) + "k" : item.price}`,
-                    color: "#111",
-                  };
-                })
-                .filter(Boolean) as any[]
+              mapPoints.map(({ item, lat, lng }) => ({
+                id: `marker-${item.id}`,
+                coordinate: [lng, lat] as [number, number],
+                title: `₱${item.price >= 1000 ? (item.price / 1000).toFixed(1) + "k" : item.price}`,
+                color: "#111",
+              })) as any[]
             }
             showMarkerLabels={true}
             userLocation={userLocation || undefined}
@@ -1082,10 +1224,8 @@ export default function AllProperties() {
 
           {selectedPropertyId && (
             <View style={styles.mapCardOverlay}>
-              {filteredData.find((p) => p.id === selectedPropertyId) &&
-                renderCard(
-                  filteredData.find((p) => p.id === selectedPropertyId),
-                )}
+              {mapData.find((p) => p.id === selectedPropertyId) &&
+                renderCard(mapData.find((p) => p.id === selectedPropertyId))}
             </View>
           )}
         </View>
@@ -1130,7 +1270,7 @@ export default function AllProperties() {
       )}
 
       {/* Map/List Toggle Float Button */}
-      {!loading && filterNearMe && (
+      {!loading && (
         <TouchableOpacity
           style={styles.mapToggleBtn}
           onPress={() => setShowMapView(!showMapView)}

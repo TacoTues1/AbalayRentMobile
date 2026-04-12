@@ -4,25 +4,25 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Dimensions,
-  Easing,
-  Image,
-  Keyboard,
-  KeyboardAvoidingView,
-  Linking,
-  Modal,
-  Platform,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Dimensions,
+    Easing,
+    Image,
+    Keyboard,
+    KeyboardAvoidingView,
+    Linking,
+    Modal,
+    Platform,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    TouchableWithoutFeedback,
+    View,
 } from "react-native";
 import CalendarPicker from "../../../components/ui/CalendarPicker";
 import { useRealtime } from "../../../hooks/useRealtime";
@@ -168,21 +168,9 @@ export default function TenantDashboard({ session, profile }: any) {
     useState<string[]>([]);
 
   const browseAvailableAmenities = [
-    "Wifi",
-    "Air Condition",
-    "Washing Machine",
-    "Parking",
-    "Hot Shower",
-    "Bathroom",
-    "Smoke Alarm",
-    "Veranda",
-    "Fire Extinguisher",
-    "Outside Garden",
-    "Furnished",
-    "Semi-Furnished",
-    "Pet Friendly",
-    "Kitchen",
-    "Smart TV",
+     'Kitchen', 'Pool', 'TV', 'Elevator', 'Air conditioning', 'Heating', 'Basketball court',
+    'Washing machine', 'Dryer', 'Parking', 'Gym', 'Security', 'Balcony', 'Garden', "Kid's Playground",
+    'Pet friendly', 'Furnished', 'Carbon monoxide alarm', 'Smoke alarm', 'Fire extinguisher', 'First aid kit'
   ];
 
   const browseClearFilters = () => {
@@ -2701,7 +2689,8 @@ export default function TenantDashboard({ session, profile }: any) {
               { color: isDark ? colors.textMuted : "#9ca3af" },
             ]}
           >
-            {item.city}, Philippines
+            {[item.city, item.state_province].filter(Boolean).join(", ") ||
+              "Location not set"}
           </Text>
           <View
             style={[
@@ -4998,7 +4987,9 @@ export default function TenantDashboard({ session, profile }: any) {
                             }}
                             numberOfLines={1}
                           >
-                            {item.city}
+                            {[item.city, item.state_province]
+                              .filter(Boolean)
+                              .join(", ") || "Location not set"}
                           </Text>
                         </View>
                         {stats.review_count > 0 && (

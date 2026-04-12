@@ -82,7 +82,8 @@ export default function LandlordProperties() {
         (p) =>
           (p.title || "").toLowerCase().includes(q) ||
           (p.address || "").toLowerCase().includes(q) ||
-          (p.city || "").toLowerCase().includes(q),
+          (p.city || "").toLowerCase().includes(q) ||
+          (p.state_province || "").toLowerCase().includes(q),
       );
     }
 
@@ -198,7 +199,12 @@ export default function LandlordProperties() {
               ]}
               numberOfLines={1}
             >
-              {item.address}, {item.city}
+              {[
+                item.address,
+                [item.city, item.state_province].filter(Boolean).join(", "),
+              ]
+                .filter(Boolean)
+                .join(", ") || "Location not set"}
             </Text>
           </View>
 

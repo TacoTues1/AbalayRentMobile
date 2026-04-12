@@ -54,7 +54,9 @@ export default function FavoritesScreen() {
 
       const { data: properties, error: propertyError } = await supabase
         .from("properties")
-        .select("id, title, city, address, price, images, status")
+        .select(
+          "id, title, city, state_province, address, price, images, status",
+        )
         .in("id", ids)
         .eq("is_deleted", false);
 
@@ -146,7 +148,11 @@ export default function FavoritesScreen() {
                   {item.title || "Untitled Property"}
                 </Text>
                 <Text style={styles.cardMeta} numberOfLines={1}>
-                  {item.city || "Unknown City"} • {item.address || "No address"}
+                  {[item.city, item.state_province]
+                    .filter(Boolean)
+                    .join(", ") || "Unknown location"}
+                  {" • "}
+                  {item.address || "No address"}
                 </Text>
                 <Text style={styles.cardPrice}>
                   PHP {Number(item.price || 0).toLocaleString()}

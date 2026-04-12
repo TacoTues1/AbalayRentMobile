@@ -2,15 +2,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Animated,
-  Easing,
-  Image,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Animated,
+    Easing,
+    Image,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { supabase } from "../../../lib/supabase";
 import { useTheme } from "../../../lib/theme";
@@ -29,6 +29,7 @@ type PropertyRow = {
   id: string;
   title: string;
   city?: string | null;
+  state_province?: string | null;
   address?: string | null;
   price?: number | null;
   images?: any;
@@ -132,7 +133,9 @@ export default function LandlordDetailsScreen() {
 
       const { data: propertyRows, error: propertyError } = await supabase
         .from("properties")
-        .select("id, title, city, address, price, images, status, is_deleted")
+        .select(
+          "id, title, city, state_province, address, price, images, status, is_deleted",
+        )
         .eq("landlord", landlordId)
         .eq("status", "available")
         .neq("is_deleted", true)
@@ -552,7 +555,12 @@ export default function LandlordDetailsScreen() {
                         { color: isDark ? colors.textMuted : "#6b7280" },
                       ]}
                     >
-                      {[property.address, property.city]
+                      {[
+                        property.address,
+                        [property.city, property.state_province]
+                          .filter(Boolean)
+                          .join(", "),
+                      ]
                         .filter(Boolean)
                         .join(", ") || "Address unavailable"}
                     </Text>

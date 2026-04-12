@@ -4,15 +4,7 @@ import * as Notifications from "expo-notifications";
 import { Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useRef, useState } from "react";
-import {
-    LogBox,
-    Platform,
-    StatusBar,
-    Text,
-    TouchableOpacity,
-    View,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { LogBox, Text, TouchableOpacity, View } from "react-native";
 import { usePushNotifications } from "../hooks/usePushNotifications";
 import { useRealtimeNotifications } from "../hooks/useRealtimeNotifications";
 import { supabase } from "../lib/supabase";
@@ -103,18 +95,8 @@ function AppHeader({
   borderColor: string;
   tintColor: string;
 }) {
-  const insets = useSafeAreaInsets();
-  const topInset =
-    insets.top > 0
-      ? insets.top
-      : Platform.OS === "android"
-        ? (StatusBar.currentHeight ?? 0)
-        : 0;
-
   return (
     <View style={{ backgroundColor }}>
-      <View style={{ paddingTop: topInset }} />
-
       {showNavigationRow ? (
         <View
           style={{
@@ -167,18 +149,20 @@ function ThemedStack() {
           const title = typeof options?.title === "string" ? options.title : "";
 
           return {
-            headerShown: true,
-            header: ({ back }: any) => (
-              <AppHeader
-                title={title}
-                canGoBack={Boolean(back) && showNavigationRow}
-                onBack={() => navigation.goBack()}
-                showNavigationRow={showNavigationRow}
-                backgroundColor={isDark ? colors.headerBg : "#fff"}
-                borderColor={isDark ? colors.border : "#e5e7eb"}
-                tintColor={isDark ? colors.text : "#000"}
-              />
-            ),
+            headerShown: showNavigationRow,
+            header: showNavigationRow
+              ? ({ back }: any) => (
+                  <AppHeader
+                    title={title}
+                    canGoBack={Boolean(back)}
+                    onBack={() => navigation.goBack()}
+                    showNavigationRow={true}
+                    backgroundColor={isDark ? colors.headerBg : "#fff"}
+                    borderColor={isDark ? colors.border : "#e5e7eb"}
+                    tintColor={isDark ? colors.text : "#000"}
+                  />
+                )
+              : undefined,
           };
         }}
       >
@@ -189,6 +173,10 @@ function ThemedStack() {
         <Stack.Screen name="favorites" options={{ headerShown: false }} />
         <Stack.Screen name="terms" />
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen
+          name="auth/callback"
+          options={{ headerShown: false }}
+        />
         <Stack.Screen
           name="properties/[id]"
           options={{ title: "Property Details" }}

@@ -106,6 +106,10 @@ export default function Bookings() {
 
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [bookingToCancel, setBookingToCancel] = useState<any>(null);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [bookingToReject, setBookingToReject] = useState<any>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [submittingReject, setSubmittingReject] = useState(false);
 
   // --- ASSIGN TENANT STATES ---
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -178,8 +182,8 @@ export default function Bookings() {
   };
 
   // --- HELPER: Ported from Next.js ---
-  function getTimeSlotInfo(bookingDate: string) {
-    if (!bookingDate)
+  function getTimeSlotInfo(startTime: string, endTime?: string) {
+    if (!startTime)
       return {
         icon: "calendar-outline" as any,
         label: "Not Scheduled",
@@ -187,7 +191,8 @@ export default function Bookings() {
         color: "#9ca3af",
       };
 
-    const date = new Date(bookingDate);
+    const date = new Date(startTime);
+    const endDate = endTime ? new Date(endTime) : null;
     const hour = date.getHours();
     const min = date.getMinutes();
     if (hour === 8 && min === 30)
@@ -223,13 +228,33 @@ export default function Bookings() {
       return {
         icon: "sunny-outline" as any,
         label: "Morning",
-        time: `${hour}:${min.toString().padStart(2, "0")} AM`,
+        time: endDate
+          ? `${date.toLocaleTimeString("en-US", {
+              hour: "numeric",
+              minute: "2-digit",
+              hour12: true,
+            })} - ${endDate.toLocaleTimeString("en-US", {
+              hour: "numeric",
+              minute: "2-digit",
+              hour12: true,
+            })}`
+          : `${hour}:${min.toString().padStart(2, "0")} AM`,
         color: "#f59e0b",
       };
     return {
       icon: "partly-sunny-outline" as any,
       label: "Afternoon",
-      time: `${hour > 12 ? hour - 12 : hour}:${min.toString().padStart(2, "0")} PM`,
+      time: endDate
+        ? `${date.toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          })} - ${endDate.toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          })}`
+        : `${hour > 12 ? hour - 12 : hour}:${min.toString().padStart(2, "0")} PM`,
       color: "#6366f1",
     };
   }
@@ -549,6 +574,41 @@ export default function Bookings() {
     }
   };
 
+  const updateSlotBookingState = async (booking: any, isBooked: boolean) => {
+    if (!booking?.time_slot_id) return;
+
+    const { data: byIdRows, error: byIdError } = await supabase
+      .from("available_time_slots")
+      .update({ is_booked: isBooked })
+      .eq("id", booking.time_slot_id)
+      .select("id");
+
+    if (!byIdError && byIdRows && byIdRows.length > 0) return;
+
+    const { data: baseSlot } = await supabase
+      .from("available_time_slots")
+      .select("id, landlord_id, start_time, end_time")
+      .eq("id", booking.time_slot_id)
+      .maybeSingle();
+
+    if (baseSlot?.landlord_id && baseSlot?.start_time && baseSlot?.end_time) {
+      const { data: byRangeRows, error: byRangeError } = await supabase
+        .from("available_time_slots")
+        .update({ is_booked: isBooked })
+        .eq("landlord_id", baseSlot.landlord_id)
+        .eq("start_time", baseSlot.start_time)
+        .eq("end_time", baseSlot.end_time)
+        .select("id");
+      if (byRangeError || !byRangeRows || byRangeRows.length === 0) {
+        console.log(
+          "updateSlotBookingState fallback update failed",
+          byRangeError || "no rows updated",
+        );
+      }
+      return;
+    }
+  };
+
   const approveBooking = async (booking: any) => {
     const { error } = await supabase
       .from("bookings")
@@ -556,12 +616,7 @@ export default function Bookings() {
       .eq("id", booking.id);
     if (error) return Alert.alert("Error", error.message);
 
-    if (booking.time_slot_id) {
-      await supabase
-        .from("available_time_slots")
-        .update({ is_booked: true })
-        .eq("id", booking.time_slot_id);
-    }
+    await updateSlotBookingState(booking, true);
 
     await createNotification(
       booking.tenant,
@@ -575,28 +630,82 @@ export default function Bookings() {
     loadBookings(session.user.id, profile.role, filter);
   };
 
-  const rejectBooking = async (booking: any) => {
+  const openRejectModal = (booking: any) => {
+    setBookingToReject(booking);
+    setRejectReason("");
+    setShowRejectModal(true);
+  };
+
+  const rejectBooking = async () => {
+    if (!bookingToReject) return;
+
+    const trimmedReason = rejectReason.trim();
+    if (!trimmedReason) {
+      return Alert.alert(
+        "Reason Required",
+        "Please provide a rejection reason.",
+      );
+    }
+
+    setSubmittingReject(true);
+
     const { error } = await supabase
       .from("bookings")
       .update({ status: "rejected" })
-      .eq("id", booking.id);
-    if (error) return Alert.alert("Error", error.message);
+      .eq("id", bookingToReject.id);
+    if (error) {
+      setSubmittingReject(false);
+      return Alert.alert("Error", error.message);
+    }
 
-    if (booking.time_slot_id) {
-      await supabase
-        .from("available_time_slots")
-        .update({ is_booked: false })
-        .eq("id", booking.time_slot_id);
+    await updateSlotBookingState(bookingToReject, false);
+
+    const { error: emailError } = await supabase.functions.invoke(
+      "send-email",
+      {
+        body: {
+          type: "booking_rejection_reason",
+          bookingId: bookingToReject.id,
+          reason: trimmedReason,
+        },
+      },
+    );
+
+    if (emailError) {
+      console.log("Rejection email send failed:", emailError.message);
+    }
+
+    if (API_URL && bookingToReject?.tenant_profile?.phone) {
+      try {
+        await fetch(`${API_URL}/api/send-sms`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            phoneNumber: bookingToReject.tenant_profile.phone,
+            message: `Abalay: Your viewing request for ${bookingToReject.property?.title || "the property"} was rejected. Check your email for details.`,
+          }),
+        });
+      } catch (smsError) {
+        console.log("Failed to send rejection SMS:", smsError);
+      }
     }
 
     await createNotification(
-      booking.tenant,
+      bookingToReject.tenant,
       "booking_rejected",
-      `Your viewing request for ${booking.property?.title} was rejected.`,
+      `Your viewing request for ${bookingToReject.property?.title} was rejected.`,
       { actor: session.user.id },
     );
-    sendBackendNotification("booking_status", booking.id, session.user.id);
+    sendBackendNotification(
+      "booking_status",
+      bookingToReject.id,
+      session.user.id,
+    );
 
+    setSubmittingReject(false);
+    setShowRejectModal(false);
+    setBookingToReject(null);
+    setRejectReason("");
     Alert.alert("Success", "Booking rejected.");
     loadBookings(session.user.id, profile.role, filter);
   };
@@ -616,12 +725,7 @@ export default function Bookings() {
     if (error) {
       Alert.alert("Error", "Failed to cancel");
     } else {
-      if (bookingToCancel.time_slot_id) {
-        await supabase
-          .from("available_time_slots")
-          .update({ is_booked: false })
-          .eq("id", bookingToCancel.time_slot_id);
-      }
+      await updateSlotBookingState(bookingToCancel, false);
       // Send notification
       await createNotification(
         bookingToCancel.tenant,
@@ -639,27 +743,112 @@ export default function Bookings() {
 
   // --- ASSIGN TENANT LOGIC ---
 
+  const navigateToAssignTenant = (booking: any) => {
+    const routePropertyId = booking?.property_id || booking?.property?.id;
+    if (!routePropertyId) {
+      Alert.alert("Error", "No property found for this booking.");
+      return;
+    }
+
+    const tenantProfile = booking?.tenant_profile || {};
+    const tenantName =
+      `${tenantProfile.first_name || ""} ${tenantProfile.last_name || ""}`.trim();
+
+    router.push({
+      pathname: "/(tabs)/assigntenant",
+      params: {
+        propertyId: String(routePropertyId),
+        bookingId: String(booking.id),
+        tenantId: String(booking.tenant || ""),
+        tenantName: tenantName,
+        tenantPhone: tenantProfile.phone || "",
+        tenantFirstName: tenantProfile.first_name || "",
+        tenantLastName: tenantProfile.last_name || "",
+      },
+    } as any);
+  };
+
   const markViewingSuccess = async (booking: any) => {
-    const { error } = await supabase
+    const activeCompetingStatuses = [
+      "pending",
+      "pending_approval",
+      "approved",
+      "accepted",
+    ];
+
+    const { data: competingBookings, error: competingFetchError } =
+      await supabase
+        .from("bookings")
+        .select("id, tenant, time_slot_id")
+        .eq("property_id", booking.property_id)
+        .neq("id", booking.id)
+        .in("status", activeCompetingStatuses);
+
+    if (competingFetchError) {
+      return Alert.alert("Error", "Failed to load related booking requests.");
+    }
+
+    const { error: viewingDoneError } = await supabase
       .from("bookings")
       .update({ status: "viewing_done" })
       .eq("id", booking.id);
 
-    if (!error) {
-      await createNotification(
-        booking.tenant,
-        "viewing_success",
-        `Your viewing for ${booking.property?.title} was successful!`,
-        { actor: session.user.id },
-      );
-      Alert.alert("Success", "Viewing marked as successful!");
-      loadBookings(session.user.id, profile.role, filter);
-    } else {
-      Alert.alert("Error", "Failed to update status");
+    if (viewingDoneError) {
+      return Alert.alert("Error", "Failed to update status");
     }
+
+    const competingIds = (competingBookings || []).map((b: any) => b.id);
+
+    if (competingIds.length > 0) {
+      const { error: rejectOthersError } = await supabase
+        .from("bookings")
+        .update({ status: "rejected" })
+        .in("id", competingIds);
+
+      if (rejectOthersError) {
+        return Alert.alert(
+          "Error",
+          "Viewing was marked successful, but other requests could not be rejected.",
+        );
+      }
+
+      await Promise.all(
+        (competingBookings || []).map((other: any) =>
+          updateSlotBookingState(other, false),
+        ),
+      );
+
+      await Promise.all(
+        (competingBookings || []).map((other: any) =>
+          createNotification(
+            other.tenant,
+            "booking_rejected",
+            `Your viewing request for ${booking.property?.title} was rejected because another viewing for this property was marked successful.`,
+            { actor: session.user.id },
+          ),
+        ),
+      );
+    }
+
+    await createNotification(
+      booking.tenant,
+      "viewing_success",
+      `Your viewing for ${booking.property?.title} was successful!`,
+      { actor: session.user.id },
+    );
+
+    Alert.alert("Success", "Viewing marked as successful!");
+    loadBookings(session.user.id, profile.role, filter);
+    navigateToAssignTenant(booking);
   };
 
   const openAssignTenantModal = async (booking: any) => {
+    const requestedPropertyId = booking?.property_id
+      ? String(booking.property_id)
+      : booking?.property?.id
+        ? String(booking.property.id)
+        : "";
+
     setAssignStep(0);
     setAssignBooking(booking);
     setPenaltyDetails("");
@@ -669,31 +858,81 @@ export default function Bookings() {
     setElectricityDueDay("");
     setAlreadyPaid(false);
     setContractFile(null);
-    setSelectedPropertyId(booking.property_id || ""); // Default to booked property
+    setSelectedPropertyId(requestedPropertyId);
     setShowWifiDayPicker(false);
     setShowWaterDayPicker(false);
     setShowElectricityDayPicker(false);
 
-    // Load available properties
-    const { data: props } = await supabase
-      .from("properties")
-      .select("*")
-      .eq("landlord", session.user.id)
-      .eq("status", "available")
-      .eq("is_deleted", false);
+    // Load landlord properties (robust fallback for schema variations)
+    const ownerColumns = ["landlord", "landlord_id", "owner_id", "user_id"];
+    let properties: any[] = [];
 
-    let properties = props || [];
+    for (const ownerColumn of ownerColumns) {
+      const { data, error } = await (supabase.from("properties") as any)
+        .select("*")
+        .eq(ownerColumn, session.user.id);
+
+      if (!error) {
+        const loaded = data || [];
+        properties = loaded.filter((p: any) => p?.is_deleted !== true);
+        if (properties.length > 0) break;
+      }
+    }
+
+    // Ensure requested property always appears as fallback.
+    if (requestedPropertyId) {
+      const alreadyIncluded = properties.some(
+        (p: any) => String(p.id) === requestedPropertyId,
+      );
+
+      if (!alreadyIncluded) {
+        if (booking?.property?.id) {
+          properties = [booking.property, ...properties];
+        } else {
+          const { data: requestedProp } = await supabase
+            .from("properties")
+            .select("*")
+            .eq("id", requestedPropertyId)
+            .maybeSingle();
+
+          if (requestedProp) {
+            properties = [requestedProp, ...properties];
+          }
+        }
+      }
+    }
+
+    // Last-resort fallback: keep Assign flow usable even if property queries are blocked.
+    if (properties.length === 0 && requestedPropertyId) {
+      properties = [
+        {
+          id: requestedPropertyId,
+          title: booking?.property?.title || "Selected Property",
+          city: booking?.property?.city || "",
+          price: booking?.property?.price || 0,
+          amenities: booking?.property?.amenities || [],
+          has_advance: booking?.property?.has_advance,
+          advance_amount: booking?.property?.advance_amount,
+          has_security_deposit: booking?.property?.has_security_deposit,
+          security_deposit_amount: booking?.property?.security_deposit_amount,
+        },
+      ];
+    }
 
     // Sort so the booked property is FIRST
-    if (booking.property_id) {
+    if (requestedPropertyId) {
       properties.sort((a, b) => {
-        if (a.id === booking.property_id) return -1;
-        if (b.id === booking.property_id) return 1;
+        if (String(a.id) === requestedPropertyId) return -1;
+        if (String(b.id) === requestedPropertyId) return 1;
         return 0;
       });
     }
 
     setAvailableProperties(properties);
+    setSelectedPropertyId(
+      requestedPropertyId ||
+        (properties.length > 0 ? String(properties[0].id) : ""),
+    );
     setShowAssignModal(true);
   };
 
@@ -760,8 +999,9 @@ export default function Bookings() {
     }
 
     const selectedProp =
-      availableProperties.find((p: any) => p.id === selectedPropertyId) ||
-      booking.property;
+      availableProperties.find(
+        (p: any) => String(p.id) === String(selectedPropertyId),
+      ) || booking.property;
     const rentAmount = selectedProp?.price || 0;
     const hasAdvance =
       typeof selectedProp?.has_advance === "boolean"
@@ -823,26 +1063,65 @@ export default function Bookings() {
       const totalMoveIn = rentAmount + advanceAmount + securityDeposit;
 
       // Notification
-      const msg = `You have been assigned to ${selectedProp?.title}. Move-in bill sent.`;
       try {
-        const msg = `You have been assigned to "${selectedProp?.title}". Move-in bill sent.`;
+        let msg = `You have been assigned to "${selectedProp?.title}" from ${startDate}.`;
+        if (alreadyPaid) msg += ` Move-in fees were marked as already paid.`;
+        else msg += ` Move-in bill sent.`;
+
         await createNotification(booking.tenant, "occupancy_assigned", msg, {
           actor: session.user.id,
           email: true,
           sms: true,
         });
+
         if (API_URL) {
-          fetch(`${API_URL}/api/notify`, {
+          const tenantProfile = booking.tenant_profile || {};
+          const phoneToUse = tenantProfile?.phone;
+          const nameToUse =
+            `${tenantProfile?.first_name || ""} ${tenantProfile?.last_name || ""}`.trim() ||
+            "Tenant";
+
+          if (phoneToUse) {
+            fetch(`${API_URL}/api/send-sms`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ phoneNumber: phoneToUse, message: msg }),
+            }).catch((e) => console.log("SMS Error:", e));
+          }
+
+          fetch(`${API_URL}/api/send-email`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              type: "occupancy_assigned",
-              recordId: newOccupancy.id,
-              actorId: session.user.id,
+              bookingId: booking.id,
+              type: "assignment",
+              customMessage: msg,
             }),
-          }).catch((notifyErr) =>
-            console.log("Assignment notify API failed:", notifyErr),
-          );
+          }).catch((e) => console.log("Email Error:", e));
+
+          if (!alreadyPaid) {
+            fetch(`${API_URL}/api/notify`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                type: "move_in",
+                recordId: newOccupancy.id,
+                tenantName: nameToUse,
+                tenantPhone: phoneToUse,
+                tenantEmail: null,
+                propertyTitle: selectedProp?.title,
+                propertyAddress: "",
+                startDate,
+                landlordName:
+                  `${session?.user?.user_metadata?.first_name || ""} ${session?.user?.user_metadata?.last_name || ""}`.trim() ||
+                  "Landlord",
+                landlordPhone: session?.user?.user_metadata?.phone || "",
+                securityDeposit: securityDeposit,
+                rentAmount: rentAmount,
+                contractPdfUrl: contractUrl,
+              }),
+            }).catch((e) => console.log("Move-in email Error:", e));
+          }
         }
       } catch (notifErr) {
         console.log("Notification failed:", notifErr);
@@ -850,6 +1129,7 @@ export default function Bookings() {
 
       // Bill
       if (!alreadyPaid) {
+        // Tenant hasn't paid yet — create a pending bill
         await supabase.from("payment_requests").insert({
           landlord: session.user.id,
           tenant: booking.tenant,
@@ -863,6 +1143,24 @@ export default function Bookings() {
           due_date: new Date(startDate).toISOString(),
           status: "pending",
           is_move_in_payment: true,
+        });
+      } else {
+        // Tenant already paid offline — record as paid so the next due date
+        // advances correctly (otherwise dashboard falls back to start_date)
+        await supabase.from("payment_requests").insert({
+          landlord: session.user.id,
+          tenant: booking.tenant,
+          property_id: selectedPropertyId,
+          occupancy_id: newOccupancy.id,
+          rent_amount: rentAmount,
+          advance_amount: advanceAmount,
+          security_deposit_amount: securityDeposit,
+          bills_description:
+            "Move-in Payment (Rent + Advance + Security Deposit) - Paid Offline",
+          due_date: new Date(startDate).toISOString(),
+          status: "paid",
+          is_move_in_payment: true,
+          payment_method: "cash",
         });
       }
 
@@ -892,7 +1190,7 @@ export default function Bookings() {
     }
 
     const selectedPropInfo = availableProperties.find(
-      (p: any) => p.id === selectedPropertyId,
+      (p: any) => String(p.id) === String(selectedPropertyId),
     );
     const amenities = selectedPropInfo?.amenities || [];
     const isWaterFree = amenities.includes("Free Water");
@@ -963,12 +1261,32 @@ export default function Bookings() {
       .gte("start_time", new Date().toISOString())
       .order("start_time", { ascending: true });
 
+    const { data: activeBookedSlots } = await supabase
+      .from("bookings")
+      .select("id, start_time, end_time")
+      .eq("property_id", booking.property_id)
+      .eq("landlord", booking.property.landlord)
+      .in("status", ["pending", "pending_approval", "approved", "accepted"]);
+
     const currentSlotId = booking?.time_slot_id
       ? String(booking.time_slot_id)
       : "";
+
+    const bookedKeys = new Set(
+      (activeBookedSlots || [])
+        .filter((b: any) => String(b.id) !== String(booking.id))
+        .map((b: any) => `${String(b.start_time)}|${String(b.end_time)}`),
+    );
+
     const filteredSlots = (data || []).filter((slot: any) => {
       const slotId = String(slot.id);
-      return !slot.is_booked || (currentSlotId && slotId === currentSlotId);
+      const slotKey = `${String(slot.start_time)}|${String(slot.end_time)}`;
+      const blockedByExistingBooking = bookedKeys.has(slotKey);
+
+      return (
+        (!slot.is_booked && !blockedByExistingBooking) ||
+        (currentSlotId && slotId === currentSlotId)
+      );
     });
 
     setAvailableTimeSlots(filteredSlots);
@@ -1057,6 +1375,53 @@ export default function Bookings() {
       return;
     }
 
+    const { data: latestSlot, error: latestSlotError } = await supabase
+      .from("available_time_slots")
+      .select("id, landlord_id, start_time, end_time, is_booked")
+      .eq("id", slot.id)
+      .maybeSingle();
+
+    if (latestSlotError || !latestSlot) {
+      Alert.alert(
+        "Unavailable",
+        "This schedule is no longer available. Please choose another time slot.",
+      );
+      setSubmittingBooking(false);
+      openBookingModal(selectedApplication);
+      return;
+    }
+
+    const selectedIsCurrent =
+      !!currentSlotId && String(slot.id) === String(currentSlotId);
+    if (latestSlot.is_booked && !selectedIsCurrent) {
+      Alert.alert(
+        "Unavailable",
+        "This schedule is no longer available. Please choose another time slot.",
+      );
+      setSubmittingBooking(false);
+      openBookingModal(selectedApplication);
+      return;
+    }
+
+    const { data: lockedRows, error: lockSlotError } = await supabase
+      .from("available_time_slots")
+      .update({ is_booked: true })
+      .eq("landlord_id", latestSlot.landlord_id)
+      .eq("start_time", latestSlot.start_time)
+      .eq("end_time", latestSlot.end_time)
+      .eq("is_booked", false)
+      .select("id");
+
+    if (lockSlotError || !lockedRows || lockedRows.length === 0) {
+      Alert.alert(
+        "Unavailable",
+        "This schedule is no longer available. Please choose another time slot.",
+      );
+      setSubmittingBooking(false);
+      openBookingModal(selectedApplication);
+      return;
+    }
+
     const { data: newBooking, error } = await supabase
       .from("bookings")
       .insert({
@@ -1075,15 +1440,16 @@ export default function Bookings() {
       .single();
 
     if (error) {
+      await supabase
+        .from("available_time_slots")
+        .update({ is_booked: false })
+        .eq("landlord_id", latestSlot.landlord_id)
+        .eq("start_time", latestSlot.start_time)
+        .eq("end_time", latestSlot.end_time);
       Alert.alert("Error", error.message);
       setSubmittingBooking(false);
       return;
     }
-
-    await supabase
-      .from("available_time_slots")
-      .update({ is_booked: true })
-      .eq("id", slot.id);
 
     if (!selectedApplication.is_application) {
       if (
@@ -1099,10 +1465,10 @@ export default function Bookings() {
           availableTimeSlots,
         );
         if (previousSlotId) {
-          await supabase
-            .from("available_time_slots")
-            .update({ is_booked: false })
-            .eq("id", previousSlotId);
+          await updateSlotBookingState(
+            { ...selectedApplication, time_slot_id: previousSlotId },
+            false,
+          );
         }
       }
     }
@@ -1163,7 +1529,10 @@ export default function Bookings() {
   );
 
   const renderBookingCard = ({ item }: { item: any }) => {
-    const timeInfo = getTimeSlotInfo(item.booking_date);
+    const timeInfo = getTimeSlotInfo(
+      item.start_time || item.booking_date,
+      item.end_time,
+    );
     const date = item.booking_date ? new Date(item.booking_date) : null;
     const isPending =
       item.status === "pending" || item.status === "pending_approval";
@@ -1410,7 +1779,7 @@ export default function Bookings() {
                     <Text style={styles.btnTextWhite}>Accept</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    onPress={() => rejectBooking(item)}
+                    onPress={() => openRejectModal(item)}
                     style={styles.btnReject}
                   >
                     <Text style={styles.btnTextGray}>Decline</Text>
@@ -1436,18 +1805,20 @@ export default function Bookings() {
               )}
 
               {statusLower === "viewing_done" && (
-                <TouchableOpacity
-                  onPress={() => openAssignTenantModal(item)}
-                  style={styles.btnBlack}
-                >
-                  <Ionicons
-                    name="person-add"
-                    size={14}
-                    color="white"
-                    style={{ marginRight: 6 }}
-                  />
-                  <Text style={styles.btnTextWhite}>Assign Tenant</Text>
-                </TouchableOpacity>
+                <View style={{ flexDirection: "row", gap: 10 }}>
+                  <TouchableOpacity
+                    onPress={() => navigateToAssignTenant(item)}
+                    style={styles.btnApprove}
+                  >
+                    <Text style={styles.btnTextWhite}>Assign Tenant</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => promptCancelBooking(item)}
+                    style={styles.btnOutlineRed}
+                  >
+                    <Text style={styles.btnTextRed}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
           )}
@@ -1683,7 +2054,7 @@ export default function Bookings() {
       </View>
 
       {/* Stats Grid */}
-      <View style={styles.statsGrid}>
+      {/* <View style={styles.statsGrid}>
         <View
           style={[
             styles.statCard,
@@ -1749,7 +2120,7 @@ export default function Bookings() {
             {rejectedCount}
           </Text>
         </View>
-      </View>
+      </View> */}
 
       {/* Filters */}
       <View
@@ -2292,6 +2663,89 @@ export default function Bookings() {
         </View>
       </Modal>
 
+      <Modal visible={showRejectModal} animationType="fade" transparent>
+        <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.modalContent,
+              { backgroundColor: isDark ? colors.surface : "white" },
+            ]}
+          >
+            <Text
+              style={[
+                styles.modalTitle,
+                { color: isDark ? colors.text : "#111" },
+              ]}
+            >
+              Reject Booking
+            </Text>
+            <Text
+              style={{
+                fontSize: 13,
+                marginTop: 8,
+                color: isDark ? colors.textMuted : "#6b7280",
+              }}
+            >
+              Add the reason. It will be sent to tenant via email and SMS.
+            </Text>
+            <TextInput
+              style={[
+                styles.textArea,
+                {
+                  marginTop: 14,
+                  backgroundColor: isDark ? colors.card : "#f9fafb",
+                  borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                  color: isDark ? colors.text : "#111",
+                  minHeight: 96,
+                },
+              ]}
+              placeholder="Reason for rejection"
+              placeholderTextColor={isDark ? colors.textMuted : "#9ca3af"}
+              multiline
+              value={rejectReason}
+              onChangeText={setRejectReason}
+            />
+            <View style={{ flexDirection: "row", marginTop: 16, gap: 10 }}>
+              <TouchableOpacity
+                style={[
+                  styles.btnOutline,
+                  {
+                    backgroundColor: isDark ? colors.card : "white",
+                    borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                  },
+                ]}
+                onPress={() => {
+                  if (submittingReject) return;
+                  setShowRejectModal(false);
+                  setBookingToReject(null);
+                  setRejectReason("");
+                }}
+              >
+                <Text
+                  style={{
+                    color: isDark ? colors.text : "#111",
+                    fontWeight: "700",
+                  }}
+                >
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.btnRed}
+                onPress={rejectBooking}
+                disabled={submittingReject}
+              >
+                {submittingReject ? (
+                  <ActivityIndicator color="white" size="small" />
+                ) : (
+                  <Text style={styles.btnTextWhite}>Confirm Reject</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* ASSIGN TENANT MODAL WIZARD */}
       <Modal
         visible={showAssignModal}
@@ -2442,13 +2896,15 @@ export default function Bookings() {
                     style={styles.wizardPropScroll}
                   >
                     {availableProperties.map((p) => {
-                      const isSelected = selectedPropertyId === p.id;
+                      const normalizedId = String(p.id);
+                      const isSelected =
+                        String(selectedPropertyId) === normalizedId;
                       const isBookedProperty =
-                        p.id === assignBooking?.property_id;
+                        normalizedId === String(assignBooking?.property_id);
                       return (
                         <TouchableOpacity
                           key={p.id}
-                          onPress={() => setSelectedPropertyId(p.id)}
+                          onPress={() => setSelectedPropertyId(normalizedId)}
                           style={[
                             styles.wizardPropItem,
                             isSelected && styles.wizardPropItemSelected,
@@ -2483,7 +2939,11 @@ export default function Bookings() {
                                   marginTop: 2,
                                 }}
                               >
-                                {p.city} • ₱{p.price}
+                                {[p.city, p.state_province]
+                                  .filter(Boolean)
+                                  .join(", ") || "Location not set"}
+                                {" • ₱"}
+                                {p.price}
                               </Text>
                             </View>
                             <View
@@ -2505,7 +2965,7 @@ export default function Bookings() {
               {assignStep === 1 &&
                 (() => {
                   const selectedPropInfo = availableProperties.find(
-                    (p: any) => p.id === selectedPropertyId,
+                    (p: any) => String(p.id) === String(selectedPropertyId),
                   );
                   const rentPrice =
                     selectedPropInfo?.price ||
@@ -2636,7 +3096,7 @@ export default function Bookings() {
               {assignStep === 3 &&
                 (() => {
                   const selectedPropInfo = availableProperties.find(
-                    (p: any) => p.id === selectedPropertyId,
+                    (p: any) => String(p.id) === String(selectedPropertyId),
                   );
                   const amenities = selectedPropInfo?.amenities || [];
                   const isWaterFree = amenities.includes("Free Water");

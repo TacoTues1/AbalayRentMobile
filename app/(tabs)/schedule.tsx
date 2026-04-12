@@ -2,22 +2,24 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import BlockingLoader from "../../components/ui/BlockingLoader";
+import CalendarPicker from "../../components/ui/CalendarPicker";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
 
-// 4 time slots per day
+// Default landlord slots
 const TIME_SLOT_CONFIG: any = {
   am1: {
     label: "AM 1",
@@ -54,6 +56,112 @@ const TIME_SLOT_CONFIG: any = {
 };
 
 const SLOT_KEYS = ["am1", "am2", "pm1", "pm2"];
+const AM_COLORS = ["#f59e0b", "#f97316", "#f59e0b", "#ea580c", "#d97706"];
+const PM_COLORS = ["#6366f1", "#8b5cf6", "#4f46e5", "#7c3aed", "#4338ca"];
+
+const parseTimeValue = (value: string) => {
+  const match = String(value || "")
+    .trim()
+    .match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  if (!Number.isInteger(h) || !Number.isInteger(m)) return null;
+  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+
+  return { hour: h, minute: m, total: h * 60 + m };
+};
+
+const to12h = (value: string) => {
+  const parsed = parseTimeValue(value);
+  if (!parsed) return value;
+  const hour12 = parsed.hour % 12 === 0 ? 12 : parsed.hour % 12;
+  const suffix = parsed.hour < 12 ? "AM" : "PM";
+  return `${hour12}:${String(parsed.minute).padStart(2, "0")} ${suffix}`;
+};
+
+const parse12hTimeValue = (value: string) => {
+  const match = String(value || "")
+    .trim()
+    .match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!match) return null;
+
+  const hour12 = Number(match[1]);
+  const minute = Number(match[2]);
+  const period = String(match[3]).toUpperCase();
+
+  if (!Number.isInteger(hour12) || !Number.isInteger(minute)) return null;
+  if (hour12 < 1 || hour12 > 12 || minute < 0 || minute > 59) return null;
+
+  let hour24 = hour12 % 12;
+  if (period === "PM") hour24 += 12;
+
+  return { hour: hour24, minute, total: hour24 * 60 + minute };
+};
+
+const to24hString = (hour: number, minute: number) => {
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+};
+
+const build12hTimeOptions = (stepMinutes = 30) => {
+  const options: string[] = [];
+  for (let total = 0; total < 24 * 60; total += stepMinutes) {
+    const hour24 = Math.floor(total / 60);
+    const minute = total % 60;
+    const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+    const suffix = hour24 < 12 ? "AM" : "PM";
+    options.push(`${hour12}:${String(minute).padStart(2, "0")} ${suffix}`);
+  }
+  return options;
+};
+
+const TIME_OPTIONS_12H = build12hTimeOptions(30);
+
+const formatDateKey = (date: Date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
+
+const parseDateKey = (dateKey: string) => {
+  const match = String(dateKey || "")
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  return new Date(year, monthIndex, day);
+};
+
+const isPastDateKey = (dateKey: string) => {
+  const date = parseDateKey(dateKey);
+  if (!date) return true;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  date.setHours(0, 0, 0, 0);
+  return date < today;
+};
+
+const getNowTotalMinutesForDateKey = (dateKey: string) => {
+  const date = parseDateKey(dateKey);
+  if (!date) return null;
+
+  const today = new Date();
+  if (
+    date.getFullYear() !== today.getFullYear() ||
+    date.getMonth() !== today.getMonth() ||
+    date.getDate() !== today.getDate()
+  ) {
+    return null;
+  }
+
+  return today.getHours() * 60 + today.getMinutes();
+};
 
 export default function Schedule() {
   const router = useRouter();
@@ -73,6 +181,18 @@ export default function Schedule() {
   const [activeDate, setActiveDate] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [searchDate, setSearchDate] = useState("");
+  const [customDate, setCustomDate] = useState(formatDateKey(new Date()));
+  const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
+  const [customStartTime, setCustomStartTime] = useState("");
+  const [customEndTime, setCustomEndTime] = useState("");
+  const [timePickerTarget, setTimePickerTarget] = useState<
+    "start" | "end" | null
+  >(null);
+  const [submittingCustomSchedule, setSubmittingCustomSchedule] =
+    useState(false);
+
+  const slotConfig = TIME_SLOT_CONFIG;
+  const slotKeys = SLOT_KEYS;
 
   useEffect(() => {
     loadSession();
@@ -130,10 +250,41 @@ export default function Schedule() {
   };
 
   const toggleActiveDate = (dateStr: string) => {
+    if (isPastDateKey(dateStr)) {
+      return Alert.alert(
+        "Invalid Date",
+        "Past dates are not allowed for availability.",
+      );
+    }
     setActiveDate(activeDate === dateStr ? null : dateStr);
   };
 
   const toggleDateTimeSlot = (dateStr: string, slotType: string) => {
+    if (isPastDateKey(dateStr)) {
+      return Alert.alert(
+        "Invalid Date",
+        "Past dates are not allowed for availability.",
+      );
+    }
+
+    const config = slotConfig[slotType];
+    const date = parseDateKey(dateStr);
+    const parsedStart = parseTimeValue(config?.start || "");
+    const current = selectedDateSlots[dateStr] || [];
+    const isSelecting = !current.includes(slotType);
+
+    if (isSelecting && date && parsedStart) {
+      const slotStart = new Date(date);
+      slotStart.setHours(parsedStart.hour, parsedStart.minute, 0, 0);
+
+      if (slotStart <= new Date()) {
+        return Alert.alert(
+          "Slot Unavailable",
+          "You cannot select a time slot that has already passed.",
+        );
+      }
+    }
+
     setSelectedDateSlots((prev) => {
       const current = prev[dateStr] || [];
       if (current.includes(slotType)) {
@@ -151,11 +302,87 @@ export default function Schedule() {
     });
   };
 
+  const addCustomSlotTemplate = async () => {
+    const parsedStart = parse12hTimeValue(customStartTime);
+    const parsedEnd = parse12hTimeValue(customEndTime);
+
+    if (!parsedStart || !parsedEnd) {
+      return Alert.alert(
+        "Invalid Time",
+        "Use 12-hour format h:mm AM/PM (e.g. 8:30 AM).",
+      );
+    }
+
+    if (parsedEnd.total <= parsedStart.total) {
+      return Alert.alert(
+        "Invalid Range",
+        "End time must be later than start time.",
+      );
+    }
+
+    const date = parseDateKey(customDate);
+    if (!date) {
+      return Alert.alert("Invalid Date", "Use date format YYYY-MM-DD.");
+    }
+
+    if (isPastDateKey(customDate)) {
+      return Alert.alert(
+        "Slot Unavailable",
+        "You cannot add a custom schedule on a past date.",
+      );
+    }
+
+    const start = new Date(date);
+    start.setHours(parsedStart.hour, parsedStart.minute, 0, 0);
+
+    const end = new Date(date);
+    end.setHours(parsedEnd.hour, parsedEnd.minute, 0, 0);
+
+    if (start <= new Date()) {
+      return Alert.alert(
+        "Slot Unavailable",
+        "You cannot add a custom schedule in the past.",
+      );
+    }
+
+    if (!session?.user?.id) return;
+
+    setSubmittingCustomSchedule(true);
+
+    const { error } = await supabase.from("available_time_slots").insert({
+      property_id: null,
+      landlord_id: session.user.id,
+      start_time: start.toISOString(),
+      end_time: end.toISOString(),
+      is_booked: false,
+    });
+
+    setSubmittingCustomSchedule(false);
+
+    if (error) {
+      return Alert.alert("Error", error.message);
+    }
+
+    setCustomStartTime("");
+    setCustomEndTime("");
+    await loadTimeSlots(session.user.id);
+    Alert.alert("Success", "Custom schedule added immediately.");
+  };
+
   const selectAllDates = (slotType: string, filterFn: (d: Date) => boolean) => {
     const dates = getNextDays(60).filter(filterFn);
     const newState: any = { ...selectedDateSlots };
     dates.forEach((d) => {
-      const dateStr = d.toISOString().split("T")[0];
+      const dateStr = formatDateKey(d);
+      const config = slotConfig[slotType];
+      const parsedStart = parseTimeValue(config?.start || "");
+      if (parsedStart) {
+        const slotStart = new Date(d);
+        slotStart.setHours(parsedStart.hour, parsedStart.minute, 0, 0);
+        if (slotStart <= new Date()) {
+          return;
+        }
+      }
       const current = newState[dateStr] || [];
       if (!current.includes(slotType)) {
         newState[dateStr] = [...current, slotType];
@@ -171,6 +398,69 @@ export default function Schedule() {
     );
   };
 
+  const getCustomDateLabel = () => {
+    const parsed = parseDateKey(customDate);
+    if (!parsed) return "Select date";
+    return parsed.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  };
+
+  const getTimeOptionsForPicker = () => {
+    const nowTotal = getNowTotalMinutesForDateKey(customDate);
+
+    let options = TIME_OPTIONS_12H;
+
+    if (nowTotal !== null) {
+      options = options.filter((option) => {
+        const parsed = parse12hTimeValue(option);
+        return !!parsed && parsed.total > nowTotal;
+      });
+    }
+
+    if (timePickerTarget !== "end") return options;
+
+    const startParsed = parse12hTimeValue(customStartTime);
+    if (!startParsed) return options;
+
+    return options.filter((option) => {
+      const parsed = parse12hTimeValue(option);
+      return !!parsed && parsed.total > startParsed.total;
+    });
+  };
+
+  const handleTimeSelect = (value: string) => {
+    const nowTotal = getNowTotalMinutesForDateKey(customDate);
+    const selectedParsed = parse12hTimeValue(value);
+    if (
+      nowTotal !== null &&
+      selectedParsed &&
+      selectedParsed.total <= nowTotal
+    ) {
+      Alert.alert(
+        "Slot Unavailable",
+        "You cannot select a custom time that has already passed.",
+      );
+      return;
+    }
+
+    if (timePickerTarget === "start") {
+      setCustomStartTime(value);
+
+      const nextStart = parse12hTimeValue(value);
+      const currentEnd = parse12hTimeValue(customEndTime);
+      if (nextStart && currentEnd && currentEnd.total <= nextStart.total) {
+        setCustomEndTime("");
+      }
+    } else if (timePickerTarget === "end") {
+      setCustomEndTime(value);
+    }
+    setTimePickerTarget(null);
+  };
+
   const addTimeSlots = async () => {
     const totalSlots = getTotalSelectedSlots();
     if (totalSlots === 0)
@@ -180,14 +470,17 @@ export default function Schedule() {
     const slotsToCreate = [];
 
     for (const dateStr of Object.keys(selectedDateSlots)) {
+      if (isPastDateKey(dateStr)) continue;
+
       const slotTypes = selectedDateSlots[dateStr];
       if (!slotTypes || slotTypes.length === 0) continue;
 
       for (const type of slotTypes) {
-        const config = TIME_SLOT_CONFIG[type];
+        const config = slotConfig[type];
         if (!config) continue;
 
-        const date = new Date(dateStr);
+        const date = parseDateKey(dateStr);
+        if (!date) continue;
 
         const [sH, sM] = config.start.split(":");
         const start = new Date(date);
@@ -214,6 +507,12 @@ export default function Schedule() {
       .insert(slotsToCreate);
 
     setSubmitting(false);
+    if (slotsToCreate.length === 0) {
+      return Alert.alert(
+        "No Valid Slots",
+        "All selected schedules are already in the past. Please select future dates and times.",
+      );
+    }
     if (error) {
       Alert.alert("Error", error.message);
     } else {
@@ -242,30 +541,40 @@ export default function Schedule() {
   };
 
   // --- HELPERS ---
-  const getSlotLabel = (startHour: number, startMin: number) => {
-    if (startHour === 8 && startMin === 30)
-      return { key: "am1", ...TIME_SLOT_CONFIG.am1 };
-    if (startHour === 10 && startMin === 0)
-      return { key: "am2", ...TIME_SLOT_CONFIG.am2 };
-    if (startHour === 13 && startMin === 0)
-      return { key: "pm1", ...TIME_SLOT_CONFIG.pm1 };
-    if (startHour === 14 && startMin === 30)
-      return { key: "pm2", ...TIME_SLOT_CONFIG.pm2 };
-    // Legacy fallback
-    if (startHour < 12)
-      return {
-        key: "am1",
-        label: "Morning",
-        time: `${startHour}:${startMin.toString().padStart(2, "0")} AM`,
-        icon: "sunny-outline",
-        color: "#f59e0b",
-      };
+  const getSlotDisplay = (slot: any, daySlots: any[]) => {
+    const startDate = new Date(slot.start_time);
+    const endDate = new Date(slot.end_time);
+    const isMorning = startDate.getHours() < 12;
+
+    const periodSlots = [...(daySlots || [])]
+      .filter((s: any) => {
+        const h = new Date(s.start_time).getHours();
+        return isMorning ? h < 12 : h >= 12;
+      })
+      .sort(
+        (a: any, b: any) =>
+          new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
+      );
+
+    const periodIndex =
+      periodSlots.findIndex((s: any) => String(s.id) === String(slot.id)) + 1;
+    const safeIndex = Math.max(periodIndex, 1);
+    const palette = isMorning ? AM_COLORS : PM_COLORS;
+    const color = palette[(safeIndex - 1) % palette.length];
+
     return {
-      key: "pm1",
-      label: "Afternoon",
-      time: `${startHour - 12}:${startMin.toString().padStart(2, "0")} PM`,
-      icon: "partly-sunny-outline",
-      color: "#6366f1",
+      label: `${isMorning ? "AM" : "PM"} ${safeIndex}`,
+      time: `${startDate.toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      })} - ${endDate.toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      })}`,
+      icon: isMorning ? "sunny-outline" : "partly-sunny-outline",
+      color,
     };
   };
 
@@ -291,10 +600,12 @@ export default function Schedule() {
   // --- RENDER HELPERS ---
 
   const renderDateRow = ({ item }: { item: Date }) => {
-    const dateStr = item.toISOString().split("T")[0];
+    const dateStr = formatDateKey(item);
     const selected = selectedDateSlots[dateStr] || [];
     const isActive = activeDate === dateStr;
     const hasSelection = selected.length > 0;
+    const todayKey = formatDateKey(new Date());
+    const isToday = dateStr === todayKey;
 
     const dayName = item.toLocaleDateString("en-US", { weekday: "short" });
     const dayNum = item.getDate();
@@ -328,31 +639,68 @@ export default function Schedule() {
           <View style={styles.dateRowLeft}>
             <View
               style={[
-                styles.dateCircle,
-                { backgroundColor: isDark ? colors.background : "#f3f4f6" },
-                hasSelection && { backgroundColor: isDark ? "white" : "#111" },
+                styles.dateCalendarCard,
+                {
+                  backgroundColor: isDark ? colors.background : "#f8fafc",
+                  borderColor: isDark ? colors.cardBorder : "#e2e8f0",
+                },
               ]}
             >
+              <View
+                style={[
+                  styles.dateCalendarTop,
+                  { backgroundColor: isDark ? colors.card : "#111827" },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.dateCalendarMonth,
+                    { color: isDark ? colors.text : "white" },
+                  ]}
+                >
+                  {monthStr.toUpperCase()}
+                </Text>
+              </View>
               <Text
                 style={[
-                  styles.dateCircleNum,
+                  styles.dateCalendarDay,
                   { color: isDark ? colors.text : "#111" },
-                  hasSelection && { color: isDark ? "#111" : "white" },
                 ]}
               >
                 {dayNum}
               </Text>
             </View>
             <View>
-              <Text
-                style={[
-                  styles.dateRowDay,
-                  { color: isDark ? colors.text : "#111" },
-                  isWeekend && { color: isDark ? "#fca5a5" : "#ef4444" },
-                ]}
-              >
-                {dayName}, {monthStr} {dayNum}
-              </Text>
+              <View style={styles.dateRowDayWrap}>
+                <Text
+                  style={[
+                    styles.dateRowDay,
+                    { color: isDark ? colors.text : "#111" },
+                    isWeekend && { color: isDark ? "#fca5a5" : "#ef4444" },
+                  ]}
+                >
+                  {dayName}, {monthStr} {dayNum}
+                </Text>
+                {isToday && (
+                  <View
+                    style={[
+                      styles.todayBadge,
+                      {
+                        backgroundColor: isDark ? "white" : "#111",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.todayBadgeText,
+                        { color: isDark ? "#111" : "white" },
+                      ]}
+                    >
+                      TODAY
+                    </Text>
+                  </View>
+                )}
+              </View>
               {hasSelection ? (
                 <View style={{ flexDirection: "row", gap: 4, marginTop: 3 }}>
                   {selected.map((s) => (
@@ -360,7 +708,7 @@ export default function Schedule() {
                       key={s}
                       style={[
                         styles.slotChipMini,
-                        { backgroundColor: TIME_SLOT_CONFIG[s]?.color },
+                        { backgroundColor: slotConfig[s]?.color || "#9ca3af" },
                       ]}
                     >
                       <Text
@@ -370,7 +718,7 @@ export default function Schedule() {
                           color: "white",
                         }}
                       >
-                        {TIME_SLOT_CONFIG[s]?.label}
+                        {slotConfig[s]?.label || "Slot"}
                       </Text>
                     </View>
                   ))}
@@ -413,9 +761,18 @@ export default function Schedule() {
               },
             ]}
           >
-            {SLOT_KEYS.map((key) => {
+            {slotKeys.map((key) => {
               const isSlotSelected = selected.includes(key);
-              const config = TIME_SLOT_CONFIG[key];
+              const config = slotConfig[key];
+              if (!config) return null;
+              const parsedStart = parseTimeValue(config.start);
+              const slotDate = parseDateKey(dateStr);
+              let isPastSlot = false;
+              if (parsedStart && slotDate) {
+                const slotStart = new Date(slotDate);
+                slotStart.setHours(parsedStart.hour, parsedStart.minute, 0, 0);
+                isPastSlot = slotStart <= new Date();
+              }
               const slotBaseBackground = isDark
                 ? config.color + "2b"
                 : config.color + "18";
@@ -423,6 +780,7 @@ export default function Schedule() {
                 <TouchableOpacity
                   key={key}
                   onPress={() => toggleDateTimeSlot(dateStr, key)}
+                  disabled={isPastSlot}
                   style={[
                     styles.slotToggleBtn,
                     {
@@ -433,23 +791,36 @@ export default function Schedule() {
                       backgroundColor: config.color,
                       borderColor: config.color,
                     },
+                    isPastSlot && styles.slotToggleDisabled,
                   ]}
-                  activeOpacity={0.7}
+                  activeOpacity={isPastSlot ? 1 : 0.7}
                 >
                   <View
                     style={[
                       styles.slotToggleIcon,
                       {
-                        backgroundColor: isSlotSelected
-                          ? "rgba(255,255,255,0.25)"
-                          : config.color + (isDark ? "25" : "15"),
+                        backgroundColor: isPastSlot
+                          ? isDark
+                            ? "rgba(148,163,184,0.18)"
+                            : "#e5e7eb"
+                          : isSlotSelected
+                            ? "rgba(255,255,255,0.25)"
+                            : config.color + (isDark ? "25" : "15"),
                       },
                     ]}
                   >
                     <Ionicons
                       name={isSlotSelected ? "checkmark" : config.icon}
                       size={16}
-                      color={isSlotSelected ? "white" : config.color}
+                      color={
+                        isPastSlot
+                          ? isDark
+                            ? "#94a3b8"
+                            : "#9ca3af"
+                          : isSlotSelected
+                            ? "white"
+                            : config.color
+                      }
                     />
                   </View>
                   <View style={{ flex: 1 }}>
@@ -458,6 +829,9 @@ export default function Schedule() {
                         styles.slotToggleLabel,
                         { color: isDark ? colors.text : "#111" },
                         isSlotSelected && { color: "white" },
+                        isPastSlot && {
+                          color: isDark ? colors.textMuted : "#9ca3af",
+                        },
                       ]}
                     >
                       {config.label}
@@ -467,11 +841,33 @@ export default function Schedule() {
                         styles.slotToggleTime,
                         { color: isDark ? colors.textMuted : "#9ca3af" },
                         isSlotSelected && { color: "rgba(255,255,255,0.7)" },
+                        isPastSlot && {
+                          color: isDark ? colors.textMuted : "#9ca3af",
+                        },
                       ]}
                     >
                       {config.time}
                     </Text>
                   </View>
+                  {isPastSlot && (
+                    <View
+                      style={[
+                        styles.slotExpiredBadge,
+                        {
+                          backgroundColor: isDark ? "#334155" : "#e5e7eb",
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.slotExpiredText,
+                          { color: isDark ? "#cbd5e1" : "#6b7280" },
+                        ]}
+                      >
+                        PASSED
+                      </Text>
+                    </View>
+                  )}
                 </TouchableOpacity>
               );
             })}
@@ -481,9 +877,9 @@ export default function Schedule() {
     );
   };
 
-  const renderSlotCard = (slot: any) => {
+  const renderSlotCard = (slot: any, daySlots: any[]) => {
     const date = new Date(slot.start_time);
-    const slotInfo = getSlotLabel(date.getHours(), date.getMinutes());
+    const slotInfo = getSlotDisplay(slot, daySlots);
     const endDate = new Date(slot.end_time);
     const startStr = date.toLocaleTimeString("en-US", {
       hour: "numeric",
@@ -520,7 +916,11 @@ export default function Schedule() {
             { backgroundColor: slotInfo.color + (isDark ? "25" : "18") },
           ]}
         >
-          <Ionicons name={slotInfo.icon} size={18} color={slotInfo.color} />
+          <Ionicons
+            name={slotInfo.icon as any}
+            size={18}
+            color={slotInfo.color}
+          />
         </View>
         <View style={styles.slotInfo}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -646,7 +1046,7 @@ export default function Schedule() {
       </View>
 
       {/* Stats Row */}
-      <View
+      {/* <View
         style={[
           styles.statsRow,
           { backgroundColor: isDark ? colors.surface : "white" },
@@ -717,7 +1117,7 @@ export default function Schedule() {
             Booked
           </Text>
         </View>
-      </View>
+      </View> */}
 
       {/* Search Filter */}
       {timeSlots.length > 0 && (
@@ -824,7 +1224,9 @@ export default function Schedule() {
                   {groupedSlots[dateKey].length > 1 ? "s" : ""}
                 </Text>
               </View>
-              {groupedSlots[dateKey].map(renderSlotCard)}
+              {groupedSlots[dateKey].map((slot: any) =>
+                renderSlotCard(slot, groupedSlots[dateKey]),
+              )}
             </View>
           ))
         )}
@@ -904,14 +1306,15 @@ export default function Schedule() {
             </View>
 
             {/* Time Slot Legend */}
-            <View
+            {/* <View
               style={[
                 styles.legendRow,
                 { backgroundColor: isDark ? colors.surface : "white" },
               ]}
             >
-              {SLOT_KEYS.map((key) => {
-                const config = TIME_SLOT_CONFIG[key];
+              {slotKeys.map((key) => {
+                const config = slotConfig[key];
+                if (!config) return null;
                 return (
                   <View
                     key={key}
@@ -947,10 +1350,259 @@ export default function Schedule() {
                   </View>
                 );
               })}
+            </View> */}
+
+            <View
+              style={[
+                styles.customBuilder,
+                {
+                  backgroundColor: isDark ? colors.surface : "white",
+                  borderBottomColor: isDark ? colors.border : "#f3f4f6",
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.customBuilderTitle,
+                  { color: isDark ? colors.text : "#111" },
+                ]}
+              >
+                Add Custom AM/PM Slot
+              </Text>
+              <Text
+                style={[
+                  styles.customBuilderSub,
+                  { color: isDark ? colors.textMuted : "#9ca3af" },
+                ]}
+              >
+                Select date and enter 12-hour time (e.g. 8:30 AM)
+              </Text>
+
+              <View style={{ marginTop: 10 }}>
+                <Text
+                  style={[
+                    styles.customTimeLabel,
+                    { color: isDark ? colors.textMuted : "#6b7280" },
+                  ]}
+                >
+                  Date
+                </Text>
+                <View
+                  style={{
+                    marginTop: 4,
+                  }}
+                >
+                  <TouchableOpacity
+                    onPress={() => setShowCustomDatePicker((prev) => !prev)}
+                    style={[
+                      styles.customDateTrigger,
+                      {
+                        backgroundColor: isDark ? colors.card : "#f9fafb",
+                        borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                      },
+                    ]}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons
+                      name="calendar-outline"
+                      size={14}
+                      color={isDark ? colors.textMuted : "#9ca3af"}
+                      style={styles.customTimeIcon}
+                    />
+                    <Text
+                      style={[
+                        styles.customDateTriggerText,
+                        {
+                          color: parseDateKey(customDate)
+                            ? isDark
+                              ? colors.text
+                              : "#111"
+                            : isDark
+                              ? colors.textMuted
+                              : "#9ca3af",
+                        },
+                      ]}
+                    >
+                      {getCustomDateLabel()}
+                    </Text>
+                    <Ionicons
+                      name={
+                        showCustomDatePicker ? "chevron-up" : "chevron-down"
+                      }
+                      size={16}
+                      color={isDark ? colors.textMuted : "#9ca3af"}
+                    />
+                  </TouchableOpacity>
+
+                  {showCustomDatePicker && (
+                    <View
+                      style={[
+                        styles.customCalendarWrap,
+                        {
+                          backgroundColor: isDark ? colors.card : "#fff",
+                          borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                        },
+                      ]}
+                    >
+                      <CalendarPicker
+                        selectedDate={customDate}
+                        onDateSelect={(date) => {
+                          setCustomDate(date);
+                          setShowCustomDatePicker(false);
+                        }}
+                      />
+                    </View>
+                  )}
+                </View>
+              </View>
+
+              <View style={styles.customTimeRow}>
+                <View style={styles.customTimeField}>
+                  <Text
+                    style={[
+                      styles.customTimeLabel,
+                      { color: isDark ? colors.textMuted : "#6b7280" },
+                    ]}
+                  >
+                    Start
+                  </Text>
+                  <View
+                    style={[
+                      styles.customTimeInputWrap,
+                      {
+                        backgroundColor: isDark ? colors.card : "#f9fafb",
+                        borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                      },
+                    ]}
+                  >
+                    <TouchableOpacity
+                      style={styles.customTimePickerPressable}
+                      onPress={() => setTimePickerTarget("start")}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons
+                        name="time-outline"
+                        size={14}
+                        color={isDark ? colors.textMuted : "#9ca3af"}
+                        style={styles.customTimeIcon}
+                      />
+                      <Text
+                        style={[
+                          styles.customTimeValueText,
+                          customStartTime
+                            ? { color: isDark ? colors.text : "#111" }
+                            : {
+                                color: isDark ? colors.textMuted : "#9ca3af",
+                              },
+                        ]}
+                      >
+                        {customStartTime || "Select start time"}
+                      </Text>
+                      <Ionicons
+                        name="chevron-down"
+                        size={16}
+                        color={isDark ? colors.textMuted : "#9ca3af"}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={styles.customTimeField}>
+                  <Text
+                    style={[
+                      styles.customTimeLabel,
+                      { color: isDark ? colors.textMuted : "#6b7280" },
+                    ]}
+                  >
+                    End
+                  </Text>
+                  <View
+                    style={[
+                      styles.customTimeInputWrap,
+                      {
+                        backgroundColor: isDark ? colors.card : "#f9fafb",
+                        borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                      },
+                    ]}
+                  >
+                    <TouchableOpacity
+                      style={styles.customTimePickerPressable}
+                      onPress={() => setTimePickerTarget("end")}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons
+                        name="time-outline"
+                        size={14}
+                        color={isDark ? colors.textMuted : "#9ca3af"}
+                        style={styles.customTimeIcon}
+                      />
+                      <Text
+                        style={[
+                          styles.customTimeValueText,
+                          customEndTime
+                            ? { color: isDark ? colors.text : "#111" }
+                            : {
+                                color: isDark ? colors.textMuted : "#9ca3af",
+                              },
+                        ]}
+                      >
+                        {customEndTime || "Select end time"}
+                      </Text>
+                      <Ionicons
+                        name="chevron-down"
+                        size={16}
+                        color={isDark ? colors.textMuted : "#9ca3af"}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+
+              <Text
+                style={[
+                  styles.customTimeHint,
+                  { color: isDark ? colors.textMuted : "#9ca3af" },
+                ]}
+              >
+                Example: 1:30 PM to 3:00 PM
+              </Text>
+
+              <TouchableOpacity
+                style={[
+                  styles.customAddBtn,
+                  { backgroundColor: isDark ? "white" : "#111" },
+                ]}
+                onPress={addCustomSlotTemplate}
+                disabled={submittingCustomSchedule}
+              >
+                {submittingCustomSchedule ? (
+                  <ActivityIndicator
+                    size="small"
+                    color={isDark ? "#111" : "white"}
+                  />
+                ) : (
+                  <>
+                    <Ionicons
+                      name="add-circle-outline"
+                      size={16}
+                      color={isDark ? "#111" : "white"}
+                    />
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        fontWeight: "700",
+                        color: isDark ? "#111" : "white",
+                      }}
+                    >
+                      Add Scheduled
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
             </View>
 
             {/* Quick Select Chips */}
-            <View
+            {/* <View
               style={{
                 height: 56,
                 backgroundColor: isDark ? colors.surface : "white",
@@ -1018,7 +1670,7 @@ export default function Schedule() {
                         style={[
                           styles.chipDot,
                           {
-                            backgroundColor: TIME_SLOT_CONFIG[opt.type]?.color,
+                            backgroundColor: slotConfig[opt.type]?.color,
                           },
                         ]}
                       />
@@ -1037,12 +1689,12 @@ export default function Schedule() {
                   </TouchableOpacity>
                 ))}
               </ScrollView>
-            </View>
+            </View> */}
 
             {/* Date List */}
             <FlatList
               data={getNextDays(60)}
-              keyExtractor={(item: Date) => item.toISOString()}
+              keyExtractor={(item: Date) => formatDateKey(item)}
               renderItem={renderDateRow}
               contentContainerStyle={{ paddingBottom: 20, paddingTop: 8 }}
             />
@@ -1111,6 +1763,112 @@ export default function Schedule() {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={timePickerTarget !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setTimePickerTarget(null)}
+      >
+        <View style={styles.timePickerOverlay}>
+          <View
+            style={[
+              styles.timePickerCard,
+              { backgroundColor: isDark ? colors.surface : "white" },
+            ]}
+          >
+            <View style={styles.timePickerHeader}>
+              <Text
+                style={[
+                  styles.timePickerTitle,
+                  { color: isDark ? colors.text : "#111" },
+                ]}
+              >
+                {timePickerTarget === "start"
+                  ? "Select Start Time"
+                  : "Select End Time"}
+              </Text>
+              <TouchableOpacity onPress={() => setTimePickerTarget(null)}>
+                <Ionicons
+                  name="close"
+                  size={20}
+                  color={isDark ? colors.textMuted : "#666"}
+                />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.timePickerList}
+              contentContainerStyle={styles.timePickerListContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {getTimeOptionsForPicker().length === 0 ? (
+                <Text
+                  style={[
+                    styles.timePickerEmpty,
+                    { color: isDark ? colors.textMuted : "#9ca3af" },
+                  ]}
+                >
+                  No available end times. Select an earlier start time.
+                </Text>
+              ) : (
+                getTimeOptionsForPicker().map((option) => {
+                  const isSelected =
+                    (timePickerTarget === "start" &&
+                      option === customStartTime) ||
+                    (timePickerTarget === "end" && option === customEndTime);
+
+                  return (
+                    <TouchableOpacity
+                      key={option}
+                      style={[
+                        styles.timePickerOption,
+                        {
+                          borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                          backgroundColor: isDark ? colors.card : "#f9fafb",
+                        },
+                        isSelected && {
+                          borderColor: isDark ? "white" : "#111",
+                          backgroundColor: isDark
+                            ? colors.background
+                            : "#eef2ff",
+                        },
+                      ]}
+                      onPress={() => handleTimeSelect(option)}
+                      activeOpacity={0.85}
+                    >
+                      <Text
+                        style={[
+                          styles.timePickerOptionText,
+                          { color: isDark ? colors.text : "#111" },
+                        ]}
+                      >
+                        {option}
+                      </Text>
+                      {isSelected && (
+                        <Ionicons
+                          name="checkmark-circle"
+                          size={16}
+                          color={isDark ? colors.text : "#111"}
+                        />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <BlockingLoader
+        visible={submitting || submittingCustomSchedule}
+        isDark={isDark}
+        surfaceColor={isDark ? colors.surface : "white"}
+        borderColor={isDark ? colors.cardBorder : "#e5e7eb"}
+        textColor={isDark ? colors.text : "#111"}
+        message="Please wait, we are saving your schedule. Please do not close this app."
+      />
     </SafeAreaView>
   );
 }
@@ -1265,16 +2023,52 @@ const styles = StyleSheet.create({
   dateRowSelected: { borderColor: "#111", backgroundColor: "#fafafa" },
   dateRowActive: { borderColor: "#111", borderWidth: 2 },
   dateRowLeft: { flexDirection: "row", alignItems: "center", gap: 12, flex: 1 },
-  dateCircle: {
+  dateCalendarCard: {
     width: 40,
     height: 40,
-    borderRadius: 12,
-    backgroundColor: "#f3f4f6",
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: "center",
+    overflow: "hidden",
+  },
+  dateCalendarTop: {
+    width: "100%",
+    paddingTop: 2,
+    paddingBottom: 1,
     alignItems: "center",
     justifyContent: "center",
   },
-  dateCircleNum: { fontSize: 16, fontWeight: "800", color: "#111" },
+  dateCalendarMonth: {
+    fontSize: 7,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  dateCalendarDay: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#111",
+    lineHeight: 19,
+    textAlign: "center",
+    textAlignVertical: "center",
+    includeFontPadding: false,
+  },
+  dateRowDayWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
   dateRowDay: { fontSize: 14, fontWeight: "700", color: "#111" },
+  todayBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  todayBadgeText: {
+    fontSize: 8,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
   dateRowHint: { fontSize: 11, color: "#d1d5db", marginTop: 2 },
   slotChipMini: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5 },
 
@@ -1306,6 +2100,19 @@ const styles = StyleSheet.create({
   },
   slotToggleLabel: { fontSize: 13, fontWeight: "700", color: "#111" },
   slotToggleTime: { fontSize: 11, color: "#9ca3af", marginTop: 1 },
+  slotToggleDisabled: {
+    opacity: 0.55,
+  },
+  slotExpiredBadge: {
+    borderRadius: 7,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  slotExpiredText: {
+    fontSize: 8,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
 
   // Modal
   modalContainer: { flex: 1, backgroundColor: "#f9fafb" },
@@ -1361,6 +2168,90 @@ const styles = StyleSheet.create({
   legendLabel: { fontSize: 11, fontWeight: "700", color: "#111" },
   legendTime: { fontSize: 9, color: "#9ca3af" },
 
+  customBuilder: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f3f4f6",
+  },
+  customBuilderTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  customBuilderSub: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  customTimeRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  customTimeField: {
+    flex: 1,
+  },
+  customTimeLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    marginBottom: 5,
+  },
+  customDateTrigger: {
+    height: 42,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  customDateTriggerText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  customCalendarWrap: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    overflow: "hidden",
+  },
+  customTimeInputWrap: {
+    height: 42,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  customTimePickerPressable: {
+    flex: 1,
+    height: 40,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  customTimeIcon: {
+    marginRight: 6,
+  },
+  customTimeValueText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+  },
+  customTimeHint: {
+    fontSize: 10,
+    marginTop: 6,
+    marginBottom: 2,
+  },
+  customAddBtn: {
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderRadius: 12,
+    paddingVertical: 10,
+  },
+
   // Quick select
   quickSelectRow: {
     paddingVertical: 10,
@@ -1407,4 +2298,57 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   confirmBtnText: { color: "white", fontWeight: "700", fontSize: 14 },
+
+  timePickerOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  timePickerCard: {
+    borderRadius: 16,
+    maxHeight: "75%",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    overflow: "hidden",
+  },
+  timePickerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
+  },
+  timePickerTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  timePickerList: {
+    maxHeight: 360,
+  },
+  timePickerListContent: {
+    padding: 12,
+    gap: 8,
+  },
+  timePickerOption: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  timePickerOptionText: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  timePickerEmpty: {
+    textAlign: "center",
+    fontSize: 12,
+    fontWeight: "600",
+    paddingVertical: 20,
+  },
 });

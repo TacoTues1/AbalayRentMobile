@@ -1,6 +1,11 @@
 // supabase/functions/send-email/index.ts
+// @ts-ignore
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+// @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+
+// @ts-ignore
+declare const Deno: any;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -56,7 +61,7 @@ const sendBrevoEmail = async ({
   }
 }
 
-serve(async (req) => {
+serve(async (req: Request) => {
   // Handle CORS preflight request
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -104,6 +109,121 @@ serve(async (req) => {
 
       return new Response(
         JSON.stringify({ success: true, message: 'Bug report sent' }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 200,
+        }
+      )
+    }
+
+    if (body?.type === 'bulk_email') {
+      const subject = String(body?.subject || '').trim()
+      const htmlContent = String(body?.htmlContent || '').trim()
+      const recipients = Array.isArray(body?.recipients) ? body.recipients : []
+
+      if (!subject || !htmlContent || recipients.length === 0) {
+        throw new Error('Subject, content, and at least one recipient are required')
+      }
+
+      // Instead of looping individual emails which might hit rate limits, we send them sequentially or grouped, but here sequentially for safety
+      for (const email of recipients) {
+        await sendBrevoEmail({
+          to: email,
+          subject,
+          htmlContent,
+        })
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, message: `Sent bulk email to ${recipients.length} recipients` }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      )
+    }
+
+    if (body?.type === 'monthly_statement') {
+      const targetMonth = String(body?.month || new Date().toLocaleString('default', { month: 'long', year: 'numeric' }))
+      
+      const adminEmail = Deno.env.get('BUG_REPORT_RECIPIENT') || 'alfonzperez92@gmail.com'
+      
+      await sendBrevoEmail({
+        to: adminEmail,
+        subject: `System Triggered: Monthly Statements Generated (${targetMonth})`,
+        htmlContent: `
+          <h2>Monthly Statements Triggered</h2>
+          <p>The system has generated and dispatched the automated statements for ${escapeHtml(targetMonth)}.</p>
+          <p>Please check the admin dashboard for detailed logs.</p>
+        `,
+      })
+
+      return new Response(
+        JSON.stringify({ success: true, message: 'Monthly statements processed' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      )
+    }
+
+    if (body?.type === 'booking_rejection_reason') {
+      const bookingId = body?.bookingId
+      const reason = String(body?.reason || '').trim()
+      if (!bookingId) throw new Error('Booking ID is required')
+      if (!reason) throw new Error('Rejection reason is required')
+
+      const supabaseAdmin = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      )
+
+      const { data: booking, error: bookingError } = await supabaseAdmin
+        .from('bookings')
+        .select(`
+          *,
+          property:properties(title, address, city),
+          tenant_profile:profiles!bookings_tenant_fkey(first_name, last_name),
+          landlord_profile:profiles!bookings_landlord_fkey(first_name, last_name, phone)
+        `)
+        .eq('id', bookingId)
+        .single()
+
+      if (bookingError || !booking) throw new Error('Booking not found')
+
+      const { data: userData } = await supabaseAdmin.auth.admin.getUserById(booking.tenant)
+      const tenantEmail = userData?.user?.email
+
+      if (!tenantEmail) throw new Error('Could not find tenant email')
+
+      const viewingDate = booking.booking_date ? new Date(booking.booking_date) : null
+      const viewingDateText = viewingDate
+        ? viewingDate.toLocaleDateString('en-US', {
+            weekday: 'long',
+            month: 'long',
+            day: 'numeric',
+            year: 'numeric',
+          })
+        : 'N/A'
+      const viewingTimeText = viewingDate
+        ? viewingDate.toLocaleTimeString('en-US', {
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+          })
+        : 'N/A'
+
+      await sendBrevoEmail({
+        to: tenantEmail,
+        subject: 'Viewing Request Update - Abalay',
+        htmlContent: `
+          <h2>Your viewing request was rejected</h2>
+          <p><strong>Property:</strong> ${escapeHtml(booking.property?.title || 'Property')}</p>
+          <p><strong>Address:</strong> ${escapeHtml(`${booking.property?.address || ''}, ${booking.property?.city || ''}`)}</p>
+          <p><strong>Schedule:</strong> ${escapeHtml(viewingDateText)} at ${escapeHtml(viewingTimeText)}</p>
+          <p><strong>Reason from landlord:</strong></p>
+          <p style="white-space: pre-wrap;">${escapeHtml(reason)}</p>
+          <p><strong>Landlord:</strong> ${escapeHtml(`${booking.landlord_profile?.first_name || ''} ${booking.landlord_profile?.last_name || ''}`.trim() || 'N/A')}</p>
+          <p><strong>Contact:</strong> ${escapeHtml(booking.landlord_profile?.phone || 'N/A')}</p>
+        `,
+      })
+
+      return new Response(
+        JSON.stringify({ success: true, message: 'Rejection email sent' }),
         {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           status: 200,
@@ -166,9 +286,9 @@ serve(async (req) => {
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     )
 
-  } catch (error) {
+  } catch (error: any) {
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: error?.message }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
     )
   }

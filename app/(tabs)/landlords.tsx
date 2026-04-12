@@ -78,6 +78,7 @@ type PropertyPreview = {
   id: string;
   title: string;
   city?: string | null;
+  state_province?: string | null;
 };
 
 type LandlordCard = {
@@ -123,7 +124,9 @@ export default function LandlordsSearchScreen() {
       if (landlordIds.length > 0) {
         const { data: propertyRows, error: propertiesError } = await supabase
           .from("properties")
-          .select("id, title, city, landlord, status, is_deleted")
+          .select(
+            "id, title, city, state_province, landlord, status, is_deleted",
+          )
           .in("landlord", landlordIds)
           .eq("status", "available")
           .neq("is_deleted", true);
@@ -151,6 +154,7 @@ export default function LandlordsSearchScreen() {
           id: property.id,
           title: property.title,
           city: property.city,
+          state_province: property.state_province,
         });
         propertyMap.set(property.landlord, list);
       }
@@ -173,8 +177,11 @@ export default function LandlordsSearchScreen() {
         const cityPreview = Array.from(
           new Set(
             landlordProperties
-              .map((p) => p.city)
-              .filter((city) => typeof city === "string" && city.length > 0),
+              .map((p) => [p.city, p.state_province].filter(Boolean).join(", "))
+              .filter(
+                (location) =>
+                  typeof location === "string" && location.length > 0,
+              ),
           ),
         )
           .slice(0, 2)
@@ -212,7 +219,10 @@ export default function LandlordsSearchScreen() {
       const fullName =
         `${landlord.first_name || ""} ${landlord.last_name || ""}`.trim();
       const searchableProperties = landlord.properties
-        .map((property) => `${property.title || ""} ${property.city || ""}`)
+        .map(
+          (property) =>
+            `${property.title || ""} ${property.city || ""} ${property.state_province || ""}`,
+        )
         .join(" ");
 
       const text = [

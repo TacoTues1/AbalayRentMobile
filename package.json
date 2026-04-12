@@ -21,6 +21,7 @@
     "@react-navigation/native": "^7.1.8",
     "@supabase/supabase-js": "^2.89.0",
     "base64-arraybuffer": "^1.0.2",
+    "country-state-city": "^3.2.1",
     "expo": "~54.0.33",
     "expo-auth-session": "~7.0.10",
     "expo-av": "~16.0.8",
@@ -71,6 +72,7 @@
     "@types/react": "~19.1.0",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
+    "supabase": "^2.88.1",
     "typescript": "~5.9.2"
   },
   "private": true

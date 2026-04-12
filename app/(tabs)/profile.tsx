@@ -5,17 +5,17 @@ import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Image,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import PrivacyView from "../../components/profile/PrivacyView";
@@ -102,6 +102,7 @@ export default function Profile() {
     | "terms"
     | "privacy"
     | "report_bug"
+    | "delete_account"
   >("menu");
 
   // --- PROFILE STATE ---
@@ -142,6 +143,14 @@ export default function Profile() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+
+  // --- DELETE ACCOUNT STATE ---
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deleteOtherReason, setDeleteOtherReason] = useState("");
+  const [deleteOtp, setDeleteOtp] = useState("");
+  const [deleteGeneratedOtp, setDeleteGeneratedOtp] = useState("");
+  const [deleteStep, setDeleteStep] = useState<"reason" | "otp">("reason");
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   // --- NOTIFICATIONS STATE ---
   const [notifPrefs, setNotifPrefs] = useState({
@@ -367,7 +376,6 @@ export default function Profile() {
       phone: phone,
       birthday: birthday || null,
       gender: gender || null,
-      updated_at: new Date(),
     };
     const { error } = await supabase
       .from("profiles")
@@ -525,6 +533,144 @@ export default function Profile() {
       Alert.alert("Error", e.message || "Failed to send bug report.");
     } finally {
       setSendingBugReport(false);
+    }
+  };
+
+  const handleNextDelete = async () => {
+    if (!deleteReason) {
+      return Alert.alert("Error", "Please select a reason.");
+    }
+    if (deleteReason === "Others" && !deleteOtherReason.trim()) {
+      return Alert.alert("Error", "Please specify your reason.");
+    }
+
+    setDeleteLoading(true);
+    try {
+      const userId = session?.user?.id;
+      if (!userId) throw new Error("No user session");
+
+      const { data: payments } = await supabase
+        .from("payments")
+        .select("id")
+        .or(`tenant_id.eq.${userId},landlord_id.eq.${userId}`)
+        .in("status", ["pending", "processing", "unpaid", "overdue"]);
+      if (payments && payments.length > 0)
+        throw new Error("You have pending or unpaid payments.");
+
+      const { data: bookings } = await supabase
+        .from("bookings")
+        .select("id")
+        .or(`tenant_id.eq.${userId},landlord_id.eq.${userId}`)
+        .in("status", ["pending", "approved", "active"]);
+      if (bookings && bookings.length > 0)
+        throw new Error("You have active or pending bookings.");
+
+      const { data: maintenance } = await supabase
+        .from("maintenance")
+        .select("id")
+        .or(`tenant_id.eq.${userId},landlord_id.eq.${userId}`)
+        .in("status", ["pending", "in_progress", "open"]);
+      if (maintenance && maintenance.length > 0)
+        throw new Error("You have active or pending maintenance requests.");
+
+      if (profileRole === "landlord") {
+        const { data: properties } = await supabase
+          .from("properties")
+          .select("id")
+          .eq("landlord_id", userId)
+          .in("status", ["occupied", "rented"]);
+        if (properties && properties.length > 0)
+          throw new Error("You have active occupied properties.");
+      }
+
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      setDeleteGeneratedOtp(otpCode);
+
+      const htmlContent = `
+        <h2>Account Deletion Verification</h2>
+        <p>You have requested to delete your Abalay account.</p>
+        <p>Your verification code is: <strong>${otpCode}</strong></p>
+        <p>If you did not request this, please ignore this email.</p>
+      `;
+      const body = {
+        sender: { name: "Abalay", email: "alfnzperez@gmail.com" },
+        to: [{ email: session.user.email }],
+        subject: `Abalay Account Deletion - Verification Code`,
+        htmlContent,
+      };
+
+      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "api-key": BREVO_API_KEY,
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok && response.status !== 201) {
+        throw new Error("Failed to send OTP email.");
+      }
+
+      setDeleteStep("otp");
+      Alert.alert("Verify", "OTP sent to your email.");
+    } catch (e: any) {
+      Alert.alert("Action Required", e.message);
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteOtp || deleteOtp !== deleteGeneratedOtp) {
+      return Alert.alert("Error", "Invalid OTP code.");
+    }
+    setDeleteLoading(true);
+    try {
+      const userId = session?.user?.id;
+      if (!userId) throw new Error("No user session");
+
+      const {
+        data: { session: latestSession },
+      } = await supabase.auth.getSession();
+
+      const { error: deleteAccountError } = await supabase.functions.invoke(
+        "delete-account",
+        {
+          headers: latestSession?.access_token
+            ? {
+                Authorization: `Bearer ${latestSession.access_token}`,
+              }
+            : undefined,
+        },
+      );
+
+      if (deleteAccountError) {
+        const message = String(deleteAccountError.message || "");
+        const functionUnavailable = /404|not found|delete-account/i.test(
+          message,
+        );
+
+        if (!functionUnavailable) {
+          throw deleteAccountError;
+        }
+
+        const { error: deleteProfileError } = await supabase
+          .from("profiles")
+          .delete()
+          .eq("id", userId);
+
+        if (deleteProfileError) throw deleteProfileError;
+      }
+
+      await supabase.auth.signOut();
+      Alert.alert("Success", "Your account has been deleted successfully.", [
+        { text: "OK", onPress: () => router.replace("/login") },
+      ]);
+    } catch (e: any) {
+      Alert.alert("Error", e.message);
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -926,7 +1072,7 @@ export default function Profile() {
   }
 
   // --- SUB-VIEWS wrapper ---
-  const SubHeader = ({ title }: any) => (
+  const SubHeader = ({ title, onBack }: any) => (
     <View
       style={[
         styles.subHeader,
@@ -937,7 +1083,7 @@ export default function Profile() {
       ]}
     >
       <TouchableOpacity
-        onPress={() => setCurrentView("menu")}
+        onPress={() => (onBack ? onBack() : setCurrentView("menu"))}
         style={styles.backBtn}
       >
         <Ionicons
@@ -1401,6 +1547,292 @@ export default function Profile() {
               <Text style={styles.saveBtnText}>Update Password</Text>
             )}
           </TouchableOpacity>
+
+          {/* DELETE ACCOUNT BUTTON */}
+          <View
+            style={{
+              marginTop: 0,
+              borderTopColor: isDark ? colors.border : "#eee",
+            }}
+          >
+            {/* <Text style={{ color: isDark ? colors.textMuted : '#666', fontSize: 13, marginBottom: 15 }}>
+              If you no longer want to use your Abalay account, you can request to delete it.
+            </Text> */}
+            <TouchableOpacity
+              style={[styles.saveBtn, { backgroundColor: "#ef4444" }]}
+              onPress={() => setCurrentView("delete_account")}
+            >
+              <Text style={styles.saveBtnText}>Delete Account</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // --- DELETE ACCOUNT VIEW ---
+  if (currentView === "delete_account") {
+    return (
+      <SafeAreaView
+        style={[
+          styles.container,
+          { backgroundColor: isDark ? colors.background : "#f9fafb" },
+        ]}
+      >
+        <SubHeader
+          title="Delete Account"
+          onBack={() => {
+            if (deleteStep === "otp") {
+              setDeleteStep("reason");
+              setDeleteOtp("");
+            } else {
+              setCurrentView("Password");
+            }
+          }}
+        />
+        <ScrollView contentContainerStyle={{ padding: 20 }}>
+          {deleteStep === "reason" ? (
+            <>
+              <View
+                style={{
+                  backgroundColor: isDark ? "#3b1c1c" : "#fef2f2",
+                  padding: 15,
+                  borderRadius: 12,
+                  marginBottom: 20,
+                  borderWidth: 1,
+                  borderColor: isDark ? "#5c2a2a" : "#fee2e2",
+                }}
+              >
+                <Text
+                  style={{
+                    color: "#ef4444",
+                    fontWeight: "bold",
+                    fontSize: 16,
+                    marginBottom: 8,
+                  }}
+                >
+                  At Abalay, we respect your right to control your personal
+                  data.
+                </Text>
+                <Text
+                  style={{
+                    color: isDark ? "#fca5a5" : "#991b1b",
+                    lineHeight: 22,
+                  }}
+                >
+                  We hate to see you go, but if you decide to leave, this page
+                  explains the steps you need to take to request permanent
+                  deletion of your account and all associated data from our
+                  property management platform.
+                </Text>
+              </View>
+
+              <Text
+                style={[
+                  styles.sectionTitle,
+                  {
+                    color: isDark ? colors.text : "#000",
+                    fontSize: 18,
+                    marginBottom: 15,
+                  },
+                ]}
+              >
+                Why are you leaving?
+              </Text>
+
+              {[
+                "No longer using the app",
+                "Switching to another platform",
+                "Privacy concerns",
+                "Too many bugs or issues",
+                "Others",
+              ].map((reason) => (
+                <TouchableOpacity
+                  key={reason}
+                  onPress={() => setDeleteReason(reason)}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    paddingVertical: 12,
+                    borderBottomWidth: 1,
+                    borderBottomColor: isDark ? colors.border : "#eee",
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 20,
+                      height: 20,
+                      borderRadius: 10,
+                      borderWidth: 2,
+                      borderColor:
+                        deleteReason === reason
+                          ? "#ef4444"
+                          : isDark
+                            ? colors.border
+                            : "#ccc",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginRight: 15,
+                    }}
+                  >
+                    {deleteReason === reason && (
+                      <View
+                        style={{
+                          width: 10,
+                          height: 10,
+                          borderRadius: 5,
+                          backgroundColor: "#ef4444",
+                        }}
+                      />
+                    )}
+                  </View>
+                  <Text
+                    style={{
+                      color: isDark ? colors.text : "#333",
+                      fontSize: 15,
+                    }}
+                  >
+                    {reason}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+
+              {deleteReason === "Others" && (
+                <TextInput
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: isDark ? colors.card : "#fff",
+                      borderColor: isDark ? colors.border : "#ddd",
+                      color: isDark ? colors.text : "#000",
+                      marginTop: 15,
+                    },
+                  ]}
+                  placeholder="Please specify..."
+                  placeholderTextColor={isDark ? colors.textMuted : "#999"}
+                  value={deleteOtherReason}
+                  onChangeText={setDeleteOtherReason}
+                />
+              )}
+
+              <TouchableOpacity
+                style={[
+                  styles.saveBtn,
+                  { backgroundColor: "#ef4444", marginTop: 30 },
+                ]}
+                onPress={handleNextDelete}
+                disabled={deleteLoading}
+              >
+                {deleteLoading ? (
+                  <ActivityIndicator color="white" />
+                ) : (
+                  <Text style={styles.saveBtnText}>Next</Text>
+                )}
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <View
+                style={{
+                  alignItems: "center",
+                  marginBottom: 30,
+                  marginTop: 20,
+                }}
+              >
+                <Ionicons
+                  name="mail-unread-outline"
+                  size={60}
+                  color="#ef4444"
+                />
+                <Text
+                  style={{
+                    fontSize: 20,
+                    fontWeight: "bold",
+                    color: isDark ? colors.text : "#000",
+                    marginTop: 15,
+                  }}
+                >
+                  Verify Deletion
+                </Text>
+                <Text
+                  style={{
+                    textAlign: "center",
+                    color: isDark ? colors.textMuted : "#666",
+                    marginTop: 10,
+                    lineHeight: 22,
+                  }}
+                >
+                  We have sent a verification code to{"\n"}
+                  <Text style={{ fontWeight: "bold" }}>
+                    {session?.user?.email}
+                  </Text>
+                  .{"\n"}Please enter the code to confirm account deletion.
+                </Text>
+              </View>
+
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    textAlign: "center",
+                    letterSpacing: 5,
+                    fontSize: 24,
+                    fontWeight: "bold",
+                    backgroundColor: isDark ? colors.card : "#fff",
+                    borderColor: isDark ? colors.border : "#ddd",
+                    color: isDark ? colors.text : "#000",
+                  },
+                ]}
+                placeholder="------"
+                placeholderTextColor={isDark ? colors.textMuted : "#999"}
+                keyboardType="number-pad"
+                maxLength={6}
+                value={deleteOtp}
+                onChangeText={setDeleteOtp}
+              />
+
+              <TouchableOpacity
+                style={[
+                  styles.saveBtn,
+                  { backgroundColor: "#ef4444", marginTop: 20 },
+                ]}
+                onPress={handleConfirmDelete}
+                disabled={deleteLoading}
+              >
+                {deleteLoading ? (
+                  <ActivityIndicator color="white" />
+                ) : (
+                  <Text style={styles.saveBtnText}>
+                    Verify & Delete Account
+                  </Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.saveBtn,
+                  {
+                    backgroundColor: isDark ? colors.surface : "#f3f4f6",
+                    marginTop: 15,
+                  },
+                ]}
+                onPress={() => {
+                  setDeleteStep("reason");
+                  setDeleteOtp("");
+                }}
+                disabled={deleteLoading}
+              >
+                <Text
+                  style={[
+                    styles.saveBtnText,
+                    { color: isDark ? colors.text : "#333" },
+                  ]}
+                >
+                  Cancel Verification
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
         </ScrollView>
       </SafeAreaView>
     );

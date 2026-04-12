@@ -204,7 +204,7 @@ function getScreenForType(type: string): string {
       return '/(tabs)/maintenance';
     case 'application':
     case 'application_status':
-      return '/(tabs)/applications';
+      return '/(tabs)/bookings';
     case 'message':
     case 'broadcast_message':
       return '/(tabs)/messages';

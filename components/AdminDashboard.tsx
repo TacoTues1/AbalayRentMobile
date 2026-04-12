@@ -1,15 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 
@@ -193,7 +193,6 @@ export default function AdminDashboard() {
         email: userForm.email.trim() || null,
         phone: userForm.phone.trim() || null,
         role: userForm.role.toLowerCase(),
-        updated_at: new Date().toISOString(),
       };
 
       const { error } = await supabase
@@ -324,7 +323,10 @@ export default function AdminDashboard() {
               {property.title || "Untitled Property"}
             </Text>
             <Text style={styles.itemSubtitle}>
-              {property.city || "Unknown City"} •{" "}
+              {[property.city, property.state_province]
+                .filter(Boolean)
+                .join(", ") || "Unknown location"}
+              {" • "}
               {formatCurrency(toNumber(property.price))}
             </Text>
             <Text style={styles.itemMeta}>

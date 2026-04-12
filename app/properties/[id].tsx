@@ -122,9 +122,9 @@ export default function PropertyDetail() {
 
     if (primaryOccupancy) {
       setHasActiveOccupancy(true);
-      setOccupiedPropertyTitle(
-        primaryOccupancy.property?.title || "a property",
-      );
+      const p = primaryOccupancy.property as any;
+      const t = Array.isArray(p) ? p[0]?.title : p?.title;
+      setOccupiedPropertyTitle(t || "a property");
       return;
     }
 
@@ -144,9 +144,9 @@ export default function PropertyDetail() {
 
       if (parentOccupancy) {
         setHasActiveOccupancy(true);
-        setOccupiedPropertyTitle(
-          parentOccupancy.property?.title || "a property",
-        );
+        const p = parentOccupancy.property as any;
+        const t = Array.isArray(p) ? p[0]?.title : p?.title;
+        setOccupiedPropertyTitle(t || "a property");
         return;
       }
     }
@@ -237,16 +237,23 @@ export default function PropertyDetail() {
       return;
     }
 
-    setProperty(propertyData);
-    if (propertyData.landlord) {
+    const landlordId =
+      propertyData.landlord ||
+      propertyData.landlord_id ||
+      propertyData.owner_id ||
+      propertyData.user_id ||
+      null;
+
+    setProperty({ ...propertyData, landlord: landlordId });
+    if (landlordId) {
       const { data: landlordData } = await supabase
         .from("profiles")
         .select("*")
-        .eq("id", propertyData.landlord)
+        .eq("id", landlordId)
         .maybeSingle();
       if (landlordData) setLandlordProfile(landlordData);
 
-      await loadLandlordRating(propertyData.landlord);
+      await loadLandlordRating(landlordId);
     }
     setLoading(false);
   };
@@ -299,7 +306,29 @@ export default function PropertyDetail() {
       .eq("is_booked", false)
       .gte("start_time", new Date().toISOString())
       .order("start_time", { ascending: true });
-    if (data) setTimeSlots(data);
+
+    const { data: activeBookedSlots } = await supabase
+      .from("bookings")
+      .select("start_time, end_time")
+      .eq("property_id", id)
+      .eq("landlord", landlordId)
+      .in("status", ["pending", "pending_approval", "approved", "accepted"]);
+
+    if (data) {
+      const bookedKeys = new Set(
+        (activeBookedSlots || []).map(
+          (b: any) => `${String(b.start_time)}|${String(b.end_time)}`,
+        ),
+      );
+
+      const filtered = data.filter(
+        (slot: any) =>
+          !bookedKeys.has(
+            `${String(slot.start_time)}|${String(slot.end_time)}`,
+          ),
+      );
+      setTimeSlots(filtered);
+    }
   };
 
   // --- HELPER: Extract Coordinates (Ported from Next.js) ---
@@ -354,6 +383,7 @@ export default function PropertyDetail() {
   };
 
   const handleCancelBooking = () => {
+    if (submitting) return;
     setShowBookingOptions(false);
     setSelectedSlotId("");
     setBookingNote("");
@@ -416,8 +446,90 @@ export default function PropertyDetail() {
       }
 
       // 3. Create Booking
-      const slot = timeSlots.find((s) => s.id === selectedSlotId);
+      const slot = timeSlots.find(
+        (s) => String(s.id) === String(selectedSlotId),
+      );
       if (!slot) throw new Error("Time slot not found.");
+
+      const { data: latestSlot, error: latestSlotError } = await supabase
+        .from("available_time_slots")
+        .select("id, landlord_id, start_time, end_time, is_booked")
+        .eq("id", slot.id)
+        .maybeSingle();
+
+      if (latestSlotError || !latestSlot || latestSlot.is_booked) {
+        await loadTimeSlots(property.landlord);
+        throw new Error(
+          "The selected schedule is not available anymore. Please choose another slot.",
+        );
+      }
+
+      let didReserveSlot = false;
+
+      // Prefer lock by exact slot ID, then fallback to matching time range.
+      const { data: lockedByIdRows, error: lockByIdError } = await supabase
+        .from("available_time_slots")
+        .update({ is_booked: true })
+        .eq("id", latestSlot.id)
+        .eq("is_booked", false)
+        .select("id");
+
+      if (!lockByIdError && lockedByIdRows && lockedByIdRows.length > 0) {
+        didReserveSlot = true;
+      }
+
+      if (!didReserveSlot) {
+        const { data: lockedByRangeRows, error: lockByRangeError } =
+          await supabase
+            .from("available_time_slots")
+            .update({ is_booked: true })
+            .eq("landlord_id", latestSlot.landlord_id)
+            .eq("start_time", latestSlot.start_time)
+            .eq("end_time", latestSlot.end_time)
+            .eq("is_booked", false)
+            .select("id");
+
+        if (
+          !lockByRangeError &&
+          lockedByRangeRows &&
+          lockedByRangeRows.length > 0
+        ) {
+          didReserveSlot = true;
+        } else {
+          const { data: slotConflict, error: slotConflictError } =
+            await supabase
+              .from("bookings")
+              .select("id")
+              .eq("property_id", id)
+              .eq("landlord", property.landlord)
+              .eq("start_time", latestSlot.start_time)
+              .eq("end_time", latestSlot.end_time)
+              .in("status", [
+                "pending",
+                "pending_approval",
+                "approved",
+                "accepted",
+              ])
+              .maybeSingle();
+
+          if (slotConflictError) {
+            throw slotConflictError;
+          }
+
+          if (slotConflict) {
+            await loadTimeSlots(property.landlord);
+            throw new Error(
+              "Failed to reserve the selected schedule. Please choose another slot.",
+            );
+          }
+
+          // If no active booking conflict exists, continue and rely on booking record.
+          console.log(
+            "Slot lock fallback: proceeding without is_booked lock",
+            lockByIdError || lockByRangeError || "no rows updated",
+          );
+        }
+      }
 
       const { data: newBooking, error: bookingError } = await supabase
         .from("bookings")
@@ -425,25 +537,37 @@ export default function PropertyDetail() {
           property_id: id,
           tenant: session.user.id,
           landlord: property.landlord,
-          start_time: slot.start_time,
-          end_time: slot.end_time,
-          booking_date: slot.start_time,
-          time_slot_id: slot.id,
+          start_time: latestSlot.start_time,
+          end_time: latestSlot.end_time,
+          booking_date: latestSlot.start_time,
+          time_slot_id: latestSlot.id,
           status: "pending",
           notes: bookingNote || "No message provided",
         })
         .select()
         .single();
 
-      if (bookingError) throw bookingError;
+      if (bookingError) {
+        if (didReserveSlot) {
+          await supabase
+            .from("available_time_slots")
+            .update({ is_booked: false })
+            .eq("landlord_id", latestSlot.landlord_id)
+            .eq("start_time", latestSlot.start_time)
+            .eq("end_time", latestSlot.end_time);
+        }
+        throw bookingError;
+      }
 
-      // 4. Update Slot
-      await supabase
-        .from("available_time_slots")
-        .update({ is_booked: true })
-        .eq("id", slot.id);
+      // Best-effort sync for schemas/policies where lock fallback path was used.
+      if (!didReserveSlot) {
+        await supabase
+          .from("available_time_slots")
+          .update({ is_booked: true })
+          .eq("id", latestSlot.id);
+      }
 
-      // 5. Notifications (Supabase + API/SMS)
+      // 5. Notifications (best-effort, non-blocking)
       if (property.landlord) {
         // In-App (Supabase) - REMOVED due to RLS. Handled via /api/notify if backend supports.
         // await createNotification(
@@ -453,33 +577,51 @@ export default function PropertyDetail() {
         //   { actor: session.user.id }
         // );
 
-        // Notify API (Email/System)
-        try {
-          const notifyTypes = ["new_booking", "booking_request", "booking_new"];
-          for (const notifyType of notifyTypes) {
-            const notifyRes = await fetch(`${API_URL}/api/notify`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                type: notifyType,
-                recordId: newBooking.id,
-                bookingId: newBooking.id,
-                actorId: session.user.id,
-              }),
-            });
+        // Notify API (Email/System) - do not block booking completion.
+        if (API_URL) {
+          void (async () => {
+            try {
+              const notifyTypes = [
+                "new_booking",
+                "booking_request",
+                "booking_new",
+              ];
 
-            if (notifyRes.ok) {
-              break;
+              for (const notifyType of notifyTypes) {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 5000);
+
+                try {
+                  const notifyRes = await fetch(`${API_URL}/api/notify`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      type: notifyType,
+                      recordId: newBooking.id,
+                      bookingId: newBooking.id,
+                      actorId: session.user.id,
+                    }),
+                    signal: controller.signal,
+                  });
+
+                  if (notifyRes.ok) {
+                    clearTimeout(timeout);
+                    break;
+                  }
+                } finally {
+                  clearTimeout(timeout);
+                }
+              }
+            } catch (e) {
+              console.log("Notify API Error:", e);
             }
-          }
-        } catch (e) {
-          console.log("Notify API Error:", e);
+          })();
         }
 
         // SMS Notification
-        if (landlordProfile?.phone) {
+        if (API_URL && landlordProfile?.phone) {
           try {
-            fetch(`${API_URL}/api/send-sms`, {
+            void fetch(`${API_URL}/api/send-sms`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -527,7 +669,9 @@ export default function PropertyDetail() {
     router.push({
       pathname: "/getDirections",
       params: {
-        to: property.address + ", " + property.city,
+        to:
+          fullLocation ||
+          [property.address, cityWithState].filter(Boolean).join(", "),
         lat: lat.toString(),
         lng: lng.toString(),
         auto: useCurrent ? "true" : "false",
@@ -598,6 +742,17 @@ export default function PropertyDetail() {
     !isOwner &&
     !isLandlordRole &&
     !activeOccupancyCheck(hasActiveOccupancy, occupiedPropertyTitle);
+  const cityWithState = [property.city, property.state_province]
+    .filter(Boolean)
+    .join(", ");
+  const fullLocation = [
+    property.address,
+    cityWithState,
+    property.zip,
+    property.country,
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   // Stats calculation
   const avgRating =
@@ -892,7 +1047,7 @@ export default function PropertyDetail() {
                 color: isDark ? colors.textSecondary : "#666",
               }}
             >
-              {property.address}, {property.city} {property.zip}
+              {fullLocation || "Location not set"}
             </Text>
           </View>
 
@@ -1583,7 +1738,7 @@ export default function PropertyDetail() {
                   }}
                   numberOfLines={1}
                 >
-                  {property.address}, {property.city}
+                  {fullLocation || "Location not set"}
                 </Text>
                 <TouchableOpacity onPress={() => handleDirections(true)}>
                   <Text
@@ -1781,7 +1936,7 @@ export default function PropertyDetail() {
                           color: isDark ? colors.text : "#000",
                         }}
                       >
-                        {property.address}, {property.city} {property.zip}
+                        {fullLocation || "Location not set"}
                       </Text>
                     </View>
                   )}
@@ -2063,7 +2218,7 @@ export default function PropertyDetail() {
                 const firstDay = new Date(year, month, 1).getDay();
 
                 const selectedSlotData = timeSlots.find(
-                  (s) => s.id === selectedSlotId,
+                  (s) => String(s.id) === String(selectedSlotId),
                 );
                 const selectedDateKey = selectedSlotData
                   ? `${new Date(selectedSlotData.start_time).getFullYear()}-${String(new Date(selectedSlotData.start_time).getMonth() + 1).padStart(2, "0")}-${String(new Date(selectedSlotData.start_time).getDate()).padStart(2, "0")}`
@@ -2139,7 +2294,7 @@ export default function PropertyDetail() {
                             onPress={() => {
                               const slots = slotsByDate[dateKey];
                               if (slots && slots.length > 0)
-                                setSelectedSlotId(slots[0].id);
+                                setSelectedSlotId(String(slots[0].id));
                             }}
                             style={[
                               styles.dayCell,
@@ -2201,40 +2356,76 @@ export default function PropertyDetail() {
                             marginTop: 5,
                           }}
                         >
-                          {slotsByDate[selectedDateKey]?.map((slot: any) => {
-                            const isActive = selectedSlotId === slot.id;
-                            return (
-                              <TouchableOpacity
-                                key={slot.id}
-                                onPress={() => setSelectedSlotId(slot.id)}
-                                style={[
-                                  styles.timeChip,
-                                  {
-                                    backgroundColor: isDark
-                                      ? colors.surface
-                                      : "#f3f4f6",
-                                    borderColor: isDark
-                                      ? colors.cardBorder
-                                      : "#eee",
-                                  },
-                                  isActive && styles.timeChipActive,
-                                ]}
-                              >
-                                <Text
+                          {[...(slotsByDate[selectedDateKey] || [])]
+                            .sort(
+                              (a: any, b: any) =>
+                                new Date(a.start_time).getTime() -
+                                new Date(b.start_time).getTime(),
+                            )
+                            .map((slot: any) => {
+                              const sortedDaySlots = [
+                                ...(slotsByDate[selectedDateKey] || []),
+                              ].sort(
+                                (a: any, b: any) =>
+                                  new Date(a.start_time).getTime() -
+                                  new Date(b.start_time).getTime(),
+                              );
+                              const slotStart = new Date(slot.start_time);
+                              const slotEnd = new Date(slot.end_time);
+                              const isMorning = slotStart.getHours() < 12;
+                              const periodSlots = sortedDaySlots.filter(
+                                (s: any) => {
+                                  const h = new Date(s.start_time).getHours();
+                                  return isMorning ? h < 12 : h >= 12;
+                                },
+                              );
+                              const periodIndex =
+                                periodSlots.findIndex(
+                                  (s: any) => String(s.id) === String(slot.id),
+                                ) + 1;
+                              const slotLabel = `${isMorning ? "AM" : "PM"} ${Math.max(periodIndex, 1)}`;
+                              const isActive =
+                                String(selectedSlotId) === String(slot.id);
+                              return (
+                                <TouchableOpacity
+                                  key={slot.id}
+                                  onPress={() =>
+                                    setSelectedSlotId(String(slot.id))
+                                  }
                                   style={[
-                                    styles.timeChipText,
-                                    { color: isDark ? colors.text : "#333" },
-                                    isActive && { color: "white" },
+                                    styles.timeChip,
+                                    {
+                                      backgroundColor: isDark
+                                        ? colors.surface
+                                        : "#f3f4f6",
+                                      borderColor: isDark
+                                        ? colors.cardBorder
+                                        : "#eee",
+                                    },
+                                    isActive && styles.timeChipActive,
                                   ]}
                                 >
-                                  {new Date(slot.start_time).toLocaleTimeString(
-                                    [],
-                                    { hour: "numeric", minute: "2-digit" },
-                                  )}
-                                </Text>
-                              </TouchableOpacity>
-                            );
-                          })}
+                                  <Text
+                                    style={[
+                                      styles.timeChipText,
+                                      { color: isDark ? colors.text : "#333" },
+                                      isActive && { color: "white" },
+                                    ]}
+                                  >
+                                    {slotLabel} •{" "}
+                                    {slotStart.toLocaleTimeString([], {
+                                      hour: "numeric",
+                                      minute: "2-digit",
+                                    })}
+                                    {" - "}
+                                    {slotEnd.toLocaleTimeString([], {
+                                      hour: "numeric",
+                                      minute: "2-digit",
+                                    })}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
                         </View>
                       </View>
                     )}
@@ -2320,6 +2511,34 @@ export default function PropertyDetail() {
               <View style={{ height: 20 }} />
             </ScrollView>
           </KeyboardAvoidingView>
+
+          {submitting && (
+            <View style={styles.bookingSubmittingOverlay}>
+              <View
+                style={[
+                  styles.bookingSubmittingCard,
+                  {
+                    backgroundColor: isDark ? colors.surface : "white",
+                    borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                  },
+                ]}
+              >
+                <ActivityIndicator
+                  size="large"
+                  color={isDark ? colors.text : "#111"}
+                />
+                <Text
+                  style={[
+                    styles.bookingSubmittingText,
+                    { color: isDark ? colors.text : "#111" },
+                  ]}
+                >
+                  Please wait, we are confirming your booking. Please do not
+                  close this app.
+                </Text>
+              </View>
+            </View>
+          )}
         </View>
       </Modal>
 
@@ -2828,5 +3047,28 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     padding: 24,
     maxHeight: "90%",
+  },
+  bookingSubmittingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  bookingSubmittingCard: {
+    width: "100%",
+    maxWidth: 360,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+    alignItems: "center",
+  },
+  bookingSubmittingText: {
+    marginTop: 14,
+    textAlign: "center",
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 20,
   },
 });

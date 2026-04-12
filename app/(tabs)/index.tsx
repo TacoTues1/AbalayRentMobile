@@ -155,10 +155,36 @@ export default function Dashboard() {
           onPress: async () => {
             setDeleting(true);
             try {
-              await supabase
-                .from("profiles")
-                .delete()
-                .eq("id", session.user.id);
+              const {
+                data: { session: latestSession },
+              } = await supabase.auth.getSession();
+
+              const { error: deleteAccountError } =
+                await supabase.functions.invoke("delete-account", {
+                  headers: latestSession?.access_token
+                    ? {
+                        Authorization: `Bearer ${latestSession.access_token}`,
+                      }
+                    : undefined,
+                });
+
+              if (deleteAccountError) {
+                const message = String(deleteAccountError.message || "");
+                const functionUnavailable =
+                  /404|not found|delete-account/i.test(message);
+
+                if (!functionUnavailable) {
+                  throw deleteAccountError;
+                }
+
+                const { error: profileDeleteError } = await supabase
+                  .from("profiles")
+                  .delete()
+                  .eq("id", session.user.id);
+
+                if (profileDeleteError) throw profileDeleteError;
+              }
+
               handleSignOut(); // Reuse logout logic
             } catch (error: any) {
               Alert.alert("Error", error.message);
@@ -287,7 +313,10 @@ export default function Dashboard() {
         </View>
 
         <TouchableOpacity
-          style={styles.favoriteBtn}
+          style={[
+            styles.favoriteBtn,
+            isDark && { backgroundColor: colors.card },
+          ]}
           onPress={() => router.push("/favorites")}
           activeOpacity={0.8}
         >

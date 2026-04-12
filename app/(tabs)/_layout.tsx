@@ -681,9 +681,11 @@ export default function TabLayout() {
       <Tabs.Screen name="payments" options={{ href: null }} />
       <Tabs.Screen name="schedule" options={{ href: null }} />
       <Tabs.Screen name="bookings" options={{ href: null }} />
-      <Tabs.Screen name="applications" options={{ href: null }} />
       <Tabs.Screen name="terms" options={{ href: null }} />
-      <Tabs.Screen name="assigntenant" options={{ href: null }} />
+      <Tabs.Screen
+        name="assigntenant"
+        options={{ href: null, tabBarStyle: { display: "none" } }}
+      />
       <Tabs.Screen name="landlords" options={{ href: null }} />
       <Tabs.Screen name="landlord/[id]" options={{ href: null }} />
       <Tabs.Screen name="active-properties" options={{ href: null }} />
