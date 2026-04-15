@@ -24,12 +24,15 @@ import {
     getStateOptionsForCountry,
 } from "../../lib/locationData";
 import { supabase } from "../../lib/supabase";
+import { useTheme } from "../../lib/theme";
 
 const { width } = Dimensions.get("window");
 
 export default function NewProperty() {
   const router = useRouter();
+  const { isDark, colors } = useTheme();
   const [session, setSession] = useState<any>(null);
+  const [profileRole, setProfileRole] = useState("");
   const [loading, setLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [uploading, setUploading] = useState(false);
@@ -115,12 +118,13 @@ export default function NewProperty() {
   const bedTypes = ["Single Bed", "Double Bed", "Triple Bed"];
 
   const availableAmenities = [
+    "Kitchen",
     "Pool",
     "TV",
     "Elevator",
     "Air conditioning",
     "Heating",
-    "CCTV",
+    "Basketball court",
     "Washing machine",
     "Dryer",
     "Parking",
@@ -128,14 +132,65 @@ export default function NewProperty() {
     "Security",
     "Balcony",
     "Garden",
+    "Kid's Playground",
     "Pet friendly",
-    "Not Furnished",
-    "Fully Furnished",
-    "Semi-Furnished",
+    "Furnished",
     "Carbon monoxide alarm",
     "Smoke alarm",
     "Fire extinguisher",
     "First aid kit",
+    "WiFi",
+    "Cable TV",
+    "Workspace",
+    "Study desk",
+    "Wardrobe",
+    "Closet",
+    "Hot water",
+    "Refrigerator",
+    "Microwave",
+    "Oven",
+    "Dishwasher",
+    "Coffee maker",
+    "24/7 Security",
+    "CCTV",
+    "Gated community",
+    "Doorman",
+    "Private entrance",
+    "Fire exit",
+    "Emergency lighting",
+    "Beach access",
+    "Mountain view",
+    "City view",
+    "BBQ grill",
+    "Outdoor dining area",
+    "Patio",
+    "Terrace",
+    "Game room",
+    "Billiards",
+    "Table tennis",
+    "Sauna",
+    "Spa",
+    "Jacuzzi",
+    "Power backup",
+    "Generator",
+    "Solar panels",
+    "Water heater",
+    "Water tank",
+    "Deep well",
+    "Garbage disposal",
+    "Recycling bins",
+    "Bicycle parking",
+    "Motorcycle parking",
+    "Shuttle service",
+    "Transport service",
+    "Cleaning service",
+    "Laundry service",
+    "Keycard access",
+    "Smart lock",
+    "Soundproof rooms",
+    "Non-smoking rooms",
+    "Wheelchair accessible",
+    "Ramp access",
   ];
 
   useEffect(() => {
@@ -146,15 +201,21 @@ export default function NewProperty() {
       }
       setSession(session);
 
-      // Role guard: only landlords can add properties
+      // Role guard: allow landlord and admin
       const { data: profile } = await supabase
         .from("profiles")
         .select("role")
         .eq("id", session.user.id)
         .single();
 
-      if (profile?.role !== "landlord") {
-        Alert.alert("Access Denied", "Only landlords can add properties.");
+      const normalizedRole = String(profile?.role || "").toLowerCase();
+      setProfileRole(normalizedRole);
+
+      if (normalizedRole !== "landlord" && normalizedRole !== "admin") {
+        Alert.alert(
+          "Access Denied",
+          "Only landlords and admins can add properties.",
+        );
         router.back();
       }
     });
@@ -298,7 +359,11 @@ export default function NewProperty() {
     if (error) Alert.alert("Error", error.message);
     else {
       Alert.alert("Success", "Property listed successfully!");
-      router.replace("/(tabs)/landlordproperties");
+      if (profileRole === "admin") {
+        router.replace("/admin");
+      } else {
+        router.replace("/(tabs)/landlordproperties");
+      }
     }
   };
 
@@ -438,7 +503,12 @@ export default function NewProperty() {
   };
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        { backgroundColor: isDark ? colors.background : "#FAF9F6" },
+      ]}
+    >
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -452,12 +522,30 @@ export default function NewProperty() {
               marginBottom: 10,
             }}
           >
-            <Text style={styles.headerTitle}>Add Rent</Text>
-            <Text style={{ fontSize: 12, color: "#666", fontWeight: "600" }}>
+            <Text
+              style={[
+                styles.headerTitle,
+                { color: isDark ? colors.text : "#111827" },
+              ]}
+            >
+              Add Rent
+            </Text>
+            <Text
+              style={{
+                fontSize: 12,
+                color: isDark ? colors.textMuted : "#666",
+                fontWeight: "600",
+              }}
+            >
               Step {currentStep} of 7
             </Text>
           </View>
-          <Text style={styles.headerSubtitle}>
+          <Text
+            style={[
+              styles.headerSubtitle,
+              { color: isDark ? colors.textMuted : "#6B7280" },
+            ]}
+          >
             Create a new listing for your portfolio.
           </Text>
         </View>
@@ -466,38 +554,111 @@ export default function NewProperty() {
         {currentStep === 1 && (
           <>
             {/* --- Rent Title --- */}
-            <View style={styles.card}>
-              <Text style={styles.inputLabel}>RENT TITLE *</Text>
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor: isDark ? colors.surface : "#FFFFFF",
+                  borderColor: isDark ? colors.cardBorder : "#F3F4F6",
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.textMuted : "#9CA3AF" },
+                ]}
+              >
+                RENT TITLE *
+              </Text>
               <TextInput
-                style={styles.hugeInput}
+                style={[
+                  styles.hugeInput,
+                  {
+                    backgroundColor: isDark ? colors.inputBg : "#F9FAFB",
+                    borderColor: isDark ? colors.inputBorder : "#F3F4F6",
+                    color: isDark ? colors.text : "#111",
+                  },
+                ]}
                 placeholder="Rent Title"
+                placeholderTextColor={isDark ? colors.textMuted : "#9CA3AF"}
                 value={form.title}
                 onChangeText={(t) => setForm({ ...form, title: t })}
               />
             </View>
 
             {/* --- Location --- */}
-            <View style={styles.card}>
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor: isDark ? colors.surface : "#FFFFFF",
+                  borderColor: isDark ? colors.cardBorder : "#F3F4F6",
+                },
+              ]}
+            >
               <View style={styles.cardHeader}>
-                <View style={styles.blackPill} />
-                <Text style={styles.cardTitle}>Location</Text>
+                <View
+                  style={[
+                    styles.blackPill,
+                    { backgroundColor: isDark ? colors.text : "#000" },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.cardTitle,
+                    { color: isDark ? colors.text : "#111827" },
+                  ]}
+                >
+                  Location
+                </Text>
               </View>
 
               <View style={styles.row}>
                 <View style={[styles.fieldGroup, { flex: 1 }]}>
-                  <Text style={styles.subLabel}>Bldg No.</Text>
+                  <Text
+                    style={[
+                      styles.subLabel,
+                      { color: isDark ? colors.textMuted : "#6B7280" },
+                    ]}
+                  >
+                    Bldg No.
+                  </Text>
                   <TextInput
-                    style={styles.input}
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: isDark ? colors.inputBg : "#FFFFFF",
+                        borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                        color: isDark ? colors.text : "#111",
+                      },
+                    ]}
                     placeholder="Bldg 5"
+                    placeholderTextColor={isDark ? colors.textMuted : "#9CA3AF"}
                     value={form.building_no}
                     onChangeText={(t) => setForm({ ...form, building_no: t })}
                   />
                 </View>
                 <View style={[styles.fieldGroup, { flex: 2, marginLeft: 10 }]}>
-                  <Text style={styles.subLabel}>Street *</Text>
+                  <Text
+                    style={[
+                      styles.subLabel,
+                      { color: isDark ? colors.textMuted : "#6B7280" },
+                    ]}
+                  >
+                    Street *
+                  </Text>
                   <TextInput
-                    style={styles.input}
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: isDark ? colors.inputBg : "#FFFFFF",
+                        borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                        color: isDark ? colors.text : "#111",
+                      },
+                    ]}
                     placeholder="Street"
+                    placeholderTextColor={isDark ? colors.textMuted : "#9CA3AF"}
                     value={form.street}
                     onChangeText={(t) => setForm({ ...form, street: t })}
                   />
@@ -506,19 +667,49 @@ export default function NewProperty() {
 
               <View style={styles.row}>
                 <View style={[styles.fieldGroup, { flex: 2 }]}>
-                  <Text style={styles.subLabel}>Barangay *</Text>
+                  <Text
+                    style={[
+                      styles.subLabel,
+                      { color: isDark ? colors.textMuted : "#6B7280" },
+                    ]}
+                  >
+                    Barangay *
+                  </Text>
                   <TextInput
-                    style={styles.input}
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: isDark ? colors.inputBg : "#FFFFFF",
+                        borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                        color: isDark ? colors.text : "#111",
+                      },
+                    ]}
                     placeholder="Barangay"
+                    placeholderTextColor={isDark ? colors.textMuted : "#9CA3AF"}
                     value={form.address}
                     onChangeText={(t) => setForm({ ...form, address: t })}
                   />
                 </View>
                 <View style={[styles.fieldGroup, { flex: 1, marginLeft: 10 }]}>
-                  <Text style={styles.subLabel}>City *</Text>
+                  <Text
+                    style={[
+                      styles.subLabel,
+                      { color: isDark ? colors.textMuted : "#6B7280" },
+                    ]}
+                  >
+                    City *
+                  </Text>
                   <TextInput
-                    style={styles.input}
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: isDark ? colors.inputBg : "#FFFFFF",
+                        borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                        color: isDark ? colors.text : "#111",
+                      },
+                    ]}
                     placeholder="City"
+                    placeholderTextColor={isDark ? colors.textMuted : "#9CA3AF"}
                     value={form.city}
                     onChangeText={(t) => setForm({ ...form, city: t })}
                   />
@@ -527,31 +718,71 @@ export default function NewProperty() {
 
               <View style={styles.row}>
                 <View style={[styles.fieldGroup, { flex: 1 }]}>
-                  <Text style={styles.subLabel}>Country *</Text>
+                  <Text
+                    style={[
+                      styles.subLabel,
+                      { color: isDark ? colors.textMuted : "#6B7280" },
+                    ]}
+                  >
+                    Country *
+                  </Text>
                   <TouchableOpacity
-                    style={styles.pickerField}
+                    style={[
+                      styles.pickerField,
+                      {
+                        backgroundColor: isDark ? colors.inputBg : "#FFFFFF",
+                        borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                      },
+                    ]}
                     activeOpacity={0.8}
                     onPress={() => setShowCountryPicker(true)}
                   >
                     <Text
                       style={
                         form.country
-                          ? styles.pickerFieldText
-                          : styles.pickerFieldPlaceholder
+                          ? [
+                              styles.pickerFieldText,
+                              { color: isDark ? colors.text : "#111" },
+                            ]
+                          : [
+                              styles.pickerFieldPlaceholder,
+                              { color: isDark ? colors.textMuted : "#9CA3AF" },
+                            ]
                       }
                     >
                       {form.country || "Select country"}
                     </Text>
-                    <Ionicons name="chevron-down" size={16} color="#6B7280" />
+                    <Ionicons
+                      name="chevron-down"
+                      size={16}
+                      color={isDark ? colors.textMuted : "#6B7280"}
+                    />
                   </TouchableOpacity>
                 </View>
 
                 <View style={[styles.fieldGroup, { flex: 1, marginLeft: 10 }]}>
-                  <Text style={styles.subLabel}>State/Province *</Text>
+                  <Text
+                    style={[
+                      styles.subLabel,
+                      { color: isDark ? colors.textMuted : "#6B7280" },
+                    ]}
+                  >
+                    State/Province *
+                  </Text>
                   {form.country && stateOptions.length === 0 ? (
                     <TextInput
-                      style={styles.input}
+                      style={[
+                        styles.input,
+                        {
+                          backgroundColor: isDark ? colors.inputBg : "#FFFFFF",
+                          borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                          color: isDark ? colors.text : "#111",
+                        },
+                      ]}
                       placeholder="Type state/province"
+                      placeholderTextColor={
+                        isDark ? colors.textMuted : "#9CA3AF"
+                      }
                       value={form.state_province}
                       onChangeText={(t) =>
                         setForm({ ...form, state_province: t })
@@ -559,7 +790,13 @@ export default function NewProperty() {
                     />
                   ) : (
                     <TouchableOpacity
-                      style={styles.pickerField}
+                      style={[
+                        styles.pickerField,
+                        {
+                          backgroundColor: isDark ? colors.inputBg : "#FFFFFF",
+                          borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                        },
+                      ]}
                       activeOpacity={0.8}
                       disabled={!form.country}
                       onPress={() => {
@@ -569,8 +806,16 @@ export default function NewProperty() {
                       <Text
                         style={
                           form.state_province
-                            ? styles.pickerFieldText
-                            : styles.pickerFieldPlaceholder
+                            ? [
+                                styles.pickerFieldText,
+                                { color: isDark ? colors.text : "#111" },
+                              ]
+                            : [
+                                styles.pickerFieldPlaceholder,
+                                {
+                                  color: isDark ? colors.textMuted : "#9CA3AF",
+                                },
+                              ]
                         }
                       >
                         {form.state_province ||
@@ -581,7 +826,15 @@ export default function NewProperty() {
                       <Ionicons
                         name="chevron-down"
                         size={16}
-                        color={form.country ? "#6B7280" : "#9CA3AF"}
+                        color={
+                          form.country
+                            ? isDark
+                              ? colors.textMuted
+                              : "#6B7280"
+                            : isDark
+                              ? colors.textMuted
+                              : "#9CA3AF"
+                        }
                       />
                     </TouchableOpacity>
                   )}
@@ -590,10 +843,25 @@ export default function NewProperty() {
 
               <View style={styles.row}>
                 <View style={[styles.fieldGroup, { flex: 1 }]}>
-                  <Text style={styles.subLabel}>ZIP Code*</Text>
+                  <Text
+                    style={[
+                      styles.subLabel,
+                      { color: isDark ? colors.textMuted : "#6B7280" },
+                    ]}
+                  >
+                    ZIP Code*
+                  </Text>
                   <TextInput
-                    style={styles.input}
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: isDark ? colors.inputBg : "#FFFFFF",
+                        borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                        color: isDark ? colors.text : "#111",
+                      },
+                    ]}
                     placeholder=""
+                    placeholderTextColor={isDark ? colors.textMuted : "#9CA3AF"}
                     value={form.zip}
                     onChangeText={(t) => setForm({ ...form, zip: t })}
                   />
@@ -601,11 +869,25 @@ export default function NewProperty() {
               </View>
 
               <View style={styles.fieldGroup}>
-                <Text style={styles.subLabel}>Google Map Link (Preferred)</Text>
+                <Text
+                  style={[
+                    styles.subLabel,
+                    { color: isDark ? colors.textMuted : "#6B7280" },
+                  ]}
+                >
+                  Google Map Link (Preferred)
+                </Text>
                 <TextInput
-                  style={[styles.input, { color: "#2563EB" }]}
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: isDark ? colors.inputBg : "#FFFFFF",
+                      borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                      color: "#2563EB",
+                    },
+                  ]}
                   placeholder="https://maps.app.goo.gl/..."
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={isDark ? colors.textMuted : "#9CA3AF"}
                   value={form.location_link}
                   onChangeText={(t) => setForm({ ...form, location_link: t })}
                 />
@@ -618,26 +900,76 @@ export default function NewProperty() {
         {currentStep === 2 && (
           <>
             {/* --- Contact --- */}
-            <View style={styles.card}>
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor: isDark ? colors.surface : "#FFFFFF",
+                  borderColor: isDark ? colors.cardBorder : "#F3F4F6",
+                },
+              ]}
+            >
               <View style={styles.cardHeader}>
-                <View style={styles.blackPill} />
-                <Text style={styles.cardTitle}>Contact</Text>
+                <View
+                  style={[
+                    styles.blackPill,
+                    { backgroundColor: isDark ? colors.text : "#000" },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.cardTitle,
+                    { color: isDark ? colors.text : "#111827" },
+                  ]}
+                >
+                  Contact
+                </Text>
               </View>
               <View style={styles.fieldGroup}>
-                <Text style={styles.subLabel}>Phone *</Text>
+                <Text
+                  style={[
+                    styles.subLabel,
+                    { color: isDark ? colors.textMuted : "#6B7280" },
+                  ]}
+                >
+                  Phone *
+                </Text>
                 <TextInput
-                  style={styles.input}
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: isDark ? colors.inputBg : "#FFFFFF",
+                      borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                      color: isDark ? colors.text : "#111",
+                    },
+                  ]}
                   placeholder="Phone number"
+                  placeholderTextColor={isDark ? colors.textMuted : "#9CA3AF"}
                   keyboardType="phone-pad"
                   value={form.owner_phone}
                   onChangeText={(t) => setForm({ ...form, owner_phone: t })}
                 />
               </View>
               <View style={styles.fieldGroup}>
-                <Text style={styles.subLabel}>Email *</Text>
+                <Text
+                  style={[
+                    styles.subLabel,
+                    { color: isDark ? colors.textMuted : "#6B7280" },
+                  ]}
+                >
+                  Email *
+                </Text>
                 <TextInput
-                  style={styles.input}
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: isDark ? colors.inputBg : "#FFFFFF",
+                      borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                      color: isDark ? colors.text : "#111",
+                    },
+                  ]}
                   placeholder="Email Address"
+                  placeholderTextColor={isDark ? colors.textMuted : "#9CA3AF"}
                   keyboardType="email-address"
                   autoCapitalize="none"
                   value={form.owner_email}
@@ -652,16 +984,51 @@ export default function NewProperty() {
         {currentStep === 3 && (
           <>
             {/* --- Details --- */}
-            <View style={styles.card}>
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor: isDark ? colors.surface : "#FFFFFF",
+                  borderColor: isDark ? colors.cardBorder : "#F3F4F6",
+                },
+              ]}
+            >
               <View style={styles.cardHeader}>
-                <View style={styles.blackPill} />
-                <Text style={styles.cardTitle}>Details</Text>
+                <View
+                  style={[
+                    styles.blackPill,
+                    { backgroundColor: isDark ? colors.text : "#000" },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.cardTitle,
+                    { color: isDark ? colors.text : "#111827" },
+                  ]}
+                >
+                  Details
+                </Text>
               </View>
 
               <View style={styles.fieldGroup}>
-                <Text style={styles.labelDark}>Monthly Price (₱) *</Text>
+                <Text
+                  style={[
+                    styles.labelDark,
+                    { color: isDark ? colors.textSecondary : "#374151" },
+                  ]}
+                >
+                  Monthly Price (₱) *
+                </Text>
                 <TextInput
-                  style={styles.inputBold}
+                  style={[
+                    styles.inputBold,
+                    {
+                      backgroundColor: isDark ? colors.inputBg : "#F9FAFB",
+                      borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                      color: isDark ? colors.text : "#111",
+                    },
+                  ]}
+                  placeholderTextColor={isDark ? colors.textMuted : "#9CA3AF"}
                   keyboardType="numeric"
                   value={form.price}
                   onChangeText={(t) => setForm({ ...form, price: t })}
@@ -670,18 +1037,46 @@ export default function NewProperty() {
 
               <View style={styles.row}>
                 <View style={[styles.fieldGroup, { flex: 1 }]}>
-                  <Text style={styles.subLabel}>Beds</Text>
+                  <Text
+                    style={[
+                      styles.subLabel,
+                      { color: isDark ? colors.textMuted : "#6B7280" },
+                    ]}
+                  >
+                    Beds
+                  </Text>
                   <TextInput
-                    style={styles.input}
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: isDark ? colors.inputBg : "#FFFFFF",
+                        borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                        color: isDark ? colors.text : "#111",
+                      },
+                    ]}
                     keyboardType="numeric"
                     value={form.bedrooms}
                     onChangeText={(t) => setForm({ ...form, bedrooms: t })}
                   />
                 </View>
                 <View style={[styles.fieldGroup, { flex: 1, marginLeft: 10 }]}>
-                  <Text style={styles.subLabel}>Baths</Text>
+                  <Text
+                    style={[
+                      styles.subLabel,
+                      { color: isDark ? colors.textMuted : "#6B7280" },
+                    ]}
+                  >
+                    Baths
+                  </Text>
                   <TextInput
-                    style={styles.input}
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: isDark ? colors.inputBg : "#FFFFFF",
+                        borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                        color: isDark ? colors.text : "#111",
+                      },
+                    ]}
                     keyboardType="numeric"
                     value={form.bathrooms}
                     onChangeText={(t) => setForm({ ...form, bathrooms: t })}
@@ -691,9 +1086,23 @@ export default function NewProperty() {
 
               <View style={styles.row}>
                 <View style={[styles.fieldGroup, { flex: 1 }]}>
-                  <Text style={styles.subLabel}>Sqft</Text>
+                  <Text
+                    style={[
+                      styles.subLabel,
+                      { color: isDark ? colors.textMuted : "#6B7280" },
+                    ]}
+                  >
+                    Sqft
+                  </Text>
                   <TextInput
-                    style={styles.input}
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: isDark ? colors.inputBg : "#FFFFFF",
+                        borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                        color: isDark ? colors.text : "#111",
+                      },
+                    ]}
                     keyboardType="numeric"
                     value={form.area_sqft}
                     onChangeText={(t) => setForm({ ...form, area_sqft: t })}
@@ -705,11 +1114,20 @@ export default function NewProperty() {
                     { flex: 1, marginLeft: 10, position: "relative" },
                   ]}
                 >
-                  <Text style={styles.subLabel}>Status</Text>
+                  <Text
+                    style={[
+                      styles.subLabel,
+                      { color: isDark ? colors.textMuted : "#6B7280" },
+                    ]}
+                  >
+                    Status
+                  </Text>
                   <TouchableOpacity
                     style={[
                       styles.input,
                       {
+                        backgroundColor: isDark ? colors.inputBg : "#FFFFFF",
+                        borderColor: isDark ? colors.inputBorder : "#E5E7EB",
                         flexDirection: "row",
                         alignItems: "center",
                         justifyContent: "space-between",
@@ -718,14 +1136,23 @@ export default function NewProperty() {
                     ]}
                     onPress={() => setShowStatusPicker(true)}
                   >
-                    <Text style={{ fontSize: 14, color: "#111" }}>
+                    <Text
+                      style={{
+                        fontSize: 14,
+                        color: isDark ? colors.text : "#111",
+                      }}
+                    >
                       {form.status === "not available"
                         ? "Unavailable"
                         : form.status === "occupied"
                           ? "Occupied"
                           : "Available"}
                     </Text>
-                    <Ionicons name="chevron-down" size={16} color="#6B7280" />
+                    <Ionicons
+                      name="chevron-down"
+                      size={16}
+                      color={isDark ? colors.textMuted : "#6B7280"}
+                    />
                   </TouchableOpacity>
 
                   <Modal
@@ -745,7 +1172,7 @@ export default function NewProperty() {
                     >
                       <View
                         style={{
-                          backgroundColor: "#fff",
+                          backgroundColor: isDark ? colors.surface : "#fff",
                           width: "70%",
                           borderRadius: 12,
                           overflow: "hidden",
@@ -758,7 +1185,9 @@ export default function NewProperty() {
                               padding: 16,
                               borderBottomWidth:
                                 i === statuses.length - 1 ? 0 : 1,
-                              borderBottomColor: "#F3F4F6",
+                              borderBottomColor: isDark
+                                ? colors.border
+                                : "#F3F4F6",
                             }}
                             onPress={() => {
                               setForm({ ...form, status: s.value });
@@ -771,7 +1200,13 @@ export default function NewProperty() {
                                 fontWeight:
                                   form.status === s.value ? "bold" : "normal",
                                 color:
-                                  form.status === s.value ? "#111" : "#4B5563",
+                                  form.status === s.value
+                                    ? isDark
+                                      ? colors.text
+                                      : "#111"
+                                    : isDark
+                                      ? colors.textSecondary
+                                      : "#4B5563",
                                 textAlign: "center",
                               }}
                             >
@@ -792,15 +1227,48 @@ export default function NewProperty() {
         {currentStep === 4 && (
           <>
             {/* --- Payment Terms --- */}
-            <View style={styles.card}>
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor: isDark ? colors.surface : "#FFFFFF",
+                  borderColor: isDark ? colors.cardBorder : "#F3F4F6",
+                },
+              ]}
+            >
               <View style={styles.cardHeader}>
-                <View style={styles.blackPill} />
-                <Text style={styles.cardTitle}>Payment Terms</Text>
+                <View
+                  style={[
+                    styles.blackPill,
+                    { backgroundColor: isDark ? colors.text : "#000" },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.cardTitle,
+                    { color: isDark ? colors.text : "#111827" },
+                  ]}
+                >
+                  Payment Terms
+                </Text>
               </View>
 
-              <View style={styles.toggleBox}>
+              <View
+                style={[
+                  styles.toggleBox,
+                  {
+                    backgroundColor: isDark ? colors.card : "#F9FAFB",
+                    borderColor: isDark ? colors.cardBorder : "#F3F4F6",
+                  },
+                ]}
+              >
                 <View style={styles.toggleRow}>
-                  <Text style={styles.toggleLabel}>
+                  <Text
+                    style={[
+                      styles.toggleLabel,
+                      { color: isDark ? colors.text : "#374151" },
+                    ]}
+                  >
                     Require Security Deposit?
                   </Text>
                   <TouchableOpacity
@@ -812,7 +1280,11 @@ export default function NewProperty() {
                     }
                     style={[
                       styles.switch,
-                      form.has_security_deposit && styles.switchActive,
+                      { backgroundColor: isDark ? colors.border : "#E5E7EB" },
+                      form.has_security_deposit && [
+                        styles.switchActive,
+                        { backgroundColor: isDark ? colors.text : "#000" },
+                      ],
                     ]}
                   >
                     <View
@@ -841,9 +1313,14 @@ export default function NewProperty() {
                             : "square-outline"
                         }
                         size={20}
-                        color="black"
+                        color={isDark ? colors.text : "black"}
                       />
-                      <Text style={styles.checkboxLabel}>
+                      <Text
+                        style={[
+                          styles.checkboxLabel,
+                          { color: isDark ? colors.textSecondary : "#4B5563" },
+                        ]}
+                      >
                         Same as monthly rent
                       </Text>
                     </TouchableOpacity>
@@ -851,9 +1328,22 @@ export default function NewProperty() {
                       <TextInput
                         style={[
                           styles.input,
-                          { marginTop: 10, marginBottom: 0 },
+                          {
+                            marginTop: 10,
+                            marginBottom: 0,
+                            backgroundColor: isDark
+                              ? colors.inputBg
+                              : "#FFFFFF",
+                            borderColor: isDark
+                              ? colors.inputBorder
+                              : "#E5E7EB",
+                            color: isDark ? colors.text : "#111",
+                          },
                         ]}
                         placeholder="Amount (₱)"
+                        placeholderTextColor={
+                          isDark ? colors.textMuted : "#9CA3AF"
+                        }
                         keyboardType="numeric"
                         value={form.security_deposit_amount}
                         onChangeText={(t) =>
@@ -865,9 +1355,22 @@ export default function NewProperty() {
                 )}
               </View>
 
-              <View style={styles.toggleBox}>
+              <View
+                style={[
+                  styles.toggleBox,
+                  {
+                    backgroundColor: isDark ? colors.card : "#F9FAFB",
+                    borderColor: isDark ? colors.cardBorder : "#F3F4F6",
+                  },
+                ]}
+              >
                 <View style={styles.toggleRow}>
-                  <Text style={styles.toggleLabel}>
+                  <Text
+                    style={[
+                      styles.toggleLabel,
+                      { color: isDark ? colors.text : "#374151" },
+                    ]}
+                  >
                     Require Advance Payment?
                   </Text>
                   <TouchableOpacity
@@ -876,7 +1379,11 @@ export default function NewProperty() {
                     }
                     style={[
                       styles.switch,
-                      form.has_advance && styles.switchActive,
+                      { backgroundColor: isDark ? colors.border : "#E5E7EB" },
+                      form.has_advance && [
+                        styles.switchActive,
+                        { backgroundColor: isDark ? colors.text : "#000" },
+                      ],
                     ]}
                   >
                     <View
@@ -905,9 +1412,14 @@ export default function NewProperty() {
                             : "square-outline"
                         }
                         size={20}
-                        color="black"
+                        color={isDark ? colors.text : "black"}
                       />
-                      <Text style={styles.checkboxLabel}>
+                      <Text
+                        style={[
+                          styles.checkboxLabel,
+                          { color: isDark ? colors.textSecondary : "#4B5563" },
+                        ]}
+                      >
                         Same as monthly rent
                       </Text>
                     </TouchableOpacity>
@@ -915,9 +1427,22 @@ export default function NewProperty() {
                       <TextInput
                         style={[
                           styles.input,
-                          { marginTop: 10, marginBottom: 0 },
+                          {
+                            marginTop: 10,
+                            marginBottom: 0,
+                            backgroundColor: isDark
+                              ? colors.inputBg
+                              : "#FFFFFF",
+                            borderColor: isDark
+                              ? colors.inputBorder
+                              : "#E5E7EB",
+                            color: isDark ? colors.text : "#111",
+                          },
                         ]}
                         placeholder="Amount (₱)"
+                        placeholderTextColor={
+                          isDark ? colors.textMuted : "#9CA3AF"
+                        }
                         keyboardType="numeric"
                         value={form.advance_amount}
                         onChangeText={(t) =>
@@ -931,12 +1456,37 @@ export default function NewProperty() {
             </View>
 
             {/* --- Utilities --- */}
-            <View style={styles.card}>
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor: isDark ? colors.surface : "#FFFFFF",
+                  borderColor: isDark ? colors.cardBorder : "#F3F4F6",
+                },
+              ]}
+            >
               <View style={styles.cardHeader}>
-                <View style={styles.blackPill} />
-                <Text style={styles.cardTitle}>Utilities</Text>
+                <View
+                  style={[
+                    styles.blackPill,
+                    { backgroundColor: isDark ? colors.text : "#000" },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.cardTitle,
+                    { color: isDark ? colors.text : "#111827" },
+                  ]}
+                >
+                  Utilities
+                </Text>
               </View>
-              <Text style={styles.helperText}>
+              <Text
+                style={[
+                  styles.helperText,
+                  { color: isDark ? colors.textMuted : "#9CA3AF" },
+                ]}
+              >
                 Toggle which utilities are included free. Non-free utilities
                 will require a due date when assigning a tenant.
               </Text>
@@ -963,6 +1513,10 @@ export default function NewProperty() {
                     key={u.label}
                     style={[
                       styles.utilityRow,
+                      {
+                        backgroundColor: isDark ? colors.card : "#F9FAFB",
+                        borderColor: isDark ? colors.cardBorder : "#F3F4F6",
+                      },
                       isFree && styles.utilityRowActive,
                     ]}
                   >
@@ -986,6 +1540,7 @@ export default function NewProperty() {
                       <Text
                         style={[
                           styles.utilityLabel,
+                          { color: isDark ? colors.textSecondary : "#374151" },
                           isFree && { color: "#059669" },
                         ]}
                       >
@@ -1016,7 +1571,12 @@ export default function NewProperty() {
               <View
                 style={[
                   styles.utilityRow,
-                  { flexDirection: "column", alignItems: "stretch" },
+                  {
+                    flexDirection: "column",
+                    alignItems: "stretch",
+                    backgroundColor: isDark ? colors.card : "#F9FAFB",
+                    borderColor: isDark ? colors.cardBorder : "#F3F4F6",
+                  },
                 ]}
               >
                 <View
@@ -1095,7 +1655,7 @@ export default function NewProperty() {
                     <Text
                       style={{
                         fontSize: 13,
-                        color: "#4B5563",
+                        color: isDark ? colors.textSecondary : "#4B5563",
                         fontWeight: "bold",
                       }}
                     >
@@ -1158,25 +1718,71 @@ export default function NewProperty() {
         {currentStep === 5 && (
           <>
             {/* --- Description & Terms --- */}
-            <View style={styles.card}>
-              <Text style={styles.inputLabel}>DESCRIPTION</Text>
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor: isDark ? colors.surface : "#FFFFFF",
+                  borderColor: isDark ? colors.cardBorder : "#F3F4F6",
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.inputLabel,
+                  { color: isDark ? colors.textMuted : "#9CA3AF" },
+                ]}
+              >
+                DESCRIPTION
+              </Text>
               <TextInput
                 style={[
                   styles.input,
-                  { height: 100, textAlignVertical: "top" },
+                  {
+                    height: 100,
+                    textAlignVertical: "top",
+                    backgroundColor: isDark ? colors.inputBg : "#FFFFFF",
+                    borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                    color: isDark ? colors.text : "#111",
+                  },
                 ]}
                 multiline
                 placeholder="Describe the property..."
+                placeholderTextColor={isDark ? colors.textMuted : "#9CA3AF"}
                 value={form.description}
                 onChangeText={(t) => setForm({ ...form, description: t })}
               />
 
-              <Text style={[styles.inputLabel, { marginTop: 10 }]}>
+              <Text
+                style={[
+                  styles.inputLabel,
+                  {
+                    marginTop: 10,
+                    color: isDark ? colors.textMuted : "#9CA3AF",
+                  },
+                ]}
+              >
                 TERMS & CONDITIONS (PDF)
               </Text>
-              <View style={styles.pdfArea}>
+              <View
+                style={[
+                  styles.pdfArea,
+                  {
+                    backgroundColor: isDark ? colors.card : "#F9FAFB",
+                    borderColor: isDark ? colors.cardBorder : "#F3F4F6",
+                  },
+                ]}
+              >
                 {form.terms_conditions ? (
-                  <View style={styles.pdfUploaded}>
+                  <View
+                    style={[
+                      styles.pdfUploaded,
+                      {
+                        backgroundColor: isDark ? colors.surface : "#fff",
+                        borderColor: isDark ? colors.border : "#E5E7EB",
+                      },
+                    ]}
+                  >
                     <TouchableOpacity
                       onPress={() => Linking.openURL(form.terms_conditions)}
                       style={{ flexDirection: "row", alignItems: "center" }}
@@ -1197,7 +1803,12 @@ export default function NewProperty() {
                     </TouchableOpacity>
                   </View>
                 ) : (
-                  <Text style={styles.pdfEmpty}>
+                  <Text
+                    style={[
+                      styles.pdfEmpty,
+                      { color: isDark ? colors.textMuted : "#9CA3AF" },
+                    ]}
+                  >
                     No custom terms uploaded. The default system terms will be
                     used.
                   </Text>
@@ -1218,23 +1829,59 @@ export default function NewProperty() {
             </View>
 
             {/* --- Photos --- */}
-            <View style={styles.card}>
-              <Text style={styles.cardTitlePlain}>Photos</Text>
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor: isDark ? colors.surface : "#FFFFFF",
+                  borderColor: isDark ? colors.cardBorder : "#F3F4F6",
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.cardTitlePlain,
+                  { color: isDark ? colors.text : "#111827" },
+                ]}
+              >
+                Photos
+              </Text>
               <View style={styles.photoGrid}>
                 <TouchableOpacity
-                  style={styles.photoAddBox}
+                  style={[
+                    styles.photoAddBox,
+                    {
+                      backgroundColor: isDark ? colors.card : "#F9FAFB",
+                      borderColor: isDark ? colors.border : "#D1D5DB",
+                    },
+                  ]}
                   onPress={pickImage}
                   disabled={uploading || form.images.length >= 10}
                 >
                   {uploading ? (
-                    <ActivityIndicator color="#9CA3AF" />
+                    <ActivityIndicator
+                      color={isDark ? colors.textMuted : "#9CA3AF"}
+                    />
                   ) : (
-                    <Text style={styles.photoAddPlus}>+</Text>
+                    <Text
+                      style={[
+                        styles.photoAddPlus,
+                        { color: isDark ? colors.textMuted : "#9CA3AF" },
+                      ]}
+                    >
+                      +
+                    </Text>
                   )}
                 </TouchableOpacity>
                 {form.images.map((img, idx) => (
                   <View key={idx} style={styles.photoBox}>
-                    <Image source={{ uri: img }} style={styles.photoImg} />
+                    <Image
+                      source={{ uri: img }}
+                      style={[
+                        styles.photoImg,
+                        { borderColor: isDark ? colors.border : "#E5E7EB" },
+                      ]}
+                    />
                     <TouchableOpacity
                       onPress={() => removeImage(idx)}
                       style={styles.photoRemove}
@@ -1245,16 +1892,34 @@ export default function NewProperty() {
                 ))}
               </View>
               <TouchableOpacity
-                style={styles.uploadMultiBtn}
+                style={[
+                  styles.uploadMultiBtn,
+                  { backgroundColor: isDark ? colors.card : "#F3F4F6" },
+                ]}
                 onPress={pickImage}
               >
-                <Ionicons name="images-outline" size={16} color="#4B5563" />
-                <Text style={styles.uploadMultiText}>Upload Photo</Text>
+                <Ionicons
+                  name="images-outline"
+                  size={16}
+                  color={isDark ? colors.textSecondary : "#4B5563"}
+                />
+                <Text
+                  style={[
+                    styles.uploadMultiText,
+                    { color: isDark ? colors.textSecondary : "#4B5563" },
+                  ]}
+                >
+                  Upload Photo
+                </Text>
               </TouchableOpacity>
               <Text
                 style={[
                   styles.helperText,
-                  { textAlign: "center", marginTop: 8 },
+                  {
+                    textAlign: "center",
+                    marginTop: 8,
+                    color: isDark ? colors.textMuted : "#9CA3AF",
+                  },
                 ]}
               >
                 Max 5MB per image. Up to 10 photos.
@@ -1267,8 +1932,23 @@ export default function NewProperty() {
         {currentStep === 6 && (
           <>
             {/* --- Amenities --- */}
-            <View style={styles.card}>
-              <Text style={styles.cardTitlePlain}>Amenities</Text>
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor: isDark ? colors.surface : "#FFFFFF",
+                  borderColor: isDark ? colors.cardBorder : "#F3F4F6",
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.cardTitlePlain,
+                  { color: isDark ? colors.text : "#111827" },
+                ]}
+              >
+                Amenities
+              </Text>
               <View style={styles.amenitiesWrap}>
                 {(showAllAmenities
                   ? availableAmenities
@@ -1278,6 +1958,10 @@ export default function NewProperty() {
                     key={amenity}
                     style={[
                       styles.amenityPill,
+                      {
+                        backgroundColor: isDark ? colors.card : "#fff",
+                        borderColor: isDark ? colors.border : "#E5E7EB",
+                      },
                       form.amenities.includes(amenity) &&
                         styles.amenityPillActive,
                     ]}
@@ -1286,6 +1970,7 @@ export default function NewProperty() {
                     <Text
                       style={[
                         styles.amenityPillText,
+                        { color: isDark ? colors.textSecondary : "#4B5563" },
                         form.amenities.includes(amenity) &&
                           styles.amenityPillTextActive,
                       ]}
@@ -1299,7 +1984,12 @@ export default function NewProperty() {
                 onPress={() => setShowAllAmenities(!showAllAmenities)}
                 style={{ marginTop: 15 }}
               >
-                <Text style={styles.toggleAllText}>
+                <Text
+                  style={[
+                    styles.toggleAllText,
+                    { color: isDark ? colors.text : "#111" },
+                  ]}
+                >
                   {showAllAmenities
                     ? "Show Less"
                     : `Show All (${availableAmenities.length})`}
@@ -1312,26 +2002,45 @@ export default function NewProperty() {
         {/* Navigation Buttons */}
         <View style={styles.footerRow}>
           <TouchableOpacity
-            style={styles.btnCancel}
+            style={[
+              styles.btnCancel,
+              {
+                backgroundColor: isDark ? colors.surface : "#fff",
+                borderColor: isDark ? colors.border : "#E5E7EB",
+              },
+            ]}
             onPress={() =>
               currentStep > 1 ? setCurrentStep(currentStep - 1) : router.back()
             }
           >
-            <Text style={styles.btnCancelText}>
+            <Text
+              style={[
+                styles.btnCancelText,
+                { color: isDark ? colors.text : "#111" },
+              ]}
+            >
               {currentStep === 1 ? "Cancel" : "Back"}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.btnCreate}
+            style={[
+              styles.btnCreate,
+              { backgroundColor: isDark ? colors.text : "#000" },
+            ]}
             onPress={() =>
               currentStep < 6 ? handleNextStep() : handleSubmit()
             }
             disabled={loading || uploading || uploadingTerms}
           >
             {loading ? (
-              <ActivityIndicator color="white" />
+              <ActivityIndicator color={isDark ? colors.background : "white"} />
             ) : (
-              <Text style={styles.btnCreateText}>
+              <Text
+                style={[
+                  styles.btnCreateText,
+                  { color: isDark ? colors.background : "#fff" },
+                ]}
+              >
                 {currentStep === 6 ? "Create" : "Next"}
               </Text>
             )}
@@ -1341,11 +2050,31 @@ export default function NewProperty() {
 
       <Modal visible={showCountryPicker} transparent animationType="fade">
         <View style={styles.pickerModalOverlay}>
-          <View style={styles.pickerModalCard}>
-            <Text style={styles.pickerModalTitle}>Select Country</Text>
+          <View
+            style={[
+              styles.pickerModalCard,
+              { backgroundColor: isDark ? colors.surface : "#fff" },
+            ]}
+          >
+            <Text
+              style={[
+                styles.pickerModalTitle,
+                { color: isDark ? colors.text : "#111827" },
+              ]}
+            >
+              Select Country
+            </Text>
             <TextInput
-              style={styles.pickerSearchInput}
+              style={[
+                styles.pickerSearchInput,
+                {
+                  backgroundColor: isDark ? colors.inputBg : "#F9FAFB",
+                  borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                  color: isDark ? colors.text : "#111",
+                },
+              ]}
               placeholder="Search country"
+              placeholderTextColor={isDark ? colors.textMuted : "#9CA3AF"}
               value={countrySearch}
               onChangeText={setCountrySearch}
             />
@@ -1353,21 +2082,41 @@ export default function NewProperty() {
               {filteredCountries.map((country) => (
                 <TouchableOpacity
                   key={country.isoCode}
-                  style={styles.pickerOption}
+                  style={[
+                    styles.pickerOption,
+                    { borderBottomColor: isDark ? colors.border : "#F3F4F6" },
+                  ]}
                   onPress={() => handleCountrySelect(country.name)}
                 >
-                  <Text style={styles.pickerOptionText}>{country.name}</Text>
+                  <Text
+                    style={[
+                      styles.pickerOptionText,
+                      { color: isDark ? colors.text : "#111827" },
+                    ]}
+                  >
+                    {country.name}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
             <TouchableOpacity
-              style={styles.pickerCancelBtn}
+              style={[
+                styles.pickerCancelBtn,
+                { backgroundColor: isDark ? colors.card : "#F3F4F6" },
+              ]}
               onPress={() => {
                 setCountrySearch("");
                 setShowCountryPicker(false);
               }}
             >
-              <Text style={styles.pickerCancelBtnText}>Cancel</Text>
+              <Text
+                style={[
+                  styles.pickerCancelBtnText,
+                  { color: isDark ? colors.text : "#374151" },
+                ]}
+              >
+                Cancel
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1375,11 +2124,31 @@ export default function NewProperty() {
 
       <Modal visible={showStatePicker} transparent animationType="fade">
         <View style={styles.pickerModalOverlay}>
-          <View style={styles.pickerModalCard}>
-            <Text style={styles.pickerModalTitle}>Select State/Province</Text>
+          <View
+            style={[
+              styles.pickerModalCard,
+              { backgroundColor: isDark ? colors.surface : "#fff" },
+            ]}
+          >
+            <Text
+              style={[
+                styles.pickerModalTitle,
+                { color: isDark ? colors.text : "#111827" },
+              ]}
+            >
+              Select State/Province
+            </Text>
             <TextInput
-              style={styles.pickerSearchInput}
+              style={[
+                styles.pickerSearchInput,
+                {
+                  backgroundColor: isDark ? colors.inputBg : "#F9FAFB",
+                  borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                  color: isDark ? colors.text : "#111",
+                },
+              ]}
               placeholder="Search state/province"
+              placeholderTextColor={isDark ? colors.textMuted : "#9CA3AF"}
               value={stateSearch}
               onChangeText={setStateSearch}
             />
@@ -1387,21 +2156,41 @@ export default function NewProperty() {
               {filteredStates.map((state) => (
                 <TouchableOpacity
                   key={state.isoCode || state.name}
-                  style={styles.pickerOption}
+                  style={[
+                    styles.pickerOption,
+                    { borderBottomColor: isDark ? colors.border : "#F3F4F6" },
+                  ]}
                   onPress={() => handleStateSelect(state.name)}
                 >
-                  <Text style={styles.pickerOptionText}>{state.name}</Text>
+                  <Text
+                    style={[
+                      styles.pickerOptionText,
+                      { color: isDark ? colors.text : "#111827" },
+                    ]}
+                  >
+                    {state.name}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
             <TouchableOpacity
-              style={styles.pickerCancelBtn}
+              style={[
+                styles.pickerCancelBtn,
+                { backgroundColor: isDark ? colors.card : "#F3F4F6" },
+              ]}
               onPress={() => {
                 setStateSearch("");
                 setShowStatePicker(false);
               }}
             >
-              <Text style={styles.pickerCancelBtnText}>Cancel</Text>
+              <Text
+                style={[
+                  styles.pickerCancelBtnText,
+                  { color: isDark ? colors.text : "#374151" },
+                ]}
+              >
+                Cancel
+              </Text>
             </TouchableOpacity>
           </View>
         </View>

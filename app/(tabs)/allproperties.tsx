@@ -5,21 +5,21 @@ import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Alert,
-  Animated,
-  Dimensions,
-  Easing,
-  FlatList,
-  Image,
-  Modal,
-  Platform,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Alert,
+    Animated,
+    Dimensions,
+    Easing,
+    FlatList,
+    Image,
+    Modal,
+    Platform,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import WebViewMap from "../../components/WebViewMap";
@@ -197,6 +197,58 @@ export default function AllProperties() {
     "Smoke alarm",
     "Fire extinguisher",
     "First aid kit",
+    "WiFi",
+    "Cable TV",
+    "Workspace",
+    "Study desk",
+    "Wardrobe",
+    "Closet",
+    "Hot water",
+    "Refrigerator",
+    "Microwave",
+    "Oven",
+    "Dishwasher",
+    "Coffee maker",
+    "24/7 Security",
+    "CCTV",
+    "Gated community",
+    "Doorman",
+    "Private entrance",
+    "Fire exit",
+    "Emergency lighting",
+    "Beach access",
+    "Mountain view",
+    "City view",
+    "BBQ grill",
+    "Outdoor dining area",
+    "Patio",
+    "Terrace",
+    "Game room",
+    "Billiards",
+    "Table tennis",
+    "Sauna",
+    "Spa",
+    "Jacuzzi",
+    "Power backup",
+    "Generator",
+    "Solar panels",
+    "Water heater",
+    "Water tank",
+    "Deep well",
+    "Garbage disposal",
+    "Recycling bins",
+    "Bicycle parking",
+    "Motorcycle parking",
+    "Shuttle service",
+    "Transport service",
+    "Cleaning service",
+    "Laundry service",
+    "Keycard access",
+    "Smart lock",
+    "Soundproof rooms",
+    "Non-smoking rooms",
+    "Wheelchair accessible",
+    "Ramp access",
   ];
 
   useEffect(() => {
@@ -210,7 +262,7 @@ export default function AllProperties() {
     stateProvince: string | null | undefined,
     country: string | null | undefined,
   ) =>
-    [address, barangay, city, stateProvince, country]
+    [barangay || address, city, stateProvince, country || "Philippines"]
       .map((value) =>
         String(value || "")
           .trim()
@@ -220,17 +272,14 @@ export default function AllProperties() {
       .join("|");
 
   const buildGeocodeQuery = (item: any) => {
-    const address = String(item?.address || "").trim();
-    const barangay = String(item?.barangay || "").trim();
+    const barangay = String(item?.barangay || item?.address || "").trim();
     const city = String(item?.city || "").trim();
     const stateProvince = String(item?.state_province || "").trim();
     const country = String(item?.country || "").trim();
 
-    const parts = [address, barangay, city, stateProvince, country].filter(
-      Boolean,
-    );
-    if (!city) return "";
-    if (!country) parts.push("Philippines");
+    const parts = [barangay, city, stateProvince].filter(Boolean);
+    if (parts.length === 0) return "";
+    parts.push(country || "Philippines");
 
     return parts.join(", ");
   };
@@ -588,14 +637,16 @@ export default function AllProperties() {
         const duplicateIndex = groupedIndex[groupKey] || 0;
         groupedIndex[groupKey] = duplicateIndex + 1;
 
-        const jitterOffset = 0.00018;
-        const angle = duplicateIndex * (Math.PI / 4);
+        const ring = Math.floor((duplicateIndex - 1) / 6) + 1;
+        const slot = (duplicateIndex - 1) % 6;
+        const jitterOffset = 0.00045;
+        const angle = slot * ((2 * Math.PI) / 6);
         const adjustedLat =
           coords.lat +
-          (duplicateIndex > 0 ? jitterOffset * Math.sin(angle) : 0);
+          (duplicateIndex > 0 ? ring * jitterOffset * Math.sin(angle) : 0);
         const adjustedLng =
           coords.lng +
-          (duplicateIndex > 0 ? jitterOffset * Math.cos(angle) : 0);
+          (duplicateIndex > 0 ? ring * jitterOffset * Math.cos(angle) : 0);
 
         return {
           item,
@@ -1100,6 +1151,8 @@ export default function AllProperties() {
           <MapLibreGL.MapView
             style={StyleSheet.absoluteFillObject}
             styleURL="https://tiles.openfreemap.org/styles/bright"
+            rotateEnabled={true}
+            pitchEnabled={true}
             {...MAPLIBRE_LOW_MEMORY_PROPS}
           >
             <MapLibreGL.Camera
@@ -1108,6 +1161,11 @@ export default function AllProperties() {
             />
 
             {mapPoints.map(({ item, lat, lng }) => {
+              const priceLabel =
+                item.price >= 1000
+                  ? `₱${(item.price / 1000).toFixed(1)}k/mo`
+                  : `₱${item.price}/mo`;
+
               return (
                 <MapLibreGL.PointAnnotation
                   key={`marker-${item.id}`}
@@ -1115,24 +1173,30 @@ export default function AllProperties() {
                   coordinate={[lng, lat]}
                   onSelected={() => setSelectedPropertyId(item.id)}
                 >
-                  <View
-                    style={[
-                      styles.mapMarker,
-                      selectedPropertyId === item.id &&
-                        styles.mapMarkerSelected,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.mapMarkerText,
-                        selectedPropertyId === item.id && { color: "white" },
-                      ]}
-                    >
-                      ₱
-                      {item.price >= 1000
-                        ? (item.price / 1000).toFixed(1) + "k"
-                        : item.price}
-                    </Text>
+                  <View style={styles.mapMarkerWrap}>
+                    <View style={styles.mapMarkerCard}>
+                      <Image
+                        source={{
+                          uri:
+                            item.images?.[0] ||
+                            "https://via.placeholder.com/120x90.png?text=Property",
+                        }}
+                        style={styles.mapMarkerThumb}
+                      />
+                      <View style={styles.mapMarkerInfo}>
+                        <Text style={styles.mapMarkerTitle} numberOfLines={1}>
+                          {item.title || "Property"}
+                        </Text>
+                        <Text style={styles.mapMarkerPrice}>{priceLabel}</Text>
+                      </View>
+                    </View>
+                    <Ionicons
+                      name="location"
+                      size={30}
+                      color={
+                        selectedPropertyId === item.id ? "#111827" : "#ef4444"
+                      }
+                    />
                   </View>
                 </MapLibreGL.PointAnnotation>
               );
@@ -1187,13 +1251,6 @@ export default function AllProperties() {
               </MapLibreGL.PointAnnotation>
             )}
           </MapLibreGL.MapView>
-
-          {selectedPropertyId && (
-            <View style={styles.mapCardOverlay}>
-              {mapData.find((p) => p.id === selectedPropertyId) &&
-                renderCard(mapData.find((p) => p.id === selectedPropertyId))}
-            </View>
-          )}
         </View>
       ) : showMapView && Platform.OS !== "web" && !MapLibreGL ? (
         <View style={{ flex: 1 }}>
@@ -1205,8 +1262,14 @@ export default function AllProperties() {
               mapPoints.map(({ item, lat, lng }) => ({
                 id: `marker-${item.id}`,
                 coordinate: [lng, lat] as [number, number],
-                title: `₱${item.price >= 1000 ? (item.price / 1000).toFixed(1) + "k" : item.price}`,
-                color: "#111",
+                title: item.title || "Property",
+                subtitle:
+                  item.price >= 1000
+                    ? `₱${(item.price / 1000).toFixed(1)}k/month`
+                    : `₱${item.price}/month`,
+                imageUrl:
+                  item.images?.[0] ||
+                  "https://via.placeholder.com/120x90.png?text=Property",
               })) as any[]
             }
             showMarkerLabels={true}
@@ -1221,13 +1284,6 @@ export default function AllProperties() {
             }
             style={StyleSheet.absoluteFillObject}
           />
-
-          {selectedPropertyId && (
-            <View style={styles.mapCardOverlay}>
-              {mapData.find((p) => p.id === selectedPropertyId) &&
-                renderCard(mapData.find((p) => p.id === selectedPropertyId))}
-            </View>
-          )}
         </View>
       ) : (
         <FlatList
@@ -1267,24 +1323,6 @@ export default function AllProperties() {
             </View>
           }
         />
-      )}
-
-      {/* Map/List Toggle Float Button */}
-      {!loading && (
-        <TouchableOpacity
-          style={styles.mapToggleBtn}
-          onPress={() => setShowMapView(!showMapView)}
-        >
-          <Ionicons
-            name={showMapView ? "list" : "map"}
-            size={20}
-            color="white"
-            style={{ marginRight: 8 }}
-          />
-          <Text style={{ color: "white", fontWeight: "bold" }}>
-            {showMapView ? "List View" : "Map View"}
-          </Text>
-        </TouchableOpacity>
       )}
 
       {/* Comparison Floating Button */}
@@ -1895,25 +1933,7 @@ const styles = StyleSheet.create({
     borderColor: "#111",
   },
 
-  // Map Toggle Button
-  mapToggleBtn: {
-    position: "absolute",
-    bottom: 30,
-    alignSelf: "center",
-    backgroundColor: "#2563eb",
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: 30,
-    shadowColor: "#000",
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 10,
-    zIndex: 100,
-  },
-
-  // Map Markers & Overlay
+  // Map Markers
   mapMarker: {
     backgroundColor: "white",
     minWidth: 64,
@@ -1931,6 +1951,47 @@ const styles = StyleSheet.create({
   },
   mapMarkerSelected: { backgroundColor: "#111", borderColor: "#111" },
   mapMarkerText: { fontSize: 11, fontWeight: "bold", color: "#111" },
+  mapMarkerWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mapMarkerCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "white",
+    borderRadius: 10,
+    padding: 4,
+    maxWidth: 170,
+    marginBottom: -2,
+    shadowColor: "#000",
+    shadowOpacity: 0.16,
+    shadowRadius: 5,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+  },
+  mapMarkerThumb: {
+    width: 34,
+    height: 34,
+    borderRadius: 6,
+    backgroundColor: "#f3f4f6",
+  },
+  mapMarkerInfo: {
+    marginLeft: 6,
+    flexShrink: 1,
+  },
+  mapMarkerTitle: {
+    fontSize: 10,
+    color: "#111827",
+    fontWeight: "700",
+    maxWidth: 120,
+  },
+  mapMarkerPrice: {
+    fontSize: 9,
+    color: "#2563eb",
+    fontWeight: "700",
+    marginTop: 1,
+  },
   userLocationMarker: {
     width: 40,
     height: 40,
@@ -1949,14 +2010,6 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 4,
   },
-  mapCardOverlay: {
-    position: "absolute",
-    bottom: 90,
-    left: 10,
-    right: 10,
-    zIndex: 50,
-  },
-
   // Filter Modal
   modalContainer: {
     maxHeight: "75%",

@@ -28,6 +28,8 @@ import RegisterLandlordForm from "@/components/auth/RegisterLandlordForm";
 
 const BREVO_API_KEY = process.env.EXPO_PUBLIC_BREVO_API_KEY || "";
 const BUG_REPORT_RECIPIENT = "alfonzperez92@gmail.com";
+type AuthView = "login" | "register" | "register-landlord" | "otp";
+type RegistrationView = "register" | "register-landlord";
 
 async function sendBugReportViaBrevo({
   reporterName,
@@ -92,9 +94,7 @@ async function sendBugReportViaBrevo({
 export default function AuthScreen() {
   const router = useRouter();
   const { initialView } = useLocalSearchParams<{ initialView: string }>();
-  const [view, setView] = useState<
-    "login" | "register" | "register-landlord" | "otp"
-  >(
+  const [view, setView] = useState<AuthView>(
     initialView === "register" ||
       initialView === "otp" ||
       initialView === "register-landlord"
@@ -104,6 +104,8 @@ export default function AuthScreen() {
   const [loading, setLoading] = useState(false);
   const [pendingEmail, setPendingEmail] = useState("");
   const [pendingMetaData, setPendingMetaData] = useState({});
+  const [otpReturnView, setOtpReturnView] =
+    useState<RegistrationView | null>(null);
   const [showLoginNotice, setShowLoginNotice] = useState(false);
   const [bugReportModalVisible, setBugReportModalVisible] = useState(false);
   const [bugReportName, setBugReportName] = useState("");
@@ -153,7 +155,7 @@ export default function AuthScreen() {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (view !== "login") {
@@ -172,8 +174,26 @@ export default function AuthScreen() {
   const handleRegisterSuccess = (email: string, metaData: any) => {
     setPendingEmail(email);
     setPendingMetaData(metaData);
+    setOtpReturnView(
+      view === "register-landlord" ? "register-landlord" : "register",
+    );
     setView("otp");
   };
+
+  const handleOtpBackToRegistration = () => {
+    setView(otpReturnView ?? "register");
+  };
+
+  const handleOtpVerified = () => {
+    setOtpReturnView(null);
+    setView("login");
+  };
+
+  const shouldKeepRegisterMounted =
+    view === "register" || (view === "otp" && otpReturnView === "register");
+  const shouldKeepLandlordRegisterMounted =
+    view === "register-landlord" ||
+    (view === "otp" && otpReturnView === "register-landlord");
 
   const handleOpenBugReportModal = () => {
     setBugReportName("");
@@ -338,23 +358,31 @@ export default function AuthScreen() {
             />
           )}
 
-          {view === "register" && (
-            <RegisterForm
-              loading={loading}
-              setLoading={setLoading}
-              onSwitchToLogin={() => setView("login")}
-              onRegisterSuccess={handleRegisterSuccess}
-            />
+          {shouldKeepRegisterMounted && (
+            <View style={view === "register" ? undefined : styles.hiddenView}>
+              <RegisterForm
+                loading={loading}
+                setLoading={setLoading}
+                onSwitchToLogin={() => setView("login")}
+                onRegisterSuccess={handleRegisterSuccess}
+              />
+            </View>
           )}
 
-          {view === "register-landlord" && (
-            <RegisterLandlordForm
-              loading={loading}
-              setLoading={setLoading}
-              onSwitchToLogin={() => setView("login")}
-              onSwitchToRegister={() => setView("register")}
-              onRegisterSuccess={handleRegisterSuccess}
-            />
+          {shouldKeepLandlordRegisterMounted && (
+            <View
+              style={
+                view === "register-landlord" ? undefined : styles.hiddenView
+              }
+            >
+              <RegisterLandlordForm
+                loading={loading}
+                setLoading={setLoading}
+                onSwitchToLogin={() => setView("login")}
+                onSwitchToRegister={() => setView("register")}
+                onRegisterSuccess={handleRegisterSuccess}
+              />
+            </View>
           )}
 
           {view === "otp" && (
@@ -363,7 +391,8 @@ export default function AuthScreen() {
               metaData={pendingMetaData}
               loading={loading}
               setLoading={setLoading}
-              onCancel={() => setView("login")}
+              onBackToRegistration={handleOtpBackToRegistration}
+              onVerified={handleOtpVerified}
             />
           )}
         </ScrollView>
@@ -614,6 +643,9 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     textAlign: "left",
     fontWeight: "500",
+  },
+  hiddenView: {
+    display: "none",
   },
   bottomReportBugButton: {
     borderTopWidth: 1,

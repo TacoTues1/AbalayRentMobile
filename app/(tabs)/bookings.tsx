@@ -1,4 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
+import DateTimePicker, {
+    DateTimePickerAndroid,
+} from "@react-native-community/datetimepicker";
 import { decode } from "base64-arraybuffer";
 import * as DocumentPicker from "expo-document-picker";
 import { useRouter } from "expo-router";
@@ -9,6 +12,7 @@ import {
     Animated,
     Easing,
     Modal,
+    Platform,
     RefreshControl,
     ScrollView,
     StyleSheet,
@@ -100,7 +104,19 @@ export default function Bookings() {
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [selectedApplication, setSelectedApplication] = useState<any>(null);
   const [availableTimeSlots, setAvailableTimeSlots] = useState<any[]>([]);
+  const [bookingSlotsLoading, setBookingSlotsLoading] = useState(false);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState("");
+  const [selectedBookingDateKey, setSelectedBookingDateKey] = useState("");
+  const [bookingCalendarMonthOffset, setBookingCalendarMonthOffset] =
+    useState(0);
+  const [bookingMode, setBookingMode] = useState<"slot" | "preferred">("slot");
+  const [preferredDate, setPreferredDate] = useState("");
+  const [preferredStartTime, setPreferredStartTime] = useState("");
+  const [preferredEndTime, setPreferredEndTime] = useState("");
+  const [showPreferredStartPicker, setShowPreferredStartPicker] =
+    useState(false);
+  const [showPreferredEndPicker, setShowPreferredEndPicker] = useState(false);
+  const [preferredTimeError, setPreferredTimeError] = useState("");
   const [bookingNotes, setBookingNotes] = useState("");
   const [submittingBooking, setSubmittingBooking] = useState(false);
 
@@ -132,6 +148,9 @@ export default function Bookings() {
   const [showElectricityDayPicker, setShowElectricityDayPicker] =
     useState(false);
   const [assignStep, setAssignStep] = useState(0);
+  const realtimeReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const ASSIGN_STEPS = [
     { label: "Property", icon: "1" },
     { label: "Contract", icon: "2" },
@@ -147,18 +166,53 @@ export default function Bookings() {
     if (session && profile) {
       loadBookings(session.user.id, profile.role, filter);
 
+      const scheduleRealtimeReload = () => {
+        if (realtimeReloadTimerRef.current) {
+          clearTimeout(realtimeReloadTimerRef.current);
+        }
+        realtimeReloadTimerRef.current = setTimeout(() => {
+          loadBookings(session.user.id, profile.role, filter);
+        }, 180);
+      };
+
       const channel = supabase
         .channel("bookings_realtime")
         .on(
           "postgres_changes",
           { event: "*", schema: "public", table: "bookings" },
-          () => {
-            loadBookings(session.user.id, profile.role, filter);
-          },
+          scheduleRealtimeReload,
         )
-        .subscribe();
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "available_time_slots" },
+          scheduleRealtimeReload,
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "properties" },
+          scheduleRealtimeReload,
+        );
+
+      if (String(profile.role || "").toLowerCase() === "tenant") {
+        channel.on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "applications",
+            filter: `tenant=eq.${session.user.id}`,
+          },
+          scheduleRealtimeReload,
+        );
+      }
+
+      channel.subscribe();
 
       return () => {
+        if (realtimeReloadTimerRef.current) {
+          clearTimeout(realtimeReloadTimerRef.current);
+          realtimeReloadTimerRef.current = null;
+        }
         supabase.removeChannel(channel);
       };
     }
@@ -258,6 +312,177 @@ export default function Bookings() {
       color: "#6366f1",
     };
   }
+
+  const formatTimeLabel = (time24: string) => {
+    if (!time24) return "";
+    const [hourStr, minuteStr] = time24.split(":");
+    const hour = Number(hourStr);
+    const minute = Number(minuteStr);
+    if (Number.isNaN(hour) || Number.isNaN(minute)) return time24;
+    const value = new Date();
+    value.setHours(hour, minute, 0, 0);
+    return value.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  };
+
+  const toTimeString = (date: Date) => {
+    return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  };
+
+  const getPickerValueFromTime = (
+    time24: string,
+    fallbackHour: number,
+    fallbackMinute: number,
+  ) => {
+    const base = new Date();
+    const [h, m] = String(time24 || "").split(":");
+    const parsedHour = Number(h);
+    const parsedMinute = Number(m);
+
+    base.setHours(
+      Number.isNaN(parsedHour) ? fallbackHour : parsedHour,
+      Number.isNaN(parsedMinute) ? fallbackMinute : parsedMinute,
+      0,
+      0,
+    );
+
+    return base;
+  };
+
+  const parsePreferredDateTime = (dateValue: string, timeValue: string) => {
+    const [yearStr, monthStr, dayStr] = dateValue.split("-");
+    const [hourStr, minuteStr] = timeValue.split(":");
+    const year = Number(yearStr);
+    const month = Number(monthStr);
+    const day = Number(dayStr);
+    const hour = Number(hourStr);
+    const minute = Number(minuteStr);
+
+    if ([year, month, day, hour, minute].some((value) => Number.isNaN(value))) {
+      return null;
+    }
+
+    const parsed = new Date(year, month - 1, day, hour, minute, 0, 0);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
+
+  const getRoundedNow = (minuteStep = 5) => {
+    const now = new Date();
+    now.setSeconds(0, 0);
+    const minutes = now.getMinutes();
+    const remainder = minutes % minuteStep;
+    if (remainder !== 0) {
+      now.setMinutes(minutes + (minuteStep - remainder));
+    }
+    return now;
+  };
+
+  const isPreferredDateToday = () => {
+    if (!preferredDate) return false;
+    const [yearStr, monthStr, dayStr] = preferredDate.split("-");
+    const year = Number(yearStr);
+    const month = Number(monthStr);
+    const day = Number(dayStr);
+
+    if ([year, month, day].some((value) => Number.isNaN(value))) {
+      return false;
+    }
+
+    const now = new Date();
+    return (
+      now.getFullYear() === year &&
+      now.getMonth() + 1 === month &&
+      now.getDate() === day
+    );
+  };
+
+  const isPastForPreferredDate = (time24: string) => {
+    if (!preferredDate || !time24) return false;
+    const value = parsePreferredDateTime(preferredDate, time24);
+    if (!value) return true;
+    return value.getTime() < Date.now();
+  };
+
+  const getPreferredStartPickerValue = () => {
+    const startValue = getPickerValueFromTime(preferredStartTime, 9, 0);
+    if (!isPreferredDateToday()) return startValue;
+
+    const minNow = getRoundedNow();
+    return startValue < minNow ? minNow : startValue;
+  };
+
+  const getPreferredEndPickerValue = () => {
+    const minNow = getRoundedNow();
+
+    if (preferredEndTime) {
+      const endValue = getPickerValueFromTime(preferredEndTime, 10, 0);
+      if (!isPreferredDateToday()) return endValue;
+      return endValue < minNow ? minNow : endValue;
+    }
+
+    if (preferredStartTime) {
+      const basedOnStart = getPickerValueFromTime(preferredStartTime, 10, 0);
+      basedOnStart.setMinutes(basedOnStart.getMinutes() + 30);
+      if (!isPreferredDateToday()) return basedOnStart;
+      return basedOnStart < minNow ? minNow : basedOnStart;
+    }
+
+    return isPreferredDateToday() ? minNow : getPickerValueFromTime("", 10, 0);
+  };
+
+  const handlePreferredStartTimeChange = (_event: any, selected?: Date) => {
+    if (!selected) {
+      setShowPreferredStartPicker(false);
+      return;
+    }
+
+    const start = toTimeString(selected);
+
+    if (isPastForPreferredDate(start)) {
+      setPreferredTimeError(
+        "Start time cannot be in the past for the selected date.",
+      );
+      setShowPreferredStartPicker(false);
+      return;
+    }
+
+    setPreferredTimeError("");
+    setPreferredStartTime(start);
+    setShowPreferredStartPicker(false);
+
+    if (preferredEndTime && preferredEndTime <= start) {
+      setPreferredEndTime("");
+    }
+  };
+
+  const handlePreferredEndTimeChange = (_event: any, selected?: Date) => {
+    if (!selected) {
+      setShowPreferredEndPicker(false);
+      return;
+    }
+
+    const end = toTimeString(selected);
+
+    if (isPastForPreferredDate(end)) {
+      setPreferredTimeError(
+        "End time cannot be in the past for the selected date.",
+      );
+      setShowPreferredEndPicker(false);
+      return;
+    }
+
+    if (preferredStartTime && end <= preferredStartTime) {
+      setPreferredTimeError("End time should be later than start time.");
+      setShowPreferredEndPicker(false);
+      return;
+    }
+
+    setPreferredTimeError("");
+    setPreferredEndTime(end);
+    setShowPreferredEndPicker(false);
+  };
 
   const autoCancelExpiredBookings = async (userId: string, role: string) => {
     try {
@@ -368,7 +593,7 @@ export default function Bookings() {
           .from("bookings")
           .select("*")
           .in("property_id", propIds)
-          .order("booking_date", { ascending: false });
+          .order("updated_at", { ascending: false });
 
         const { data, error } = await query;
         if (error) throw error;
@@ -379,7 +604,7 @@ export default function Bookings() {
           .from("bookings")
           .select("*")
           .eq("tenant", userId)
-          .order("booking_date", { ascending: false });
+          .order("updated_at", { ascending: false });
 
         const { data, error } = await query;
         if (error) throw error;
@@ -388,7 +613,9 @@ export default function Bookings() {
         // 2. Fetch "Accepted" Applications (Ready to Book)
         const { data: acceptedApps } = await supabase
           .from("applications")
-          .select("id, property_id, tenant, status, message")
+          .select(
+            "id, property_id, tenant, status, message, updated_at, created_at",
+          )
           .eq("tenant", userId)
           .eq("status", "accepted");
 
@@ -399,6 +626,8 @@ export default function Bookings() {
             property_id: app.property_id,
             tenant: app.tenant,
             booking_date: null,
+            updated_at: app.updated_at || app.created_at || null,
+            created_at: app.created_at || null,
             status: "ready_to_book",
             notes: app.message,
           }));
@@ -447,36 +676,26 @@ export default function Bookings() {
         tenant_profile: tenantMap[b.tenant],
       }));
 
-      // --- SORTING & DEDUPE (Matches Next.js) ---
+      // --- SORTING: Newest request updates first for both roles ---
       let finalBookings = enriched;
-      const hasActiveBooking = bookingsData.some((b) =>
-        ["pending", "pending_approval", "approved", "accepted"].includes(
-          b.status,
-        ),
-      );
-
-      const getSortWeight = (booking: any) => {
-        const s = (booking.status || "").toLowerCase();
-        if (["pending", "pending_approval"].includes(s)) return 1;
-        if (s === "ready_to_book") {
-          if (role !== "landlord" && hasActiveBooking) return 3;
-          return 2;
-        }
-        if (["approved", "accepted"].includes(s)) return 4;
-        if (["approved", "accepted"].includes(s)) return 4;
-        if (["rejected", "cancelled"].includes(s)) return 5;
-        if (s === "viewing_done") return 0; // Priority
-        return 6;
-      };
 
       finalBookings.sort((a, b) => {
-        const weightA = getSortWeight(a);
-        const weightB = getSortWeight(b);
-        if (weightA !== weightB) return weightA - weightB;
-        return (
-          new Date(b.booking_date || 0).getTime() -
-          new Date(a.booking_date || 0).getTime()
-        );
+        const timeA = a?.updated_at
+          ? new Date(a.updated_at).getTime()
+          : a?.created_at
+            ? new Date(a.created_at).getTime()
+            : Number.NEGATIVE_INFINITY;
+        const timeB = b?.updated_at
+          ? new Date(b.updated_at).getTime()
+          : b?.created_at
+            ? new Date(b.created_at).getTime()
+            : Number.NEGATIVE_INFINITY;
+
+        if (timeA !== timeB) return timeB - timeA;
+
+        const fallbackA = String(a?.status || "");
+        const fallbackB = String(b?.status || "");
+        return fallbackA.localeCompare(fallbackB);
       });
 
       // Tenant should only see "ready_to_book" entries for properties that are actually available.
@@ -658,7 +877,7 @@ export default function Bookings() {
       return Alert.alert("Error", error.message);
     }
 
-    await updateSlotBookingState(bookingToReject, false);
+    await updateSlotBookingState(bookingToReject, true);
 
     const { error: emailError } = await supabase.functions.invoke(
       "send-email",
@@ -682,7 +901,7 @@ export default function Bookings() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             phoneNumber: bookingToReject.tenant_profile.phone,
-            message: `Abalay: Your viewing request for ${bookingToReject.property?.title || "the property"} was rejected. Check your email for details.`,
+            message: `Abalay: Your viewing request for ${bookingToReject.property?.title || "the property"} was rejected. Reason: ${trimmedReason}`,
           }),
         });
       } catch (smsError) {
@@ -693,7 +912,7 @@ export default function Bookings() {
     await createNotification(
       bookingToReject.tenant,
       "booking_rejected",
-      `Your viewing request for ${bookingToReject.property?.title} was rejected.`,
+      `Your viewing request for ${bookingToReject.property?.title} was rejected. Reason: ${trimmedReason}`,
       { actor: session.user.id },
     );
     sendBackendNotification(
@@ -718,25 +937,44 @@ export default function Bookings() {
   const confirmCancelBooking = async () => {
     if (!bookingToCancel) return;
 
+    const roleLower = String(profile?.role || "").toLowerCase();
+
     const { error } = await supabase
       .from("bookings")
       .update({ status: "cancelled" })
       .eq("id", bookingToCancel.id);
+
     if (error) {
       Alert.alert("Error", "Failed to cancel");
     } else {
       await updateSlotBookingState(bookingToCancel, false);
-      // Send notification
-      await createNotification(
-        bookingToCancel.tenant,
-        "booking_cancelled",
-        `Your viewing for ${bookingToCancel.property?.title} has been cancelled.`,
-        { actor: session.user.id },
+
+      const notifyRecipient =
+        roleLower === "landlord"
+          ? bookingToCancel.tenant
+          : bookingToCancel.landlord || bookingToCancel.tenant;
+
+      if (notifyRecipient) {
+        await createNotification(
+          notifyRecipient,
+          "booking_cancelled",
+          roleLower === "landlord"
+            ? `Your viewing for ${bookingToCancel.property?.title} has been cancelled by the landlord.`
+            : `${profile?.first_name || "A tenant"} cancelled viewing for ${bookingToCancel.property?.title || "your property"}.`,
+          { actor: session.user.id },
+        );
+      }
+
+      sendBackendNotification(
+        "booking_status",
+        bookingToCancel.id,
+        session.user.id,
       );
 
       Alert.alert("Success", "Booking cancelled");
       loadBookings(session.user.id, profile.role, filter);
     }
+
     setShowCancelModal(false);
     setBookingToCancel(null);
   };
@@ -1249,72 +1487,135 @@ export default function Bookings() {
     }
 
     setSelectedApplication(booking);
+    setBookingSlotsLoading(true);
     setShowBookingModal(true);
     setSubmittingBooking(false);
     setBookingNotes("");
     setAvailableTimeSlots([]);
+    setSelectedBookingDateKey("");
+    setBookingCalendarMonthOffset(0);
+    setBookingMode("slot");
+    setPreferredDate("");
+    setPreferredStartTime("");
+    setPreferredEndTime("");
+    setPreferredTimeError("");
+    setShowPreferredStartPicker(false);
+    setShowPreferredEndPicker(false);
 
-    const { data } = await supabase
-      .from("available_time_slots")
-      .select("*")
-      .eq("landlord_id", booking.property.landlord)
-      .gte("start_time", new Date().toISOString())
-      .order("start_time", { ascending: true });
+    try {
+      const { data } = await supabase
+        .from("available_time_slots")
+        .select("*")
+        .eq("landlord_id", booking.property.landlord)
+        .gte("start_time", new Date().toISOString())
+        .order("start_time", { ascending: true });
 
-    const { data: activeBookedSlots } = await supabase
-      .from("bookings")
-      .select("id, start_time, end_time")
-      .eq("property_id", booking.property_id)
-      .eq("landlord", booking.property.landlord)
-      .in("status", ["pending", "pending_approval", "approved", "accepted"]);
+      const { data: activeBookedSlots } = await supabase
+        .from("bookings")
+        .select("id, start_time, end_time")
+        .eq("property_id", booking.property_id)
+        .eq("landlord", booking.property.landlord)
+        .in("status", ["pending", "pending_approval", "approved", "accepted"]);
 
-    const currentSlotId = booking?.time_slot_id
-      ? String(booking.time_slot_id)
-      : "";
+      const statusLower = String(booking?.status || "").toLowerCase();
+      const canUseCurrentSlotAsEditable = [
+        "pending",
+        "pending_approval",
+        "approved",
+        "accepted",
+      ].includes(statusLower);
 
-    const bookedKeys = new Set(
-      (activeBookedSlots || [])
-        .filter((b: any) => String(b.id) !== String(booking.id))
-        .map((b: any) => `${String(b.start_time)}|${String(b.end_time)}`),
-    );
+      const currentSlotId =
+        canUseCurrentSlotAsEditable && booking?.time_slot_id
+          ? String(booking.time_slot_id)
+          : "";
 
-    const filteredSlots = (data || []).filter((slot: any) => {
-      const slotId = String(slot.id);
-      const slotKey = `${String(slot.start_time)}|${String(slot.end_time)}`;
-      const blockedByExistingBooking = bookedKeys.has(slotKey);
-
-      return (
-        (!slot.is_booked && !blockedByExistingBooking) ||
-        (currentSlotId && slotId === currentSlotId)
+      const bookedKeys = new Set(
+        (activeBookedSlots || [])
+          .filter((b: any) => String(b.id) !== String(booking.id))
+          .map((b: any) => `${String(b.start_time)}|${String(b.end_time)}`),
       );
-    });
 
-    setAvailableTimeSlots(filteredSlots);
+      const getSlotDateKey = (startTime: string) => {
+        const d = new Date(startTime);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      };
 
-    const fallbackOriginalSlot = booking?.booking_date
-      ? filteredSlots.find(
+      const slotsWithStatus = (data || []).map((slot: any) => {
+        const slotId = String(slot.id);
+        const slotKey = `${String(slot.start_time)}|${String(slot.end_time)}`;
+        const isCurrentSlot = !!currentSlotId && slotId === currentSlotId;
+        const isBookedByOtherTenant =
+          (Boolean(slot.is_booked) || bookedKeys.has(slotKey)) &&
+          !isCurrentSlot;
+
+        return {
+          ...slot,
+          isCurrentSlot,
+          isBookedByOtherTenant,
+        };
+      });
+
+      setAvailableTimeSlots(slotsWithStatus);
+      setBookingCalendarMonthOffset(0);
+
+      const fallbackOriginalSlot =
+        canUseCurrentSlotAsEditable && booking?.booking_date
+          ? slotsWithStatus.find(
+              (slot: any) =>
+                new Date(slot.start_time).getTime() ===
+                new Date(booking.booking_date).getTime(),
+            )
+          : null;
+
+      const originalSlotId =
+        currentSlotId ||
+        (fallbackOriginalSlot ? String(fallbackOriginalSlot.id) : "");
+
+      const selectedSlotData = originalSlotId
+        ? slotsWithStatus.find(
+            (slot: any) => String(slot.id) === originalSlotId,
+          )
+        : null;
+
+      const initialDateKey = selectedSlotData
+        ? getSlotDateKey(selectedSlotData.start_time)
+        : slotsWithStatus[0]
+          ? getSlotDateKey(slotsWithStatus[0].start_time)
+          : "";
+
+      setSelectedBookingDateKey(initialDateKey);
+
+      if (selectedSlotData) {
+        setSelectedTimeSlot(String(selectedSlotData.id));
+      } else if (!initialDateKey) {
+        setSelectedTimeSlot("");
+      } else {
+        const firstSelectable = slotsWithStatus.find(
           (slot: any) =>
-            new Date(slot.start_time).getTime() ===
-            new Date(booking.booking_date).getTime(),
-        )
-      : null;
+            getSlotDateKey(slot.start_time) === initialDateKey &&
+            !slot.isBookedByOtherTenant,
+        );
 
-    const originalSlotId =
-      currentSlotId ||
-      (fallbackOriginalSlot ? String(fallbackOriginalSlot.id) : "");
-
-    if (
-      originalSlotId &&
-      filteredSlots.some((slot: any) => String(slot.id) === originalSlotId)
-    ) {
-      setSelectedTimeSlot(originalSlotId);
-    } else {
-      setSelectedTimeSlot("");
+        setSelectedTimeSlot(firstSelectable ? String(firstSelectable.id) : "");
+      }
+    } finally {
+      setBookingSlotsLoading(false);
     }
   };
 
   const getOriginalSlotId = (booking: any, slots: any[]) => {
     if (!booking) return "";
+    const statusLower = String(booking?.status || "").toLowerCase();
+    const canUseCurrentSlotAsEditable = [
+      "pending",
+      "pending_approval",
+      "approved",
+      "accepted",
+    ].includes(statusLower);
+
+    if (!canUseCurrentSlotAsEditable) return "";
+
     if (booking.time_slot_id) return String(booking.time_slot_id);
     if (!booking.booking_date) return "";
 
@@ -1326,8 +1627,96 @@ export default function Bookings() {
     return match ? String(match.id) : "";
   };
 
+  const confirmOneHourWarning = async (startAt: Date) => {
+    const diffMs = startAt.getTime() - Date.now();
+    const diffMinutes = diffMs / (1000 * 60);
+
+    if (diffMinutes > 60 || diffMinutes <= 0) return true;
+
+    return await new Promise<boolean>((resolve) => {
+      Alert.alert(
+        "Warning",
+        "This viewing is scheduled within 1 hour from now. Do you want to continue?",
+        [
+          {
+            text: "Back",
+            style: "cancel",
+            onPress: () => resolve(false),
+          },
+          {
+            text: "Continue",
+            onPress: () => resolve(true),
+          },
+        ],
+      );
+    });
+  };
+
   const submitBooking = async () => {
-    if (!selectedTimeSlot || !selectedApplication) return;
+    if (!selectedApplication) return;
+
+    const isPreferredMode = bookingMode === "preferred";
+
+    if (!isPreferredMode && !selectedTimeSlot) return;
+
+    let preferredStartAt: Date | null = null;
+    let preferredEndAt: Date | null = null;
+    let slotForBooking: any = null;
+
+    if (isPreferredMode) {
+      if (!preferredDate || !preferredStartTime || !preferredEndTime) {
+        return Alert.alert(
+          "Error",
+          "Please select your preferred date, start time, and end time.",
+        );
+      }
+
+      preferredStartAt = parsePreferredDateTime(
+        preferredDate,
+        preferredStartTime,
+      );
+      preferredEndAt = parsePreferredDateTime(preferredDate, preferredEndTime);
+
+      if (!preferredStartAt || !preferredEndAt) {
+        return Alert.alert(
+          "Error",
+          "Invalid preferred schedule. Please choose another date and time range.",
+        );
+      }
+
+      if (preferredEndAt <= preferredStartAt) {
+        return Alert.alert(
+          "Error",
+          "End time should be later than the start time.",
+        );
+      }
+
+      if (preferredStartAt.getTime() < Date.now()) {
+        return Alert.alert(
+          "Error",
+          "Preferred schedule must be set in the future.",
+        );
+      }
+
+      const confirmedPreferred = await confirmOneHourWarning(preferredStartAt);
+      if (!confirmedPreferred) return;
+    } else {
+      slotForBooking = availableTimeSlots.find(
+        (s) => String(s.id) === String(selectedTimeSlot),
+      );
+
+      if (!slotForBooking) {
+        return Alert.alert(
+          "Error",
+          "Selected time slot was not found. Please pick another slot.",
+        );
+      }
+
+      const slotStart = new Date(slotForBooking.start_time);
+      const confirmedSlot = await confirmOneHourWarning(slotStart);
+      if (!confirmedSlot) return;
+    }
+
     setSubmittingBooking(true);
 
     const currentSlotId = getOriginalSlotId(
@@ -1347,14 +1736,17 @@ export default function Bookings() {
       return;
     }
 
-    const { data: globalActive } = await supabase
+    const { data: globalActiveRows } = await supabase
       .from("bookings")
       .select("id")
       .eq("tenant", session.user.id)
-      .in("status", ["pending", "pending_approval", "approved", "accepted"])
-      .maybeSingle();
+      .in("status", ["pending", "pending_approval", "approved", "accepted"]);
 
-    if (globalActive && globalActive.id !== selectedApplication.id) {
+    const globalActive = (globalActiveRows || []).find(
+      (b: any) => String(b.id) !== String(selectedApplication?.id),
+    );
+
+    if (globalActive) {
       Alert.alert(
         "Limit Reached",
         "You can only have 1 active viewing schedule at a time.",
@@ -1363,92 +1755,184 @@ export default function Bookings() {
       return;
     }
 
-    const slot = availableTimeSlots.find(
-      (s) => String(s.id) === String(selectedTimeSlot),
-    );
-    if (!slot) {
-      Alert.alert(
-        "Error",
-        "Selected time slot was not found. Please pick another slot.",
-      );
-      setSubmittingBooking(false);
-      return;
-    }
+    let newBooking: any = null;
 
-    const { data: latestSlot, error: latestSlotError } = await supabase
-      .from("available_time_slots")
-      .select("id, landlord_id, start_time, end_time, is_booked")
-      .eq("id", slot.id)
-      .maybeSingle();
+    if (isPreferredMode && preferredStartAt && preferredEndAt) {
+      const preferredStartIso = preferredStartAt.toISOString();
+      const preferredEndIso = preferredEndAt.toISOString();
 
-    if (latestSlotError || !latestSlot) {
-      Alert.alert(
-        "Unavailable",
-        "This schedule is no longer available. Please choose another time slot.",
-      );
-      setSubmittingBooking(false);
-      openBookingModal(selectedApplication);
-      return;
-    }
+      const { data: insertedBooking, error } = await supabase
+        .from("bookings")
+        .insert({
+          property_id: selectedApplication.property_id,
+          tenant: session.user.id,
+          landlord: selectedApplication.property.landlord,
+          start_time: preferredStartIso,
+          end_time: preferredEndIso,
+          booking_date: preferredStartIso,
+          time_slot_id: null,
+          status: "pending",
+          notes:
+            bookingNotes ||
+            `Preferred schedule requested: ${preferredDate} ${formatTimeLabel(preferredStartTime)} - ${formatTimeLabel(preferredEndTime)}`,
+        })
+        .select()
+        .single();
 
-    const selectedIsCurrent =
-      !!currentSlotId && String(slot.id) === String(currentSlotId);
-    if (latestSlot.is_booked && !selectedIsCurrent) {
-      Alert.alert(
-        "Unavailable",
-        "This schedule is no longer available. Please choose another time slot.",
-      );
-      setSubmittingBooking(false);
-      openBookingModal(selectedApplication);
-      return;
-    }
+      if (error) {
+        Alert.alert("Error", error.message);
+        setSubmittingBooking(false);
+        return;
+      }
 
-    const { data: lockedRows, error: lockSlotError } = await supabase
-      .from("available_time_slots")
-      .update({ is_booked: true })
-      .eq("landlord_id", latestSlot.landlord_id)
-      .eq("start_time", latestSlot.start_time)
-      .eq("end_time", latestSlot.end_time)
-      .eq("is_booked", false)
-      .select("id");
+      newBooking = insertedBooking;
+    } else {
+      const slot = slotForBooking;
 
-    if (lockSlotError || !lockedRows || lockedRows.length === 0) {
-      Alert.alert(
-        "Unavailable",
-        "This schedule is no longer available. Please choose another time slot.",
-      );
-      setSubmittingBooking(false);
-      openBookingModal(selectedApplication);
-      return;
-    }
-
-    const { data: newBooking, error } = await supabase
-      .from("bookings")
-      .insert({
-        property_id: selectedApplication.property_id,
-        tenant: session.user.id,
-        landlord: selectedApplication.property.landlord,
-        start_time: slot.start_time,
-        end_time: slot.end_time,
-        booking_date: slot.start_time,
-        time_slot_id: slot.id,
-        status: "pending",
-        notes:
-          bookingNotes || `Booking for ${selectedApplication.property?.title}`,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      await supabase
+      const { data: latestSlot, error: latestSlotError } = await supabase
         .from("available_time_slots")
-        .update({ is_booked: false })
-        .eq("landlord_id", latestSlot.landlord_id)
-        .eq("start_time", latestSlot.start_time)
-        .eq("end_time", latestSlot.end_time);
-      Alert.alert("Error", error.message);
-      setSubmittingBooking(false);
-      return;
+        .select("id, landlord_id, start_time, end_time, is_booked")
+        .eq("id", slot.id)
+        .maybeSingle();
+
+      if (latestSlotError || !latestSlot) {
+        Alert.alert(
+          "Unavailable",
+          "This schedule is no longer available. Please choose another time slot.",
+        );
+        setSubmittingBooking(false);
+        openBookingModal(selectedApplication);
+        return;
+      }
+
+      const selectedIsCurrent =
+        !!currentSlotId && String(slot.id) === String(currentSlotId);
+      if (latestSlot.is_booked === true && !selectedIsCurrent) {
+        Alert.alert(
+          "Unavailable",
+          "This schedule is no longer available. Please choose another time slot.",
+        );
+        setSubmittingBooking(false);
+        openBookingModal(selectedApplication);
+        return;
+      }
+
+      let didReserveSlot = false;
+
+      const { data: lockedByIdRows, error: lockByIdError } = await supabase
+        .from("available_time_slots")
+        .update({ is_booked: true })
+        .eq("id", latestSlot.id)
+        .or("is_booked.eq.false,is_booked.is.null")
+        .select("id");
+
+      if (!lockByIdError && lockedByIdRows && lockedByIdRows.length > 0) {
+        didReserveSlot = true;
+      }
+
+      if (!didReserveSlot) {
+        const { data: lockedByRangeRows, error: lockByRangeError } =
+          await supabase
+            .from("available_time_slots")
+            .update({ is_booked: true })
+            .eq("landlord_id", latestSlot.landlord_id)
+            .eq("start_time", latestSlot.start_time)
+            .eq("end_time", latestSlot.end_time)
+            .or("is_booked.eq.false,is_booked.is.null")
+            .select("id");
+
+        if (
+          !lockByRangeError &&
+          lockedByRangeRows &&
+          lockedByRangeRows.length > 0
+        ) {
+          didReserveSlot = true;
+        } else {
+          const { data: slotConflictRows, error: slotConflictError } =
+            await supabase
+              .from("bookings")
+              .select("id")
+              .eq("property_id", selectedApplication.property_id)
+              .eq("landlord", selectedApplication.property.landlord)
+              .eq("start_time", latestSlot.start_time)
+              .eq("end_time", latestSlot.end_time)
+              .in("status", [
+                "pending",
+                "pending_approval",
+                "approved",
+                "accepted",
+              ]);
+
+          if (slotConflictError) {
+            Alert.alert(
+              "Unavailable",
+              "This schedule is no longer available. Please choose another time slot.",
+            );
+            setSubmittingBooking(false);
+            openBookingModal(selectedApplication);
+            return;
+          }
+
+          const slotConflict = (slotConflictRows || [])[0];
+
+          if (slotConflict) {
+            Alert.alert(
+              "Unavailable",
+              "This schedule is no longer available. Please choose another time slot.",
+            );
+            setSubmittingBooking(false);
+            openBookingModal(selectedApplication);
+            return;
+          }
+
+          // No active conflict found: continue even if lock update did not apply.
+          console.log(
+            "reschedule slot lock fallback: proceeding without is_booked lock",
+            lockByIdError || lockByRangeError || "no rows updated",
+          );
+        }
+      }
+
+      const { data: insertedBooking, error } = await supabase
+        .from("bookings")
+        .insert({
+          property_id: selectedApplication.property_id,
+          tenant: session.user.id,
+          landlord: selectedApplication.property.landlord,
+          start_time: slot.start_time,
+          end_time: slot.end_time,
+          booking_date: slot.start_time,
+          time_slot_id: slot.id,
+          status: "pending",
+          notes:
+            bookingNotes ||
+            `Booking for ${selectedApplication.property?.title}`,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        if (didReserveSlot) {
+          await supabase
+            .from("available_time_slots")
+            .update({ is_booked: false })
+            .eq("landlord_id", latestSlot.landlord_id)
+            .eq("start_time", latestSlot.start_time)
+            .eq("end_time", latestSlot.end_time);
+        }
+        Alert.alert("Error", error.message);
+        setSubmittingBooking(false);
+        return;
+      }
+
+      if (!didReserveSlot) {
+        await supabase
+          .from("available_time_slots")
+          .update({ is_booked: true })
+          .eq("id", latestSlot.id);
+      }
+
+      newBooking = insertedBooking;
     }
 
     if (!selectedApplication.is_application) {
@@ -1477,18 +1961,22 @@ export default function Bookings() {
     if (newBooking)
       sendBackendNotification("booking_new", newBooking.id, session.user.id);
 
-    Alert.alert("Success", "Viewing scheduled!");
+    Alert.alert(
+      "Success",
+      isPreferredMode ? "Preferred schedule submitted!" : "Viewing scheduled!",
+    );
     setSubmittingBooking(false);
     setShowBookingModal(false);
+    setBookingSlotsLoading(false);
+    setBookingMode("slot");
+    setSelectedBookingDateKey("");
+    setPreferredDate("");
+    setPreferredStartTime("");
+    setPreferredEndTime("");
+    setPreferredTimeError("");
+    setShowPreferredStartPicker(false);
+    setShowPreferredEndPicker(false);
     loadBookings(session.user.id, profile.role, filter);
-  };
-
-  const canModifyBooking = (bookingDate: string) => {
-    if (!bookingDate) return true;
-    const diff =
-      (new Date(bookingDate).getTime() - new Date().getTime()) /
-      (1000 * 60 * 60);
-    return diff >= 12;
   };
 
   const nextAssignStep = () => {
@@ -1517,6 +2005,8 @@ export default function Bookings() {
   ).length;
 
   const selectedStatusLower = (selectedApplication?.status || "").toLowerCase();
+  const isBookAgainFlow =
+    !!selectedApplication && selectedStatusLower === "rejected";
   const isRescheduleFlow =
     !!selectedApplication &&
     !selectedApplication?.is_application &&
@@ -1539,6 +2029,14 @@ export default function Bookings() {
     const isPast = date && date < new Date();
     const statusLower = (item.status || "").toLowerCase();
     const roleLower = (profile?.role || "").toLowerCase();
+    const isActiveBooking = [
+      "pending",
+      "pending_approval",
+      "approved",
+      "accepted",
+    ].includes(statusLower);
+    const isTenantPreferredSchedule =
+      roleLower === "landlord" && !item?.is_application && !item?.time_slot_id;
 
     let badgeStyle = styles.badgeGray;
     let badgeText = styles.badgeTextGray;
@@ -1663,6 +2161,14 @@ export default function Bookings() {
             <Text style={[badgeText]}>{statusText}</Text>
           </View>
         </View>
+
+        {isTenantPreferredSchedule && (
+          <View style={styles.preferredScheduleTag}>
+            <Text style={styles.preferredScheduleTagText}>
+              TENANTS PREFERRED SCHEDULE
+            </Text>
+          </View>
+        )}
 
         {/* NEW: Action Required Banner (Ported from Next.js) */}
         {statusLower === "ready_to_book" &&
@@ -1859,52 +2365,24 @@ export default function Bookings() {
                   </TouchableOpacity>
                 )}
 
-                {[
-                  "pending",
-                  "pending_approval",
-                  "approved",
-                  "accepted",
-                ].includes(statusLower) &&
-                  canModifyBooking(item.booking_date) && (
-                    <>
-                      {isPending && (
-                        <TouchableOpacity
-                          onPress={() => openBookingModal(item)}
-                          style={styles.btnBlue}
-                        >
-                          <Text style={styles.btnTextWhite}>Reschedule</Text>
-                        </TouchableOpacity>
-                      )}
+                {isActiveBooking && (
+                  <>
+                    {isPending && (
                       <TouchableOpacity
-                        onPress={() => promptCancelBooking(item)}
-                        style={styles.btnOutlineRed}
+                        onPress={() => openBookingModal(item)}
+                        style={styles.btnBlue}
                       >
-                        <Text style={styles.btnTextRed}>Cancel</Text>
+                        <Text style={styles.btnTextWhite}>Reschedule</Text>
                       </TouchableOpacity>
-                    </>
-                  )}
-                {!canModifyBooking(item.booking_date) &&
-                  ["pending", "pending_approval", "approved"].includes(
-                    statusLower,
-                  ) && (
-                    <View
-                      style={{
-                        padding: 8,
-                        backgroundColor: "#fef2f2",
-                        borderRadius: 8,
-                      }}
+                    )}
+                    <TouchableOpacity
+                      onPress={() => promptCancelBooking(item)}
+                      style={styles.btnOutlineRed}
                     >
-                      <Text
-                        style={{
-                          color: "#ef4444",
-                          fontSize: 10,
-                          fontWeight: "bold",
-                        }}
-                      >
-                        Cannot modify (within 12h)
-                      </Text>
-                    </View>
-                  )}
+                      <Text style={styles.btnTextRed}>Cancel</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
               </View>
             )}
         </View>
@@ -2239,9 +2717,13 @@ export default function Bookings() {
                     { color: isDark ? colors.text : "#111" },
                   ]}
                 >
-                  {selectedApplication && isRescheduleFlow
-                    ? "Reschedule Viewing"
-                    : "Schedule Viewing"}
+                  {bookingMode === "preferred"
+                    ? selectedApplication && isRescheduleFlow
+                      ? "Preferred Reschedule"
+                      : "Preferred Schedule"
+                    : selectedApplication && isRescheduleFlow
+                      ? "Reschedule Viewing"
+                      : "Schedule Viewing"}
                 </Text>
                 <Text
                   style={{
@@ -2249,12 +2731,25 @@ export default function Bookings() {
                     color: isDark ? colors.textMuted : "#9ca3af",
                   }}
                 >
-                  Pick a time slot below
+                  {bookingMode === "preferred"
+                    ? "Set your preferred date and time range"
+                    : "Pick a time slot below"}
                 </Text>
               </View>
             </View>
             <TouchableOpacity
-              onPress={() => setShowBookingModal(false)}
+              onPress={() => {
+                setShowBookingModal(false);
+                setBookingSlotsLoading(false);
+                setBookingMode("slot");
+                setSelectedBookingDateKey("");
+                setPreferredDate("");
+                setPreferredStartTime("");
+                setPreferredEndTime("");
+                setPreferredTimeError("");
+                setShowPreferredStartPicker(false);
+                setShowPreferredEndPicker(false);
+              }}
               style={{
                 width: 36,
                 height: 36,
@@ -2320,188 +2815,867 @@ export default function Bookings() {
             </View>
           )}
 
-          <ScrollView contentContainerStyle={{ padding: 20 }}>
-            <Text
-              style={{
-                fontSize: 11,
-                fontWeight: "700",
-                color: "#9ca3af",
-                textTransform: "uppercase",
-                letterSpacing: 0.5,
-                marginBottom: 12,
-              }}
+          <View
+            style={{
+              marginHorizontal: 20,
+              marginTop: 12,
+              flexDirection: "row",
+              borderWidth: 1,
+              borderRadius: 12,
+              borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+              backgroundColor: isDark ? colors.card : "#f3f4f6",
+              padding: 4,
+              gap: 4,
+            }}
+          >
+            <TouchableOpacity
+              onPress={() => setBookingMode("slot")}
+              style={[
+                styles.bookingModeBtn,
+                bookingMode === "slot" && [
+                  styles.bookingModeBtnActive,
+                  { backgroundColor: isDark ? colors.text : "#111" },
+                ],
+              ]}
             >
-              Available Time Slots
-            </Text>
+              <Text
+                style={[
+                  styles.bookingModeBtnText,
+                  { color: isDark ? colors.textMuted : "#6b7280" },
+                  bookingMode === "slot" && {
+                    color: isDark ? colors.background : "white",
+                  },
+                ]}
+              >
+                Available Slots
+              </Text>
+            </TouchableOpacity>
 
-            {availableTimeSlots.length === 0 ? (
-              <View style={{ alignItems: "center", paddingVertical: 40 }}>
-                <View
+            <TouchableOpacity
+              onPress={() => {
+                setBookingMode("preferred");
+                setSelectedTimeSlot("");
+                setSelectedBookingDateKey("");
+                setPreferredTimeError("");
+                setShowPreferredStartPicker(false);
+                setShowPreferredEndPicker(false);
+              }}
+              style={[
+                styles.bookingModeBtn,
+                bookingMode === "preferred" && [
+                  styles.bookingModeBtnActive,
+                  { backgroundColor: isDark ? colors.text : "#111" },
+                ],
+              ]}
+            >
+              <Text
+                style={[
+                  styles.bookingModeBtnText,
+                  { color: isDark ? colors.textMuted : "#6b7280" },
+                  bookingMode === "preferred" && {
+                    color: isDark ? colors.background : "white",
+                  },
+                ]}
+              >
+                Preferred Schedule
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView contentContainerStyle={{ padding: 20 }}>
+            {bookingMode === "slot" ? (
+              <>
+                <Text
                   style={{
-                    width: 64,
-                    height: 64,
-                    borderRadius: 32,
-                    backgroundColor: "#f3f4f6",
-                    alignItems: "center",
-                    justifyContent: "center",
+                    fontSize: 11,
+                    fontWeight: "700",
+                    color: "#9ca3af",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
                     marginBottom: 12,
                   }}
                 >
-                  <Ionicons name="calendar-outline" size={28} color="#d1d5db" />
-                </View>
-                <Text style={{ fontWeight: "700", color: "#111" }}>
-                  No slots available
+                  Available Time Slots
                 </Text>
-                <Text style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>
-                  Contact the landlord directly.
-                </Text>
-              </View>
-            ) : (
-              availableTimeSlots.map((slot) => {
-                const info = getTimeSlotInfo(slot.start_time);
-                const startDate = new Date(slot.start_time);
-                const endDate = new Date(slot.end_time);
-                const isSelected = String(selectedTimeSlot) === String(slot.id);
-                const isOriginalSlot =
-                  !!originalSlotIdForModal &&
-                  String(originalSlotIdForModal) === String(slot.id);
-                const dayName = startDate.toLocaleDateString("en-US", {
-                  weekday: "short",
-                });
-                const dateStr = startDate.toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                });
-                const startStr = startDate.toLocaleTimeString("en-US", {
-                  hour: "numeric",
-                  minute: "2-digit",
-                  hour12: true,
-                });
-                const endStr = endDate.toLocaleTimeString("en-US", {
-                  hour: "numeric",
-                  minute: "2-digit",
-                  hour12: true,
-                });
 
-                return (
-                  <TouchableOpacity
-                    key={slot.id}
-                    style={[
-                      styles.slotItem,
-                      isOriginalSlot &&
-                        !isSelected && {
-                          borderColor: "#2563eb",
-                          borderWidth: 1.8,
-                          backgroundColor: isDark ? "#111827" : "#eff6ff",
-                        },
-                      isSelected && styles.slotItemActive,
-                    ]}
-                    onPress={() => setSelectedTimeSlot(String(slot.id))}
-                    activeOpacity={0.8}
-                  >
-                    {/* Selection Indicator */}
+                {bookingSlotsLoading &&
+                (isBookAgainFlow || isRescheduleFlow) ? (
+                  <View style={{ paddingVertical: 8 }}>
                     <View
-                      style={[
-                        styles.slotRadio,
-                        isSelected && styles.slotRadioActive,
-                      ]}
+                      style={{
+                        borderWidth: 1,
+                        borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                        borderRadius: 14,
+                        padding: 12,
+                        backgroundColor: isDark ? colors.card : "#fafafa",
+                      }}
                     >
-                      {isSelected && <View style={styles.slotRadioDot} />}
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: 12,
+                        }}
+                      >
+                        <SkeletonBlock
+                          width={120}
+                          height={14}
+                          borderRadius={7}
+                          backgroundColor={skeletonColor}
+                        />
+                        <SkeletonBlock
+                          width={84}
+                          height={14}
+                          borderRadius={7}
+                          backgroundColor={skeletonColor}
+                        />
+                      </View>
+
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          marginBottom: 10,
+                        }}
+                      >
+                        {Array.from({ length: 7 }, (_, idx) => (
+                          <SkeletonBlock
+                            key={`booking-modal-weekday-skel-${idx}`}
+                            width={18}
+                            height={10}
+                            borderRadius={5}
+                            backgroundColor={skeletonColor}
+                          />
+                        ))}
+                      </View>
+
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          flexWrap: "wrap",
+                          gap: 8,
+                        }}
+                      >
+                        {Array.from({ length: 14 }, (_, idx) => (
+                          <SkeletonBlock
+                            key={`booking-modal-day-skel-${idx}`}
+                            width={34}
+                            height={34}
+                            borderRadius={10}
+                            backgroundColor={skeletonColor}
+                          />
+                        ))}
+                      </View>
                     </View>
 
-                    {/* Slot Type Icon */}
+                    <View style={{ marginTop: 12 }}>
+                      <SkeletonBlock
+                        width={96}
+                        height={12}
+                        borderRadius={6}
+                        backgroundColor={skeletonColor}
+                      />
+                      <View style={{ marginTop: 8, gap: 8 }}>
+                        {Array.from({ length: 3 }, (_, idx) => (
+                          <SkeletonBlock
+                            key={`booking-modal-slot-skel-${idx}`}
+                            width="100%"
+                            height={58}
+                            borderRadius={14}
+                            backgroundColor={skeletonColor}
+                          />
+                        ))}
+                      </View>
+                    </View>
+                  </View>
+                ) : availableTimeSlots.length === 0 ? (
+                  <View style={{ alignItems: "center", paddingVertical: 40 }}>
                     <View
+                      style={{
+                        width: 64,
+                        height: 64,
+                        borderRadius: 32,
+                        backgroundColor: "#f3f4f6",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        marginBottom: 12,
+                      }}
+                    >
+                      <Ionicons
+                        name="calendar-outline"
+                        size={28}
+                        color="#d1d5db"
+                      />
+                    </View>
+                    <Text style={{ fontWeight: "700", color: "#111" }}>
+                      No slots available
+                    </Text>
+                    <Text
+                      style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}
+                    >
+                      Contact the landlord directly.
+                    </Text>
+                  </View>
+                ) : (
+                  (() => {
+                    const slotsByDate: any = {};
+                    availableTimeSlots.forEach((slot: any) => {
+                      const d = new Date(slot.start_time);
+                      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                      if (!slotsByDate[key]) slotsByDate[key] = [];
+                      slotsByDate[key].push(slot);
+                    });
+
+                    const today = new Date();
+                    const todayStart = new Date(
+                      today.getFullYear(),
+                      today.getMonth(),
+                      today.getDate(),
+                    );
+                    const viewDate = new Date(
+                      today.getFullYear(),
+                      today.getMonth() + bookingCalendarMonthOffset,
+                      1,
+                    );
+                    const year = viewDate.getFullYear();
+                    const month = viewDate.getMonth();
+                    const daysInMonth = new Date(year, month + 1, 0).getDate();
+                    const firstDay = new Date(year, month, 1).getDay();
+
+                    const selectedSlotData = availableTimeSlots.find(
+                      (s: any) => String(s.id) === String(selectedTimeSlot),
+                    );
+                    const selectedDateFromSlot = selectedSlotData
+                      ? `${new Date(selectedSlotData.start_time).getFullYear()}-${String(new Date(selectedSlotData.start_time).getMonth() + 1).padStart(2, "0")}-${String(new Date(selectedSlotData.start_time).getDate()).padStart(2, "0")}`
+                      : "";
+                    const selectedDateKey =
+                      selectedBookingDateKey || selectedDateFromSlot;
+
+                    const selectedDateSlots = [
+                      ...(slotsByDate[selectedDateKey] || []),
+                    ].sort(
+                      (a: any, b: any) =>
+                        new Date(a.start_time).getTime() -
+                        new Date(b.start_time).getTime(),
+                    );
+
+                    return (
+                      <>
+                        <View
+                          style={[
+                            styles.bookingCalendarCard,
+                            {
+                              backgroundColor: isDark ? colors.card : "#fafafa",
+                              borderColor: isDark
+                                ? colors.cardBorder
+                                : "#e5e7eb",
+                            },
+                          ]}
+                        >
+                          <View style={styles.bookingCalendarHeader}>
+                            <TouchableOpacity
+                              onPress={() =>
+                                setBookingCalendarMonthOffset(
+                                  (prev) => prev - 1,
+                                )
+                              }
+                              style={styles.bookingCalendarNavBtn}
+                            >
+                              <Ionicons
+                                name="chevron-back"
+                                size={20}
+                                color={isDark ? colors.text : "#333"}
+                              />
+                            </TouchableOpacity>
+                            <Text
+                              style={[
+                                styles.bookingCalendarMonth,
+                                { color: isDark ? colors.text : "#111" },
+                              ]}
+                            >
+                              {viewDate.toLocaleDateString("en-US", {
+                                month: "long",
+                                year: "numeric",
+                              })}
+                            </Text>
+                            <TouchableOpacity
+                              onPress={() =>
+                                setBookingCalendarMonthOffset(
+                                  (prev) => prev + 1,
+                                )
+                              }
+                              style={styles.bookingCalendarNavBtn}
+                            >
+                              <Ionicons
+                                name="chevron-forward"
+                                size={20}
+                                color={isDark ? colors.text : "#333"}
+                              />
+                            </TouchableOpacity>
+                          </View>
+
+                          <View style={styles.bookingWeekRow}>
+                            {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+                              <Text
+                                key={`weekday-${d}-${i}`}
+                                style={styles.bookingWeekDay}
+                              >
+                                {d}
+                              </Text>
+                            ))}
+                          </View>
+
+                          <View style={styles.bookingDaysGrid}>
+                            {Array.from({ length: firstDay }).map((_, i) => (
+                              <View
+                                key={`booking-empty-${i}`}
+                                style={styles.bookingDayCell}
+                              />
+                            ))}
+                            {Array.from({ length: daysInMonth }).map((_, i) => {
+                              const day = i + 1;
+                              const dateKey = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+                              const dateObj = new Date(year, month, day);
+                              const daySlots = slotsByDate[dateKey] || [];
+                              const hasSlots = daySlots.length > 0;
+                              const selectableCount = daySlots.filter(
+                                (slot: any) => !slot.isBookedByOtherTenant,
+                              ).length;
+                              const isFullyBooked =
+                                hasSlots && selectableCount === 0;
+                              const isSelected = selectedDateKey === dateKey;
+                              const isPast = dateObj < todayStart;
+
+                              return (
+                                <TouchableOpacity
+                                  key={`booking-day-${day}`}
+                                  disabled={!hasSlots || isPast}
+                                  onPress={() => {
+                                    const slots = slotsByDate[dateKey] || [];
+                                    setSelectedBookingDateKey(dateKey);
+                                    const firstSelectable = slots.find(
+                                      (slot: any) =>
+                                        !slot.isBookedByOtherTenant,
+                                    );
+                                    setSelectedTimeSlot(
+                                      firstSelectable
+                                        ? String(firstSelectable.id)
+                                        : "",
+                                    );
+                                  }}
+                                  style={[
+                                    styles.bookingDayCell,
+                                    isSelected && styles.bookingDayCellSelected,
+                                    (!hasSlots || isPast) &&
+                                      styles.bookingDayCellDisabled,
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.bookingDayText,
+                                      { color: isDark ? colors.text : "#333" },
+                                      isSelected && { color: "white" },
+                                      (!hasSlots || isPast) && {
+                                        color: isDark ? "#555" : "#ccc",
+                                      },
+                                    ]}
+                                  >
+                                    {day}
+                                  </Text>
+                                  {hasSlots && !isPast && !isSelected && (
+                                    <View
+                                      style={[
+                                        styles.bookingDayDot,
+                                        isFullyBooked
+                                          ? styles.bookingDayDotBooked
+                                          : styles.bookingDayDotAvailable,
+                                      ]}
+                                    />
+                                  )}
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+
+                          <View
+                            style={[
+                              styles.bookingLegendRow,
+                              {
+                                borderTopColor: isDark
+                                  ? colors.border
+                                  : "#e5e7eb",
+                              },
+                            ]}
+                          >
+                            <View style={styles.bookingLegendItem}>
+                              <View
+                                style={[
+                                  styles.bookingLegendDot,
+                                  styles.bookingDayDotAvailable,
+                                ]}
+                              />
+                              <Text
+                                style={{
+                                  fontSize: 12,
+                                  color: isDark
+                                    ? colors.textSecondary
+                                    : "#374151",
+                                }}
+                              >
+                                Available
+                              </Text>
+                            </View>
+                            <View style={styles.bookingLegendItem}>
+                              <View
+                                style={[
+                                  styles.bookingLegendDot,
+                                  styles.bookingDayDotBooked,
+                                ]}
+                              />
+                              <Text
+                                style={{
+                                  fontSize: 12,
+                                  color: isDark
+                                    ? colors.textSecondary
+                                    : "#374151",
+                                }}
+                              >
+                                Fully Booked
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+
+                        {selectedDateKey ? (
+                          <View style={{ marginTop: 12 }}>
+                            <Text
+                              style={{
+                                fontSize: 11,
+                                fontWeight: "700",
+                                color: "#9ca3af",
+                                textTransform: "uppercase",
+                                letterSpacing: 0.5,
+                                marginBottom: 8,
+                              }}
+                            >
+                              Time Slots
+                            </Text>
+
+                            {selectedDateSlots.map((slot: any) => {
+                              const info = getTimeSlotInfo(
+                                slot.start_time,
+                                slot.end_time,
+                              );
+                              const startDate = new Date(slot.start_time);
+                              const endDate = new Date(slot.end_time);
+                              const isSelected =
+                                String(selectedTimeSlot) === String(slot.id);
+                              const isOriginalSlot =
+                                !!originalSlotIdForModal &&
+                                String(originalSlotIdForModal) ===
+                                  String(slot.id);
+                              const isBooked = !!slot.isBookedByOtherTenant;
+                              const dayName = startDate.toLocaleDateString(
+                                "en-US",
+                                {
+                                  weekday: "short",
+                                },
+                              );
+                              const dateStr = startDate.toLocaleDateString(
+                                "en-US",
+                                {
+                                  month: "short",
+                                  day: "numeric",
+                                },
+                              );
+                              const startStr = startDate.toLocaleTimeString(
+                                "en-US",
+                                {
+                                  hour: "numeric",
+                                  minute: "2-digit",
+                                  hour12: true,
+                                },
+                              );
+                              const endStr = endDate.toLocaleTimeString(
+                                "en-US",
+                                {
+                                  hour: "numeric",
+                                  minute: "2-digit",
+                                  hour12: true,
+                                },
+                              );
+
+                              return (
+                                <TouchableOpacity
+                                  key={slot.id}
+                                  style={[
+                                    styles.slotItem,
+                                    isBooked && styles.slotItemBooked,
+                                    isOriginalSlot &&
+                                      !isSelected &&
+                                      !isBooked && {
+                                        borderColor: "#2563eb",
+                                        borderWidth: 1.8,
+                                        backgroundColor: isDark
+                                          ? "#111827"
+                                          : "#eff6ff",
+                                      },
+                                    isSelected &&
+                                      !isBooked &&
+                                      styles.slotItemActive,
+                                  ]}
+                                  onPress={() =>
+                                    !isBooked &&
+                                    setSelectedTimeSlot(String(slot.id))
+                                  }
+                                  disabled={isBooked}
+                                  activeOpacity={0.8}
+                                >
+                                  <View
+                                    style={[
+                                      styles.slotRadio,
+                                      isSelected &&
+                                        !isBooked &&
+                                        styles.slotRadioActive,
+                                    ]}
+                                  >
+                                    {isSelected && !isBooked && (
+                                      <View style={styles.slotRadioDot} />
+                                    )}
+                                  </View>
+
+                                  <View
+                                    style={[
+                                      styles.slotIconBox,
+                                      {
+                                        backgroundColor: isBooked
+                                          ? "#fee2e2"
+                                          : isSelected
+                                            ? "rgba(255,255,255,0.15)"
+                                            : info.color + "15",
+                                      },
+                                    ]}
+                                  >
+                                    <Ionicons
+                                      name={info.icon}
+                                      size={18}
+                                      color={
+                                        isBooked
+                                          ? "#ef4444"
+                                          : isSelected
+                                            ? "white"
+                                            : info.color
+                                      }
+                                    />
+                                  </View>
+
+                                  <View style={{ flex: 1 }}>
+                                    <View
+                                      style={{
+                                        flexDirection: "row",
+                                        alignItems: "center",
+                                        gap: 6,
+                                      }}
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.slotText,
+                                          isSelected &&
+                                            !isBooked &&
+                                            styles.slotTextActive,
+                                          isBooked && styles.slotTextBooked,
+                                        ]}
+                                      >
+                                        {dayName}, {dateStr}
+                                      </Text>
+                                      {isOriginalSlot && (
+                                        <View
+                                          style={{
+                                            backgroundColor:
+                                              isSelected && !isBooked
+                                                ? "rgba(255,255,255,0.22)"
+                                                : "#dbeafe",
+                                            paddingHorizontal: 7,
+                                            paddingVertical: 2,
+                                            borderRadius: 6,
+                                          }}
+                                        >
+                                          <Text
+                                            style={{
+                                              fontSize: 9,
+                                              fontWeight: "800",
+                                              color:
+                                                isSelected && !isBooked
+                                                  ? "white"
+                                                  : "#1d4ed8",
+                                            }}
+                                          >
+                                            CURRENT SCHEDULE
+                                          </Text>
+                                        </View>
+                                      )}
+                                      <View
+                                        style={[
+                                          styles.slotTypeBadge,
+                                          {
+                                            backgroundColor: isBooked
+                                              ? "#fee2e2"
+                                              : isSelected
+                                                ? "rgba(255,255,255,0.2)"
+                                                : info.color + "18",
+                                          },
+                                        ]}
+                                      >
+                                        <Text
+                                          style={{
+                                            fontSize: 9,
+                                            fontWeight: "800",
+                                            color: isBooked
+                                              ? "#ef4444"
+                                              : isSelected
+                                                ? "white"
+                                                : info.color,
+                                          }}
+                                        >
+                                          {isBooked ? "BOOKED" : info.label}
+                                        </Text>
+                                      </View>
+                                    </View>
+                                    <Text
+                                      style={{
+                                        fontSize: 12,
+                                        color: isBooked
+                                          ? "#ef4444"
+                                          : isSelected
+                                            ? "rgba(255,255,255,0.7)"
+                                            : "#9ca3af",
+                                        marginTop: 2,
+                                      }}
+                                    >
+                                      {startStr} – {endStr}
+                                      {isBooked ? " • BOOKED" : ""}
+                                    </Text>
+                                  </View>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        ) : null}
+                      </>
+                    );
+                  })()
+                )}
+              </>
+            ) : (
+              <View
+                style={[
+                  styles.bookingCalendarCard,
+                  {
+                    backgroundColor: isDark ? colors.card : "#fafafa",
+                    borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                    padding: 12,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.label,
+                    {
+                      marginTop: 0,
+                      marginBottom: 8,
+                      color: isDark ? colors.textMuted : "#666",
+                    },
+                  ]}
+                >
+                  PREFERRED DATE
+                </Text>
+
+                <CalendarPicker
+                  selectedDate={preferredDate}
+                  onDateSelect={(date) => {
+                    setPreferredDate(date);
+                    setPreferredStartTime("");
+                    setPreferredEndTime("");
+                    setPreferredTimeError("");
+                    setShowPreferredStartPicker(false);
+                    setShowPreferredEndPicker(false);
+                  }}
+                  allowPastDates={false}
+                  isDark={isDark}
+                  themeColors={{
+                    card: colors.card,
+                    border: colors.cardBorder,
+                    text: colors.text,
+                    textMuted: colors.textMuted,
+                    background: colors.background,
+                  }}
+                />
+
+                {preferredDate ? (
+                  <>
+                    <Text
                       style={[
-                        styles.slotIconBox,
+                        styles.label,
                         {
-                          backgroundColor: isSelected
-                            ? "rgba(255,255,255,0.15)"
-                            : info.color + "15",
+                          color: isDark ? colors.textMuted : "#666",
+                          marginTop: 12,
+                        },
+                      ]}
+                    >
+                      START TIME
+                    </Text>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (Platform.OS === "android") {
+                          DateTimePickerAndroid.open({
+                            value: getPreferredStartPickerValue(),
+                            mode: "time",
+                            onChange: handlePreferredStartTimeChange,
+                          });
+                        } else {
+                          setShowPreferredStartPicker((prev) => !prev);
+                        }
+                      }}
+                      style={[
+                        styles.timeInputBtn,
+                        {
+                          backgroundColor: isDark ? colors.surface : "#f9fafb",
+                          borderColor: isDark ? colors.cardBorder : "#e5e7eb",
                         },
                       ]}
                     >
                       <Ionicons
-                        name={info.icon}
+                        name="time-outline"
                         size={18}
-                        color={isSelected ? "white" : info.color}
+                        color={isDark ? colors.text : "#111"}
                       />
-                    </View>
-
-                    {/* Slot Details */}
-                    <View style={{ flex: 1 }}>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 6,
-                        }}
-                      >
-                        <Text
-                          style={[
-                            styles.slotText,
-                            isSelected && styles.slotTextActive,
-                          ]}
-                        >
-                          {dayName}, {dateStr}
-                        </Text>
-                        {isOriginalSlot && (
-                          <View
-                            style={{
-                              backgroundColor: isSelected
-                                ? "rgba(255,255,255,0.22)"
-                                : "#dbeafe",
-                              paddingHorizontal: 7,
-                              paddingVertical: 2,
-                              borderRadius: 6,
-                            }}
-                          >
-                            <Text
-                              style={{
-                                fontSize: 9,
-                                fontWeight: "800",
-                                color: isSelected ? "white" : "#1d4ed8",
-                              }}
-                            >
-                              CURRENT SCHEDULE
-                            </Text>
-                          </View>
-                        )}
-                        <View
-                          style={[
-                            styles.slotTypeBadge,
-                            {
-                              backgroundColor: isSelected
-                                ? "rgba(255,255,255,0.2)"
-                                : info.color + "18",
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={{
-                              fontSize: 9,
-                              fontWeight: "800",
-                              color: isSelected ? "white" : info.color,
-                            }}
-                          >
-                            {info.label}
-                          </Text>
-                        </View>
-                      </View>
                       <Text
-                        style={{
-                          fontSize: 12,
-                          color: isSelected
-                            ? "rgba(255,255,255,0.7)"
-                            : "#9ca3af",
-                          marginTop: 2,
-                        }}
+                        style={[
+                          styles.timeInputText,
+                          { color: isDark ? colors.text : "#111" },
+                        ]}
                       >
-                        {startStr} – {endStr}
+                        {preferredStartTime
+                          ? formatTimeLabel(preferredStartTime)
+                          : "Tap to input start time"}
                       </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })
+                    </TouchableOpacity>
+
+                    {Platform.OS === "ios" && showPreferredStartPicker && (
+                      <DateTimePicker
+                        value={getPreferredStartPickerValue()}
+                        mode="time"
+                        display="spinner"
+                        themeVariant={isDark ? "dark" : "light"}
+                        onChange={handlePreferredStartTimeChange}
+                      />
+                    )}
+
+                    <Text
+                      style={[
+                        styles.label,
+                        {
+                          color: isDark ? colors.textMuted : "#666",
+                          marginTop: 12,
+                        },
+                      ]}
+                    >
+                      END TIME
+                    </Text>
+
+                    <TouchableOpacity
+                      disabled={!preferredStartTime}
+                      onPress={() => {
+                        if (Platform.OS === "android") {
+                          DateTimePickerAndroid.open({
+                            value: getPreferredEndPickerValue(),
+                            mode: "time",
+                            onChange: handlePreferredEndTimeChange,
+                          });
+                        } else {
+                          setShowPreferredEndPicker((prev) => !prev);
+                        }
+                      }}
+                      style={[
+                        styles.timeInputBtn,
+                        {
+                          backgroundColor: isDark ? colors.surface : "#f9fafb",
+                          borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                        },
+                        !preferredStartTime && styles.bookingDayCellDisabled,
+                      ]}
+                    >
+                      <Ionicons
+                        name="time-outline"
+                        size={18}
+                        color={isDark ? colors.text : "#111"}
+                      />
+                      <Text
+                        style={[
+                          styles.timeInputText,
+                          { color: isDark ? colors.text : "#111" },
+                          !preferredStartTime && {
+                            color: isDark ? "#6b7280" : "#9ca3af",
+                          },
+                        ]}
+                      >
+                        {preferredEndTime
+                          ? formatTimeLabel(preferredEndTime)
+                          : preferredStartTime
+                            ? "Tap to input end time"
+                            : "Select start time first"}
+                      </Text>
+                    </TouchableOpacity>
+
+                    {Platform.OS === "ios" && showPreferredEndPicker && (
+                      <DateTimePicker
+                        value={getPreferredEndPickerValue()}
+                        mode="time"
+                        display="spinner"
+                        themeVariant={isDark ? "dark" : "light"}
+                        onChange={handlePreferredEndTimeChange}
+                      />
+                    )}
+
+                    {!!preferredTimeError && (
+                      <Text
+                        style={[
+                          styles.preferredErrorText,
+                          { color: isDark ? "#fca5a5" : "#b91c1c" },
+                        ]}
+                      >
+                        {preferredTimeError}
+                      </Text>
+                    )}
+
+                    {preferredStartTime && preferredEndTime && (
+                      <Text
+                        style={[
+                          styles.preferredRangeText,
+                          {
+                            color: isDark ? colors.textSecondary : "#374151",
+                          },
+                        ]}
+                      >
+                        Selected range: {formatTimeLabel(preferredStartTime)} -{" "}
+                        {formatTimeLabel(preferredEndTime)}
+                      </Text>
+                    )}
+                  </>
+                ) : (
+                  <Text
+                    style={{
+                      marginTop: 12,
+                      fontSize: 12,
+                      color: isDark ? colors.textMuted : "#6b7280",
+                    }}
+                  >
+                    Select a date first to choose your preferred time range.
+                  </Text>
+                )}
+              </View>
             )}
 
             <Text
@@ -2544,11 +3718,25 @@ export default function Bookings() {
             <TouchableOpacity
               style={[
                 styles.modalConfirmBtn,
-                (submittingBooking || !selectedTimeSlot) &&
+                (submittingBooking ||
+                  (bookingMode === "slot"
+                    ? !selectedTimeSlot
+                    : !preferredDate ||
+                      !preferredStartTime ||
+                      !preferredEndTime ||
+                      !!preferredTimeError)) &&
                   styles.modalConfirmBtnDisabled,
               ]}
               onPress={submitBooking}
-              disabled={submittingBooking || !selectedTimeSlot}
+              disabled={
+                submittingBooking ||
+                (bookingMode === "slot"
+                  ? !selectedTimeSlot
+                  : !preferredDate ||
+                    !preferredStartTime ||
+                    !preferredEndTime ||
+                    !!preferredTimeError)
+              }
             >
               <View
                 style={{
@@ -2570,12 +3758,18 @@ export default function Bookings() {
                   allowFontScaling={false}
                 >
                   {submittingBooking
-                    ? isRescheduleFlow
-                      ? "Submitting Reschedule..."
-                      : "Submitting Schedule..."
-                    : isRescheduleFlow
-                      ? "Confirm Reschedule"
-                      : "Confirm Schedule"}
+                    ? bookingMode === "preferred"
+                      ? "Submitting Preferred Schedule..."
+                      : isRescheduleFlow
+                        ? "Submitting Reschedule..."
+                        : "Submitting Schedule..."
+                    : bookingMode === "preferred"
+                      ? isRescheduleFlow
+                        ? "Submit Preferred Reschedule"
+                        : "Submit Preferred Schedule"
+                      : isRescheduleFlow
+                        ? "Confirm Reschedule"
+                        : "Confirm Schedule"}
                 </Text>
               </View>
             </TouchableOpacity>
@@ -3591,6 +4785,22 @@ const styles = StyleSheet.create({
   badgeTextRed: { color: "#b91c1c", fontSize: 10, fontWeight: "bold" },
   badgeIndigo: { backgroundColor: "#eef2ff" },
   badgeTextIndigo: { color: "#4338ca", fontSize: 10, fontWeight: "bold" },
+  preferredScheduleTag: {
+    alignSelf: "flex-start",
+    marginTop: 10,
+    backgroundColor: "#ecfccb",
+    borderColor: "#84cc16",
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  preferredScheduleTagText: {
+    color: "#365314",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
 
   // New Action Banner
   actionBanner: {
@@ -3731,6 +4941,139 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
+  bookingModeBtn: {
+    flex: 1,
+    borderRadius: 9,
+    paddingVertical: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bookingModeBtnActive: {
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  bookingModeBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  timeInputBtn: {
+    marginTop: 8,
+    minHeight: 46,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  timeInputText: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  preferredErrorText: {
+    marginTop: 8,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  preferredRangeText: {
+    marginTop: 8,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+
+  bookingCalendarCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    overflow: "hidden",
+  },
+  bookingCalendarHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  bookingCalendarNavBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.04)",
+  },
+  bookingCalendarMonth: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  bookingWeekRow: {
+    flexDirection: "row",
+    paddingHorizontal: 8,
+    marginBottom: 6,
+  },
+  bookingWeekDay: {
+    flex: 1,
+    textAlign: "center",
+    fontSize: 11,
+    color: "#9ca3af",
+    fontWeight: "700",
+  },
+  bookingDaysGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    paddingHorizontal: 8,
+    paddingBottom: 10,
+  },
+  bookingDayCell: {
+    width: "14.28%",
+    aspectRatio: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    marginBottom: 4,
+  },
+  bookingDayCellSelected: {
+    backgroundColor: "#111827",
+  },
+  bookingDayCellDisabled: {
+    opacity: 0.45,
+  },
+  bookingDayText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  bookingDayDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginTop: 2,
+  },
+  bookingDayDotAvailable: {
+    backgroundColor: "#22c55e",
+  },
+  bookingDayDotBooked: {
+    backgroundColor: "#ef4444",
+  },
+  bookingLegendRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+  },
+  bookingLegendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  bookingLegendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+
   slotItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -3740,6 +5083,11 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     marginBottom: 8,
     gap: 12,
+  },
+  slotItemBooked: {
+    borderColor: "#fecaca",
+    backgroundColor: "#fff1f2",
+    opacity: 0.95,
   },
   slotItemActive: { backgroundColor: "#111827", borderColor: "#111827" },
   slotRadio: {
@@ -3768,6 +5116,7 @@ const styles = StyleSheet.create({
   slotTypeBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   slotText: { fontWeight: "700", color: "#111", fontSize: 13 },
   slotTextActive: { color: "white" },
+  slotTextBooked: { color: "#dc2626" },
   noSlots: { textAlign: "center", color: "#999", marginVertical: 20 },
   label: {
     fontSize: 12,

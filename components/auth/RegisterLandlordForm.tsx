@@ -2,26 +2,35 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    Alert,
-    Animated,
-    Easing,
-    Modal,
-    Platform,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  Animated,
+  Easing,
+  Modal,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import AuthInput from "./AuthInput";
 // Import DateTimePicker AND the Android Helper
 import DateTimePicker, {
-    DateTimePickerAndroid,
+  DateTimePickerAndroid,
 } from "@react-native-community/datetimepicker";
 
 const BREVO_API_KEY = process.env.EXPO_PUBLIC_BREVO_API_KEY || "";
 const generateCode = () =>
   Math.floor(100000 + Math.random() * 900000).toString();
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const normalizeEmail = (value: string) =>
+  String(value || "")
+    .normalize("NFKC")
+    .replace(/[\u200B\u200C\u200D\uFEFF]/g, "")
+    .replace(/\s/g, "")
+    .replace(/[;,]+$/g, "")
+    .toLowerCase();
 
 async function sendOtpViaBrevo(toEmail: string, code: string) {
   if (!BREVO_API_KEY) {
@@ -156,8 +165,6 @@ export default function RegisterLandlordForm({
   // --- Step Navigation ---
   const nextStep = () => {
     if (step === 0) {
-      if (!businessName.trim())
-        return Alert.alert("Required", "Business Name is required");
       if (!firstName.trim())
         return Alert.alert("Required", "First Name is required");
       if (!lastName.trim())
@@ -176,6 +183,12 @@ export default function RegisterLandlordForm({
     if (step === 2) {
       if (!email.trim()) return Alert.alert("Required", "Email is required");
       const fullEmail = getFullEmail();
+      if (!EMAIL_REGEX.test(fullEmail)) {
+        return Alert.alert(
+          "Invalid Email",
+          "Please enter a valid email address (e.g. name@yahoo.com).",
+        );
+      }
       if (password.length < 6)
         return Alert.alert("Error", "Password must be at least 6 characters");
       if (password !== confirmPassword)
@@ -185,36 +198,94 @@ export default function RegisterLandlordForm({
   };
   const prevStep = () => setStep((s) => s - 1);
 
-  // Email handler: only the part before @gmail.com
+  // Email handler: allow full address with any provider
   const handleEmailChange = (text: string) => {
-    const cleaned = text.replace(/[@\s]/g, "").toLowerCase();
-    setEmail(cleaned);
+    setEmail(normalizeEmail(text));
   };
-  const getFullEmail = () => (email ? `${email}@gmail.com` : "");
+  const getFullEmail = () => normalizeEmail(email);
+
+  const toggleMayaSameAsGcash = () => {
+    const next = !mayaSameAsGcash;
+    if (next) {
+      if (!gcashEnabled) {
+        Alert.alert(
+          "GCash Required",
+          "Enable GCash first before using the same number for Maya.",
+        );
+        return;
+      }
+
+      const trimmedGcash = gcashNumber.trim();
+      if (!trimmedGcash) {
+        Alert.alert(
+          "GCash Number Required",
+          "Please enter your GCash number first.",
+        );
+        return;
+      }
+
+      setMayaNumber(trimmedGcash);
+    }
+
+    setMayaSameAsGcash(next);
+  };
+
+  useEffect(() => {
+    if (mayaSameAsGcash) {
+      setMayaNumber(gcashNumber);
+    }
+  }, [mayaSameAsGcash, gcashNumber]);
+
   // --- Registration Logic ---
   const handleRegister = async () => {
-    if (gcashEnabled && !gcashNumber.trim())
+    const trimmedGcash = gcashNumber.trim();
+    const trimmedMaya = mayaNumber.trim();
+
+    if (mayaEnabled && mayaSameAsGcash && !gcashEnabled) {
+      return Alert.alert(
+        "GCash Required",
+        "Enable GCash to use the same number for Maya.",
+      );
+    }
+
+    if (gcashEnabled && !trimmedGcash)
       return Alert.alert("Required", "Please enter GCash number");
-    if (mayaEnabled && !mayaNumber.trim())
+
+    if (mayaEnabled && mayaSameAsGcash && !trimmedGcash)
+      return Alert.alert(
+        "Required",
+        "Please enter GCash number to use for Maya.",
+      );
+
+    if (mayaEnabled && !mayaSameAsGcash && !trimmedMaya)
       return Alert.alert("Required", "Please enter Maya number");
 
     setLoading(true);
 
     try {
       const formattedBirthday = birthday?.toISOString().split("T")[0];
+      const fullEmail = getFullEmail();
+      const normalizedBusinessName = businessName.trim() || "N/A";
+
+      if (!EMAIL_REGEX.test(fullEmail)) {
+        setLoading(false);
+        return Alert.alert(
+          "Invalid Email",
+          "Please enter a valid email address (e.g. name@yahoo.com).",
+        );
+      }
 
       // Build accepted_payments JSON
       const acceptedPayments: any = { cash: true };
       if (gcashEnabled)
-        acceptedPayments.gcash = { number: gcashNumber, verified: false }; // Verify later logic
+        acceptedPayments.gcash = { number: trimmedGcash, verified: false }; // Verify later logic
       if (mayaEnabled)
         acceptedPayments.maya = {
-          number: mayaSameAsGcash ? gcashNumber : mayaNumber,
+          number: mayaSameAsGcash ? trimmedGcash : trimmedMaya,
           verified: false,
         };
 
       // Check Duplicate Email
-      const fullEmail = getFullEmail();
       const { data: existingEmail } = await supabase
         .from("profiles")
         .select("id")
@@ -231,7 +302,7 @@ export default function RegisterLandlordForm({
 
       // Sign Up
       const { data, error } = await supabase.auth.signUp({
-        email: getFullEmail(),
+        email: fullEmail,
         password,
         options: {
           data: {
@@ -241,7 +312,7 @@ export default function RegisterLandlordForm({
             birthday: formattedBirthday,
             gender: gender,
             role: "landlord",
-            business_name: businessName,
+            business_name: normalizedBusinessName,
             accepted_payments: acceptedPayments,
           },
         }, // Web project expects verification email!
@@ -285,7 +356,7 @@ export default function RegisterLandlordForm({
               birthday: formattedBirthday,
               gender,
               role: "landlord",
-              business_name: businessName,
+              business_name: normalizedBusinessName,
               accepted_payments: acceptedPayments,
               useCustomOtp: true,
             });
@@ -302,7 +373,7 @@ export default function RegisterLandlordForm({
               birthday: formattedBirthday,
               gender,
               role: "landlord",
-              business_name: businessName,
+              business_name: normalizedBusinessName,
               accepted_payments: acceptedPayments,
               useCustomOtp: true,
             });
@@ -314,14 +385,14 @@ export default function RegisterLandlordForm({
 
       if (data.user) {
         setLoading(false);
-        onRegisterSuccess(getFullEmail(), {
+        onRegisterSuccess(fullEmail, {
           firstName,
           middleName,
           lastName,
           birthday: formattedBirthday,
           gender,
           role: "landlord",
-          business_name: businessName,
+          business_name: normalizedBusinessName,
           accepted_payments: acceptedPayments,
         });
       }
@@ -337,7 +408,7 @@ export default function RegisterLandlordForm({
   const renderStep0 = () => (
     <View style={styles.stepContainer}>
       <AuthInput
-        label="Business Name *"
+        label="Business Name (Optional)"
         value={businessName}
         onChangeText={setBusinessName}
         placeholder="Your business name"
@@ -448,20 +519,16 @@ export default function RegisterLandlordForm({
 
   const renderStep2 = () => (
     <View style={styles.stepContainer}>
-      {/* Email with @gmail.com suffix */}
+      {/* Email Address */}
       <View style={{ marginBottom: 15 }}>
         <Text style={styles.inputLabel}>Email Address *</Text>
-        <View style={styles.prefixInputContainer}>
-          <AuthInput
-            label=""
-            value={email}
-            onChangeText={handleEmailChange}
-            placeholder="yourname"
-          />
-          <View style={styles.suffixBox}>
-            <Text style={styles.prefixText}>@gmail.com</Text>
-          </View>
-        </View>
+        <AuthInput
+          label=""
+          value={email}
+          onChangeText={handleEmailChange}
+          placeholder="name@example.com"
+          keyboardType="email-address"
+        />
       </View>
 
       <AuthInput
@@ -607,7 +674,7 @@ export default function RegisterLandlordForm({
             <View style={styles.mayaSameAsContainer}>
               <TouchableOpacity
                 style={styles.checkboxSmall}
-                onPress={() => setMayaSameAsGcash(!mayaSameAsGcash)}
+                onPress={toggleMayaSameAsGcash}
               >
                 <Ionicons
                   name={mayaSameAsGcash ? "checkbox" : "square-outline"}
@@ -617,7 +684,7 @@ export default function RegisterLandlordForm({
               </TouchableOpacity>
               <Text
                 style={{ fontSize: 13, color: "#333" }}
-                onPress={() => setMayaSameAsGcash(!mayaSameAsGcash)}
+                onPress={toggleMayaSameAsGcash}
               >
                 Use same number as GCash
               </Text>

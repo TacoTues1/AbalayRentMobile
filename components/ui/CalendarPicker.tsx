@@ -6,9 +6,11 @@ interface CalendarPickerProps {
     selectedDate: string;
     onDateSelect: (date: string) => void;
     allowPastDates?: boolean;
+    isDark?: boolean;
+    themeColors?: { card?: string; border?: string; text?: string; textMuted?: string; background?: string };
 }
 
-export default function CalendarPicker({ selectedDate, onDateSelect, allowPastDates = false }: CalendarPickerProps) {
+export default function CalendarPicker({ selectedDate, onDateSelect, allowPastDates = false, isDark = false, themeColors }: CalendarPickerProps) {
     const [currentDate, setCurrentDate] = useState(selectedDate ? new Date(selectedDate) : new Date());
 
     const year = currentDate.getFullYear();
@@ -56,15 +58,16 @@ export default function CalendarPicker({ selectedDate, onDateSelect, allowPastDa
                     disabled={isDisabled}
                     style={[
                         styles.dayCell,
-                        isSelected && styles.selectedDay
+                        isSelected && [styles.selectedDay, isDark && { backgroundColor: '#fff' }]
                     ]}
                     onPress={() => handleDayPress(day)}
                 >
                     <Text style={[
                         styles.dayText,
-                        isDisabled && styles.disabledDayText,
+                        isDark && { color: themeColors?.text || '#fff' },
+                        isDisabled && [styles.disabledDayText, isDark && { color: themeColors?.textMuted || '#555' }],
                         isToday && styles.todayText,
-                        isSelected && styles.selectedDayText
+                        isSelected && [styles.selectedDayText, isDark && { color: '#000' }]
                     ]}>
                         {day}
                     </Text>
@@ -76,22 +79,22 @@ export default function CalendarPicker({ selectedDate, onDateSelect, allowPastDa
     };
 
     return (
-        <View style={styles.container}>
+        <View style={[styles.container, isDark && { backgroundColor: themeColors?.card || '#1f2937', borderColor: themeColors?.border || '#374151' }]}>
             {/* Header */}
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => changeMonth(-1)} style={styles.navBtn}>
-                    <Ionicons name="chevron-back" size={20} color="#333" />
+                    <Ionicons name="chevron-back" size={20} color={isDark ? (themeColors?.text || '#fff') : '#333'} />
                 </TouchableOpacity>
-                <Text style={styles.monthTitle}>{monthNames[month]} {year}</Text>
+                <Text style={[styles.monthTitle, isDark && { color: themeColors?.text || '#fff' }]}>{monthNames[month]} {year}</Text>
                 <TouchableOpacity onPress={() => changeMonth(1)} style={styles.navBtn}>
-                    <Ionicons name="chevron-forward" size={20} color="#333" />
+                    <Ionicons name="chevron-forward" size={20} color={isDark ? (themeColors?.text || '#fff') : '#333'} />
                 </TouchableOpacity>
             </View>
 
             {/* Week Days */}
             <View style={styles.weekRow}>
                 {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(d => (
-                    <Text key={d} style={styles.weekDayText}>{d}</Text>
+                    <Text key={d} style={[styles.weekDayText, isDark && { color: themeColors?.textMuted || '#888' }]}>{d}</Text>
                 ))}
             </View>
 

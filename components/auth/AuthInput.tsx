@@ -30,7 +30,7 @@ export default function AuthInput({
   return (
     <View style={[styles.container, !label && { marginBottom: 0, flex: 1 }]}>
       {label ? <Text style={styles.label}>{label}</Text> : null}
-      <View style={[styles.inputContainer, !label && { borderRadius: label ? 8 : 0 }]}>
+      <View style={styles.inputContainer}>
         <TextInput
           style={styles.input}
           value={value}

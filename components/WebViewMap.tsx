@@ -15,6 +15,8 @@ interface WebViewMapProps {
     id: string;
     coordinate: [number, number]; // [lng, lat]
     title?: string;
+    subtitle?: string;
+    imageUrl?: string;
     color?: string;
   }>;
   routes?: Array<{
@@ -91,6 +93,12 @@ const WebViewMap = forwardRef(function WebViewMap(
   const escapedTitle = (title: string) =>
     title.replace(/'/g, "\\'").replace(/"/g, '\\"');
 
+  const escapedUrl = (url: string) =>
+    String(url || "")
+      .replace(/'/g, "\\'")
+      .replace(/"/g, "")
+      .trim();
+
   const markerHtml = markers
     .map(
       (m) => `
@@ -101,9 +109,9 @@ const WebViewMap = forwardRef(function WebViewMap(
       interactive: false,
       icon: L.divIcon({
         className: 'custom-marker-label',
-        html: '<div style="background: rgba(17,17,17,0.9); color: white; font-size: 10px; font-weight: 600; padding: 4px 7px; border-radius: 8px; max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center;">${escapedTitle(m.title)}</div>',
-        iconSize: [140, 22],
-        iconAnchor: [70, -4]
+        html: '<div style="display:flex; align-items:center; gap:6px; background: rgba(255,255,255,0.95); color:#111827; font-size: 10px; font-weight: 600; padding: 4px 6px; border-radius: 10px; border:1px solid #e5e7eb; box-shadow:0 2px 8px rgba(0,0,0,0.15); max-width: 190px;"><img src="${escapedUrl(m.imageUrl || "")}" style="width:28px; height:28px; object-fit:cover; border-radius:6px; background:#f3f4f6;" /><div style="display:flex; flex-direction:column; min-width:0;"><div style="font-size:10px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:140px;">${escapedTitle(m.title)}</div><div style="font-size:9px; color:#2563eb; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:140px;">${escapedTitle(m.subtitle || "")}</div></div></div>',
+        iconSize: [190, 36],
+        iconAnchor: [95, -6]
       })
     }).addTo(map);
     `

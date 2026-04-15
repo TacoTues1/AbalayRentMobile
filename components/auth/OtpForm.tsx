@@ -46,7 +46,8 @@ async function sendOtpViaBravo(toEmail: string, code: string) {
 export default function OtpForm({
   email,
   metaData,
-  onCancel,
+  onBackToRegistration,
+  onVerified,
   loading,
   setLoading,
 }: any) {
@@ -138,14 +139,14 @@ export default function OtpForm({
         }
 
         Alert.alert("Success", "Email verified successfully! Please sign in.");
-        if (onCancel) onCancel();
+        onVerified?.();
       } else {
         // userId not found but code was valid — still let them proceed
         Alert.alert(
           "Success",
           "Email verified! Please sign in with your credentials.",
         );
-        if (onCancel) onCancel();
+        onVerified?.();
       }
     } catch (error: any) {
       Alert.alert("Error", error.message);
@@ -236,7 +237,7 @@ export default function OtpForm({
               `Resend code in ${Math.floor(countdown / 60)}:${(countdown % 60).toString().padStart(2, "0")}`
             ) : (
               <>
-                Didn't receive the code?{" "}
+                Didn&apos;t receive the code?{" "}
                 <Text style={styles.resendBold}>Resend</Text>
               </>
             )}
@@ -244,8 +245,11 @@ export default function OtpForm({
         )}
       </TouchableOpacity>
 
-      <TouchableOpacity onPress={onCancel} style={styles.cancelLink}>
-        <Text style={styles.cancelText}>← Back to Registration</Text>
+      <TouchableOpacity
+        onPress={() => onBackToRegistration?.()}
+        style={styles.cancelLink}
+      >
+        <Text style={styles.cancelText}>{"<- Back to Registration"}</Text>
       </TouchableOpacity>
     </View>
   );

@@ -1,23 +1,24 @@
 import { Ionicons } from "@expo/vector-icons";
+import DateTimePicker, {
+    DateTimePickerAndroid,
+} from "@react-native-community/datetimepicker";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
-  Alert,
-  Modal,
-  Platform,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Alert,
+    Modal,
+    Platform,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import AuthInput from "./AuthInput";
-// Import DateTimePicker AND the Android Helper
-import DateTimePicker, {
-  DateTimePickerAndroid,
-} from "@react-native-community/datetimepicker";
 
 const BREVO_API_KEY = process.env.EXPO_PUBLIC_BREVO_API_KEY || "";
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 const generateCode = () =>
   Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -46,6 +47,7 @@ async function sendOtpViaBrevo(toEmail: string, code: string) {
       `,
     }),
   });
+
   return response.ok || response.status === 201;
 }
 
@@ -64,7 +66,6 @@ export default function RegisterForm({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [phone, setPhone] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
@@ -73,15 +74,12 @@ export default function RegisterForm({
   const [gender, setGender] = useState("");
 
   // UI State
-  const [showIOSPicker, setShowIOSPicker] = useState(false); // Only for iOS Modal
+  const [showIOSPicker, setShowIOSPicker] = useState(false);
   const [showGenderModal, setShowGenderModal] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
 
-  // --- Date Picker Logic (Robust) ---
-
   const openDatePicker = () => {
     if (Platform.OS === "android") {
-      // ANDROID: Use Imperative API
       DateTimePickerAndroid.open({
         value: birthday || new Date(),
         onChange: (event, selectedDate) => {
@@ -92,13 +90,13 @@ export default function RegisterForm({
         mode: "date",
         maximumDate: new Date(),
       });
-    } else {
-      // iOS: Show Modal
-      setShowIOSPicker(true);
+      return;
     }
+
+    setShowIOSPicker(true);
   };
 
-  const onIOSDateChange = (event: any, selectedDate?: Date) => {
+  const onIOSDateChange = (_event: any, selectedDate?: Date) => {
     if (selectedDate) {
       setBirthday(selectedDate);
     }
@@ -109,28 +107,12 @@ export default function RegisterForm({
     if (!birthday) setBirthday(new Date());
   };
 
-  // Phone handler: only allow digits starting with 9, max 10 digits
-  const handlePhoneChange = (text: string) => {
-    // Remove any non-digit characters
-    let digits = text.replace(/[^0-9]/g, "");
-    // Strip leading 0 if present
-    if (digits.startsWith("0")) digits = digits.substring(1);
-    // Must start with 9
-    if (digits.length > 0 && digits[0] !== "9") return;
-    // Max 10 digits
-    if (digits.length > 10) digits = digits.substring(0, 10);
-    setPhone(digits);
-  };
-
-  // Email handler: only the part before @gmail.com
   const handleEmailChange = (text: string) => {
-    // Remove spaces and @ symbols from input
-    const cleaned = text.replace(/[@\s]/g, "").toLowerCase();
+    const cleaned = text.replace(/\s/g, "").toLowerCase();
     setEmail(cleaned);
   };
 
-  const getFullEmail = () => (email ? `${email}@gmail.com` : "");
-  const getFullPhone = () => (phone ? `+63${phone}` : "");
+  const getFullEmail = () => email.trim().toLowerCase();
 
   const handleRegister = async () => {
     if (
@@ -138,7 +120,6 @@ export default function RegisterForm({
       !lastName ||
       !email ||
       !password ||
-      !phone ||
       !birthday ||
       !gender
     ) {
@@ -155,37 +136,25 @@ export default function RegisterForm({
       );
     }
 
-    if (phone.length !== 10 || !phone.startsWith("9")) {
+    const fullEmail = getFullEmail();
+    if (!EMAIL_REGEX.test(fullEmail)) {
       return Alert.alert(
-        "Invalid Phone",
-        "Please enter a valid 10-digit phone number starting with 9.",
+        "Invalid Email",
+        "Please enter a valid email address (e.g. name@yahoo.com).",
       );
     }
 
-    if (password !== confirmPassword)
+    if (password !== confirmPassword) {
       return Alert.alert("Error", "Passwords do not match");
-    if (password.length < 6)
+    }
+
+    if (password.length < 6) {
       return Alert.alert("Error", "Password must be at least 6 characters");
+    }
 
     setLoading(true);
 
     try {
-      const fullPhone = getFullPhone();
-      const fullEmail = getFullEmail();
-
-      // Check Duplicate Phone
-      const { data: existingPhone } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("phone", fullPhone)
-        .maybeSingle();
-
-      if (existingPhone) {
-        setLoading(false);
-        return Alert.alert("Error", "This phone number is already registered.");
-      }
-
-      // Check Duplicate Email
       const { data: existingEmail } = await supabase
         .from("profiles")
         .select("id")
@@ -202,7 +171,6 @@ export default function RegisterForm({
 
       const formattedBirthday = birthday.toISOString().split("T")[0];
 
-      // Sign Up
       const { data, error } = await supabase.auth.signUp({
         email: fullEmail,
         password,
@@ -213,7 +181,6 @@ export default function RegisterForm({
             last_name: lastName,
             birthday: formattedBirthday,
             gender: gender,
-            phone: fullPhone,
           },
         },
       });
@@ -225,14 +192,11 @@ export default function RegisterForm({
           msg.includes("exceeded") ||
           msg.includes("error sending")
         ) {
-          // Rate limited — the user may already be created but unconfirmed.
-          // Try to send OTP via Brevo instead
           console.log(
             "Supabase email rate limited during signUp, falling back to Brevo...",
           );
-          const code = generateCode();
 
-          // Store the custom code in Supabase DB
+          const code = generateCode();
           const { error: storeError } = await supabase.rpc("store_reset_code", {
             p_email: fullEmail.toLowerCase(),
             p_code: code,
@@ -247,7 +211,6 @@ export default function RegisterForm({
             );
           }
 
-          // Send via Brevo
           const sent = await sendOtpViaBrevo(fullEmail, code);
           if (sent) {
             setLoading(false);
@@ -257,7 +220,6 @@ export default function RegisterForm({
               lastName,
               birthday: formattedBirthday,
               gender,
-              phone: fullPhone,
               useCustomOtp: true,
             });
           } else {
@@ -272,7 +234,6 @@ export default function RegisterForm({
               lastName,
               birthday: formattedBirthday,
               gender,
-              phone: fullPhone,
               useCustomOtp: true,
             });
           }
@@ -289,7 +250,6 @@ export default function RegisterForm({
           lastName,
           birthday: formattedBirthday,
           gender,
-          phone: fullPhone,
         });
       }
     } catch (error: any) {
@@ -328,9 +288,7 @@ export default function RegisterForm({
         placeholder="Middlename"
       />
 
-      {/* --- BIRTHDAY & GENDER ROW --- */}
       <View style={styles.row}>
-        {/* Birthday Picker */}
         <View style={{ flex: 1, marginRight: 5, marginBottom: 15 }}>
           <Text style={styles.inputLabel}>Birthday *</Text>
           <TouchableOpacity style={styles.inputLike} onPress={openDatePicker}>
@@ -340,7 +298,6 @@ export default function RegisterForm({
             <Ionicons name="calendar-outline" size={18} color="#666" />
           </TouchableOpacity>
 
-          {/* iOS ONLY: Modal Picker */}
           {showIOSPicker && (
             <Modal transparent animationType="fade" visible={true}>
               <View style={styles.modalOverlay}>
@@ -365,7 +322,7 @@ export default function RegisterForm({
                     display="spinner"
                     onChange={onIOSDateChange}
                     maximumDate={new Date()}
-                    textColor="black" // Explicit text color for dark mode
+                    textColor="black"
                   />
                 </View>
               </View>
@@ -373,7 +330,6 @@ export default function RegisterForm({
           )}
         </View>
 
-        {/* Gender Dropdown */}
         <View style={{ flex: 1, marginLeft: 5, marginBottom: 15 }}>
           <Text style={styles.inputLabel}>Gender *</Text>
           <TouchableOpacity
@@ -388,36 +344,15 @@ export default function RegisterForm({
         </View>
       </View>
 
-      {/* Phone Number with +63 prefix */}
-      <View style={{ marginBottom: 15 }}>
-        <Text style={styles.inputLabel}>Phone Number *</Text>
-        <View style={styles.prefixInputContainer}>
-          <View style={styles.prefixBox}>
-            <Text style={styles.prefixText}>+63</Text>
-          </View>
-          <AuthInput
-            label=""
-            value={phone}
-            onChangeText={handlePhoneChange}
-            placeholder="9XXXXXXXXX"
-          />
-        </View>
-      </View>
-
-      {/* Email with @gmail.com suffix */}
-      <View style={{ marginBottom: 15 }}>
+      <View style={{ marginBottom: 15 ,borderRadius: 6}}>
         <Text style={styles.inputLabel}>Email *</Text>
-        <View style={styles.prefixInputContainer}>
-          <AuthInput
-            label=""
-            value={email}
-            onChangeText={handleEmailChange}
-            placeholder="Email"
-          />
-          <View style={styles.suffixBox}>
-            <Text style={styles.prefixText}>@gmail.com</Text>
-          </View>
-        </View>
+        <AuthInput
+          label=""
+          value={email}
+          onChangeText={handleEmailChange}
+          placeholder="name@example.com"
+          keyboardType="email-address"
+        />
       </View>
 
       <AuthInput
@@ -439,7 +374,6 @@ export default function RegisterForm({
         togglePassword={() => setShowConfirmPassword(!showConfirmPassword)}
       />
 
-      {/* Terms Checkbox */}
       <View style={styles.termsContainer}>
         <TouchableOpacity
           style={styles.checkbox}
@@ -477,7 +411,6 @@ export default function RegisterForm({
         </TouchableOpacity>
       </View>
 
-      {/* --- GENDER SELECTION MODAL --- */}
       <Modal visible={showGenderModal} transparent animationType="fade">
         <TouchableOpacity
           style={styles.modalOverlay}
@@ -541,39 +474,13 @@ const styles = StyleSheet.create({
   },
   linkText: { fontWeight: "bold", textDecorationLine: "underline" },
 
-  // Phone prefix & email suffix styles
-  prefixInputContainer: { flexDirection: "row", alignItems: "center" },
-  prefixBox: {
-    backgroundColor: "#f3f4f6",
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRightWidth: 0,
-    borderTopLeftRadius: 8,
-    borderBottomLeftRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    justifyContent: "center",
-  },
-  suffixBox: {
-    backgroundColor: "#f3f4f6",
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderLeftWidth: 0,
-    borderTopRightRadius: 8,
-    borderBottomRightRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    justifyContent: "center",
-  },
-  prefixText: { fontSize: 14, color: "#374151", fontWeight: "600" },
-
-  // Custom Input Styles
   inputLabel: {
     fontSize: 14,
     fontWeight: "600",
     color: "#1f2937",
     marginBottom: 6,
     marginLeft: 4,
+    borderRadius: 8,
   },
   inputLike: {
     flexDirection: "row",
@@ -589,7 +496,6 @@ const styles = StyleSheet.create({
   inputText: { color: "black", fontSize: 14 },
   placeholderText: { color: "#9ca3af", fontSize: 14 },
 
-  // Terms Styles
   termsContainer: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -605,7 +511,6 @@ const styles = StyleSheet.create({
     textDecorationLine: "underline",
   },
 
-  // Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",

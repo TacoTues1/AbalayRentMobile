@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker, {
-  DateTimePickerAndroid,
+    DateTimePickerAndroid,
 } from "@react-native-community/datetimepicker";
 import { decode } from "base64-arraybuffer";
 import * as ImagePicker from "expo-image-picker";
@@ -8,21 +8,21 @@ import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Easing,
-  FlatList,
-  Image,
-  Modal,
-  Platform,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Easing,
+    FlatList,
+    Image,
+    Modal,
+    Platform,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { createNotification } from "../../lib/notifications";
@@ -323,20 +323,45 @@ export default function Payments() {
       console.log(`Loaded ${finalBills?.length} bills.`);
 
       // 2. Load payment history (for stats / history)
-      let paymentsQuery = supabase
-        .from("payments")
-        .select(
-          "*, properties(title), profiles!payments_tenant_fkey(first_name, middle_name, last_name)",
-        )
-        .order("paid_at", { ascending: false });
+      const fetchPaymentsByField = async (roleField: string) => {
+        return await supabase
+          .from("payments")
+          .select(
+            "*, properties(title), profiles!payments_tenant_fkey(first_name, middle_name, last_name)",
+          )
+          .order("paid_at", { ascending: false })
+          .eq(roleField, userId);
+      };
+
+      let paymentsData: any[] = [];
+      let paymentsError: any = null;
 
       if (normalizedRole === "tenant") {
-        paymentsQuery = paymentsQuery.eq("tenant", userId);
+        const primary = await fetchPaymentsByField("tenant");
+        paymentsData = primary.data || [];
+        paymentsError = primary.error;
+
+        if (paymentsError) {
+          const fallback = await fetchPaymentsByField("tenant_id");
+          paymentsData = fallback.data || [];
+          paymentsError = fallback.error;
+        }
       } else if (normalizedRole === "landlord") {
-        paymentsQuery = paymentsQuery.eq("landlord", userId);
+        const primary = await fetchPaymentsByField("landlord");
+        paymentsData = primary.data || [];
+        paymentsError = primary.error;
+
+        if (paymentsError) {
+          const fallback = await fetchPaymentsByField("landlord_id");
+          paymentsData = fallback.data || [];
+          paymentsError = fallback.error;
+        }
       }
 
-      const { data: paymentsData } = await paymentsQuery;
+      if (paymentsError) {
+        console.error("Load payment history error:", paymentsError);
+      }
+
       setPayments(paymentsData || []);
     } catch (e: any) {
       console.error("Load Data Exception:", e);
@@ -2692,6 +2717,54 @@ export default function Payments() {
               {payments.length}
             </Text>
           </View>
+        </View>
+      )}
+
+      {profile?.role === "landlord" && (
+        <View style={{ paddingHorizontal: 15, paddingBottom: 10 }}>
+          <TouchableOpacity
+            onPress={() => router.push("/payment-history" as any)}
+            style={[
+              {
+                borderRadius: 14,
+                paddingVertical: 12,
+                paddingHorizontal: 14,
+                borderWidth: 1,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+              },
+              {
+                backgroundColor: isDark ? colors.card : "white",
+                borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+              },
+            ]}
+            activeOpacity={0.85}
+          >
+            <View
+              style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+            >
+              <Ionicons
+                name="bar-chart-outline"
+                size={18}
+                color={isDark ? colors.text : "#111"}
+              />
+              <Text
+                style={{
+                  fontSize: 13,
+                  fontWeight: "800",
+                  color: isDark ? colors.text : "#111",
+                }}
+              >
+                View Full Payment History
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color={isDark ? colors.textSecondary : "#6b7280"}
+            />
+          </TouchableOpacity>
         </View>
       )}
 

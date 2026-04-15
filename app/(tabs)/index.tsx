@@ -278,20 +278,25 @@ export default function Dashboard() {
         ]}
       >
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          {profile?.avatar_url ? (
-            <Image
-              source={{ uri: profile.avatar_url }}
-              style={styles.avatarImage}
-            />
-          ) : (
-            <View style={styles.avatarFallback}>
-              <Text style={styles.avatarText}>
-                {(profile?.first_name || session?.user?.email || "U")
-                  .charAt(0)
-                  .toUpperCase()}
-              </Text>
-            </View>
-          )}
+          <TouchableOpacity
+            onPress={() => router.push("/(tabs)/profile")}
+            activeOpacity={0.8}
+          >
+            {profile?.avatar_url ? (
+              <Image
+                source={{ uri: profile.avatar_url }}
+                style={styles.avatarImage}
+              />
+            ) : (
+              <View style={styles.avatarFallback}>
+                <Text style={styles.avatarText}>
+                  {(profile?.first_name || session?.user?.email || "U")
+                    .charAt(0)
+                    .toUpperCase()}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
           <View>
             <Text
               style={[

@@ -2,20 +2,20 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Dimensions,
-    Easing,
-    Image,
-    Modal,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  Easing,
+  Image,
+  Modal,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import CalendarPicker from "../../../components/ui/CalendarPicker";
 import { useRealtime } from "../../../hooks/useRealtime";
@@ -135,6 +135,8 @@ export default function LandlordDashboard({ session, profile }: any) {
   const [emailEnding, setEmailEnding] = useState("");
   const [sendingEmail, setSendingEmail] = useState(false);
   const [showTenantDropdown, setShowTenantDropdown] = useState(false);
+  const [showScheduleAvailabilityWarning, setShowScheduleAvailabilityWarning] =
+    useState(false);
 
   // 3. Advance Bill Modal
   const [advanceBillModal, setAdvanceBillModal] = useState({
@@ -174,10 +176,10 @@ export default function LandlordDashboard({ session, profile }: any) {
   // --- EFFECTS ---
 
   useEffect(() => {
-    if (profile) {
+    if (profile && session?.user?.id) {
       loadDashboard();
     }
-  }, [profile]);
+  }, [profile, session?.user?.id]);
 
   useEffect(() => {
     const canScroll =
@@ -225,6 +227,12 @@ export default function LandlordDashboard({ session, profile }: any) {
 
   const quickActionsItems = [
     {
+      label: "Add Property",
+      icon: "add-circle-outline",
+      action: () => router.push("/properties/new" as any),
+      badge: 0,
+    },
+    {
       label: "All Properties",
       icon: "business-outline",
       action: () => router.push("/(tabs)/allproperties" as any),
@@ -261,9 +269,9 @@ export default function LandlordDashboard({ session, profile }: any) {
       badge: pendingPaymentsCount,
     },
     {
-      label: "Add Property",
-      icon: "add-circle-outline",
-      action: () => router.push("/properties/new" as any),
+      label: "History",
+      icon: "bar-chart-outline",
+      action: () => router.push("/payment-history" as any),
       badge: 0,
     },
   ];
@@ -274,7 +282,7 @@ export default function LandlordDashboard({ session, profile }: any) {
         // Only refresh silently if it already loaded once
         loadDashboard();
       }
-    }, [profile]),
+    }, [profile, loading]),
   );
 
   useRealtime(
@@ -316,6 +324,7 @@ export default function LandlordDashboard({ session, profile }: any) {
         loadDashboardTasks(),
         loadMonthlyIncome(),
         loadScheduledViewings(),
+        checkScheduleAvailability(),
         loadOccupancyFamilyMembers(activeOccs),
         loadEndedOccupancies(),
       ]);
@@ -533,6 +542,45 @@ export default function LandlordDashboard({ session, profile }: any) {
       console.log("Error loading scheduled viewings:", e);
     }
   }
+
+  async function checkScheduleAvailability() {
+    try {
+      if (!session?.user?.id) return;
+
+      const { data, error } = await supabase
+        .from("available_time_slots")
+        .select("id, start_time, is_booked")
+        .eq("landlord_id", session.user.id)
+        .gte("start_time", new Date().toISOString());
+
+      if (error) {
+        console.log("Error checking schedule availability:", error);
+        return;
+      }
+
+      const hasUpcomingAvailability = (data || []).some(
+        (slot: any) => slot?.is_booked !== true,
+      );
+
+      if (hasUpcomingAvailability) {
+        setShowScheduleAvailabilityWarning(false);
+        return;
+      }
+
+      setShowScheduleAvailabilityWarning(true);
+    } catch (e) {
+      console.log("Error checking schedule availability:", e);
+    }
+  }
+
+  const dismissScheduleWarning = () => {
+    setShowScheduleAvailabilityWarning(false);
+  };
+
+  const goToScheduleSetup = () => {
+    setShowScheduleAvailabilityWarning(false);
+    router.push("/(tabs)/schedule" as any);
+  };
 
   // --- FINANCIAL LOGIC ---
   async function loadMonthlyIncome() {
@@ -2665,6 +2713,74 @@ export default function LandlordDashboard({ session, profile }: any) {
         </View>
       </Modal>
 
+      {/* 3. Schedule Availability Warning Modal */}
+      <Modal
+        visible={showScheduleAvailabilityWarning}
+        transparent
+        animationType="fade"
+        onRequestClose={dismissScheduleWarning}
+      >
+        <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.modalContent,
+              { backgroundColor: isDark ? colors.surface : "white" },
+            ]}
+          >
+            <View style={styles.scheduleWarningHeader}>
+              <View style={styles.scheduleWarningIconWrap}>
+                <Ionicons name="warning-outline" size={22} color="#f59e0b" />
+              </View>
+              <TouchableOpacity onPress={dismissScheduleWarning}>
+                <Ionicons
+                  name="close"
+                  size={22}
+                  color={isDark ? colors.textMuted : "#999"}
+                />
+              </TouchableOpacity>
+            </View>
+
+            <Text
+              style={[
+                styles.modalTitle,
+                { color: isDark ? colors.text : "#111", marginBottom: 8 },
+              ]}
+            >
+              Set Schedule Availability
+            </Text>
+            <Text
+              style={[
+                styles.scheduleWarningBody,
+                { color: isDark ? colors.textSecondary : "#4b5563" },
+              ]}
+            >
+              You currently have no upcoming availability slots. Tenants cannot
+              book viewings slot until you set your schedule.
+            </Text>
+
+            <View style={styles.scheduleWarningActions}>
+              <TouchableOpacity
+                onPress={dismissScheduleWarning}
+                style={[
+                  styles.btnFull,
+                  { backgroundColor: isDark ? colors.card : "#eee" },
+                ]}
+              >
+                <Text style={{ color: isDark ? colors.text : "#000" }}>
+                  Later
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={goToScheduleSetup}
+                style={[styles.btnFull, { backgroundColor: "#111827" }]}
+              >
+                <Text style={styles.btnTextWhite}>Set Schedule</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* 4. Property Details Modal */}
       <Modal
         visible={propertyDetailsModal.isOpen}
@@ -3673,6 +3789,29 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   modalTitle: { fontSize: 18, fontWeight: "bold" },
+  scheduleWarningHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  scheduleWarningIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "#fef3c7",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  scheduleWarningBody: {
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  scheduleWarningActions: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 18,
+  },
   detailsInfoCard: {
     borderWidth: 1,
     borderRadius: 12,

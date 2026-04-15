@@ -4,25 +4,25 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Dimensions,
-    Easing,
-    Image,
-    Keyboard,
-    KeyboardAvoidingView,
-    Linking,
-    Modal,
-    Platform,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
-    View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  Easing,
+  Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  Linking,
+  Modal,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
 import CalendarPicker from "../../../components/ui/CalendarPicker";
 import { useRealtime } from "../../../hooks/useRealtime";
@@ -168,9 +168,27 @@ export default function TenantDashboard({ session, profile }: any) {
     useState<string[]>([]);
 
   const browseAvailableAmenities = [
-     'Kitchen', 'Pool', 'TV', 'Elevator', 'Air conditioning', 'Heating', 'Basketball court',
-    'Washing machine', 'Dryer', 'Parking', 'Gym', 'Security', 'Balcony', 'Garden', "Kid's Playground",
-    'Pet friendly', 'Furnished', 'Carbon monoxide alarm', 'Smoke alarm', 'Fire extinguisher', 'First aid kit'
+    "Kitchen",
+    "Pool",
+    "TV",
+    "Elevator",
+    "Air conditioning",
+    "Heating",
+    "Basketball court",
+    "Washing machine",
+    "Dryer",
+    "Parking",
+    "Gym",
+    "Security",
+    "Balcony",
+    "Garden",
+    "Kid's Playground",
+    "Pet friendly",
+    "Furnished",
+    "Carbon monoxide alarm",
+    "Smoke alarm",
+    "Fire extinguisher",
+    "First aid kit",
   ];
 
   const browseClearFilters = () => {

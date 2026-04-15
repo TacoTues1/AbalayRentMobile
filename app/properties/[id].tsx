@@ -1,24 +1,28 @@
 import { Ionicons } from "@expo/vector-icons";
+import DateTimePicker, {
+  DateTimePickerAndroid,
+} from "@react-native-community/datetimepicker";
 import Constants from "expo-constants";
 import * as Linking from "expo-linking";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    FlatList,
-    Image,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  FlatList,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
+import CalendarPicker from "../../components/ui/CalendarPicker";
 import WebViewMap from "../../components/WebViewMap";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
@@ -69,9 +73,18 @@ export default function PropertyDetail() {
   const [timeSlots, setTimeSlots] = useState<any[]>([]);
   const [showBookingOptions, setShowBookingOptions] = useState(false);
   const [selectedSlotId, setSelectedSlotId] = useState("");
+  const [selectedSlotDateKey, setSelectedSlotDateKey] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [bookingNote, setBookingNote] = useState("");
   const [calendarMonthOffset, setCalendarMonthOffset] = useState(0);
+  const [bookingMode, setBookingMode] = useState<"slot" | "preferred">("slot");
+  const [preferredDate, setPreferredDate] = useState("");
+  const [preferredStartTime, setPreferredStartTime] = useState("");
+  const [preferredEndTime, setPreferredEndTime] = useState("");
+  const [showPreferredStartPicker, setShowPreferredStartPicker] =
+    useState(false);
+  const [showPreferredEndPicker, setShowPreferredEndPicker] = useState(false);
+  const [preferredTimeError, setPreferredTimeError] = useState("");
 
   // Modals
   const [showGalleryModal, setShowGalleryModal] = useState(false);
@@ -303,7 +316,6 @@ export default function PropertyDetail() {
       .from("available_time_slots")
       .select("*")
       .eq("landlord_id", landlordId)
-      .eq("is_booked", false)
       .gte("start_time", new Date().toISOString())
       .order("start_time", { ascending: true });
 
@@ -321,13 +333,15 @@ export default function PropertyDetail() {
         ),
       );
 
-      const filtered = data.filter(
-        (slot: any) =>
-          !bookedKeys.has(
-            `${String(slot.start_time)}|${String(slot.end_time)}`,
-          ),
-      );
-      setTimeSlots(filtered);
+      const withBookingState = data.map((slot: any) => {
+        const slotKey = `${String(slot.start_time)}|${String(slot.end_time)}`;
+        return {
+          ...slot,
+          isBookedByTenant: Boolean(slot.is_booked) || bookedKeys.has(slotKey),
+        };
+      });
+
+      setTimeSlots(withBookingState);
     }
   };
 
@@ -361,7 +375,178 @@ export default function PropertyDetail() {
 
   // --- ACTIONS ---
 
-  const handleOpenBooking = () => {
+  const formatTimeLabel = (time24: string) => {
+    if (!time24) return "";
+    const [hourStr, minuteStr] = time24.split(":");
+    const hour = Number(hourStr);
+    const minute = Number(minuteStr);
+    if (Number.isNaN(hour) || Number.isNaN(minute)) return time24;
+    const value = new Date();
+    value.setHours(hour, minute, 0, 0);
+    return value.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  };
+
+  const toTimeString = (date: Date) => {
+    return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  };
+
+  const getPickerValueFromTime = (
+    time24: string,
+    fallbackHour: number,
+    fallbackMinute: number,
+  ) => {
+    const base = new Date();
+    const [h, m] = String(time24 || "").split(":");
+    const parsedHour = Number(h);
+    const parsedMinute = Number(m);
+
+    base.setHours(
+      Number.isNaN(parsedHour) ? fallbackHour : parsedHour,
+      Number.isNaN(parsedMinute) ? fallbackMinute : parsedMinute,
+      0,
+      0,
+    );
+
+    return base;
+  };
+
+  const handlePreferredStartTimeChange = (_event: any, selected?: Date) => {
+    if (!selected) {
+      setShowPreferredStartPicker(false);
+      return;
+    }
+
+    const start = toTimeString(selected);
+
+    if (isPastForPreferredDate(start)) {
+      setPreferredTimeError(
+        "Start time cannot be in the past for the selected date.",
+      );
+      setShowPreferredStartPicker(false);
+      return;
+    }
+
+    setPreferredTimeError("");
+    setPreferredStartTime(start);
+    setShowPreferredStartPicker(false);
+
+    if (preferredEndTime && preferredEndTime <= start) {
+      setPreferredEndTime("");
+    }
+  };
+
+  const handlePreferredEndTimeChange = (_event: any, selected?: Date) => {
+    if (!selected) {
+      setShowPreferredEndPicker(false);
+      return;
+    }
+
+    const end = toTimeString(selected);
+
+    if (isPastForPreferredDate(end)) {
+      setPreferredTimeError(
+        "End time cannot be in the past for the selected date.",
+      );
+      setShowPreferredEndPicker(false);
+      return;
+    }
+
+    if (preferredStartTime && end <= preferredStartTime) {
+      setPreferredTimeError("End time should be later than start time.");
+      setShowPreferredEndPicker(false);
+      return;
+    }
+
+    setPreferredTimeError("");
+    setPreferredEndTime(end);
+    setShowPreferredEndPicker(false);
+  };
+
+  const parsePreferredDateTime = (dateValue: string, timeValue: string) => {
+    const [yearStr, monthStr, dayStr] = dateValue.split("-");
+    const [hourStr, minuteStr] = timeValue.split(":");
+    const year = Number(yearStr);
+    const month = Number(monthStr);
+    const day = Number(dayStr);
+    const hour = Number(hourStr);
+    const minute = Number(minuteStr);
+
+    if ([year, month, day, hour, minute].some((value) => Number.isNaN(value))) {
+      return null;
+    }
+
+    const parsed = new Date(year, month - 1, day, hour, minute, 0, 0);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
+
+  const getRoundedNow = (minuteStep = 5) => {
+    const now = new Date();
+    now.setSeconds(0, 0);
+    const minutes = now.getMinutes();
+    const remainder = minutes % minuteStep;
+    if (remainder !== 0) {
+      now.setMinutes(minutes + (minuteStep - remainder));
+    }
+    return now;
+  };
+
+  const isPreferredDateToday = () => {
+    if (!preferredDate) return false;
+    const [yearStr, monthStr, dayStr] = preferredDate.split("-");
+    const year = Number(yearStr);
+    const month = Number(monthStr);
+    const day = Number(dayStr);
+
+    if ([year, month, day].some((value) => Number.isNaN(value))) {
+      return false;
+    }
+
+    const now = new Date();
+    return (
+      now.getFullYear() === year &&
+      now.getMonth() + 1 === month &&
+      now.getDate() === day
+    );
+  };
+
+  const isPastForPreferredDate = (time24: string) => {
+    if (!preferredDate || !time24) return false;
+    const value = parsePreferredDateTime(preferredDate, time24);
+    if (!value) return true;
+    return value.getTime() < Date.now();
+  };
+
+  const getPreferredStartPickerValue = () => {
+    const startValue = getPickerValueFromTime(preferredStartTime, 9, 0);
+    if (!isPreferredDateToday()) return startValue;
+
+    const minNow = getRoundedNow();
+    return startValue < minNow ? minNow : startValue;
+  };
+
+  const getPreferredEndPickerValue = () => {
+    const minNow = getRoundedNow();
+
+    if (preferredEndTime) {
+      const endValue = getPickerValueFromTime(preferredEndTime, 10, 0);
+      if (!isPreferredDateToday()) return endValue;
+      return endValue < minNow ? minNow : endValue;
+    }
+
+    if (preferredStartTime) {
+      const basedOnStart = getPickerValueFromTime(preferredStartTime, 10, 0);
+      basedOnStart.setMinutes(basedOnStart.getMinutes() + 30);
+      if (!isPreferredDateToday()) return basedOnStart;
+      return basedOnStart < minNow ? minNow : basedOnStart;
+    }
+
+    return isPreferredDateToday() ? minNow : getPickerValueFromTime("", 10, 0);
+  };
+
+  const openBookingModal = (mode: "slot" | "preferred") => {
     const latestStatus = String(property?.status || "")
       .trim()
       .toLowerCase();
@@ -379,20 +564,143 @@ export default function PropertyDetail() {
       ]);
       return;
     }
+
+    setBookingMode(mode);
     setShowBookingOptions(true);
+    setBookingNote("");
+    setTermsAccepted(false);
+    setSelectedSlotDateKey("");
+
+    if (mode === "slot") {
+      setPreferredDate("");
+      setPreferredStartTime("");
+      setPreferredEndTime("");
+      setPreferredTimeError("");
+      setShowPreferredStartPicker(false);
+      setShowPreferredEndPicker(false);
+      return;
+    }
+
+    setSelectedSlotId("");
+    setCalendarMonthOffset(0);
+    setPreferredDate("");
+    setPreferredStartTime("");
+    setPreferredEndTime("");
+    setPreferredTimeError("");
+    setShowPreferredStartPicker(false);
+    setShowPreferredEndPicker(false);
+  };
+
+  const handleOpenBooking = () => {
+    openBookingModal("slot");
+  };
+
+  const handleOpenPreferredBooking = () => {
+    openBookingModal("preferred");
   };
 
   const handleCancelBooking = () => {
     if (submitting) return;
     setShowBookingOptions(false);
+    setBookingMode("slot");
     setSelectedSlotId("");
+    setSelectedSlotDateKey("");
     setBookingNote("");
     setTermsAccepted(false);
+    setPreferredDate("");
+    setPreferredStartTime("");
+    setPreferredEndTime("");
+    setPreferredTimeError("");
+    setShowPreferredStartPicker(false);
+    setShowPreferredEndPicker(false);
+  };
+
+  const confirmOneHourWarning = async (startAt: Date) => {
+    const diffMs = startAt.getTime() - Date.now();
+    const diffMinutes = diffMs / (1000 * 60);
+
+    if (diffMinutes > 60 || diffMinutes <= 0) return true;
+
+    return await new Promise<boolean>((resolve) => {
+      Alert.alert(
+        "Warning",
+        "This viewing is scheduled within 1 hour from now. Do you want to continue?",
+        [
+          {
+            text: "Back",
+            style: "cancel",
+            onPress: () => resolve(false),
+          },
+          {
+            text: "Continue",
+            onPress: () => resolve(true),
+          },
+        ],
+      );
+    });
   };
 
   const handleConfirmBooking = async () => {
-    if (!selectedSlotId)
+    const isPreferredMode = bookingMode === "preferred";
+
+    if (!isPreferredMode && !selectedSlotId) {
       return Alert.alert("Error", "Please select a viewing time.");
+    }
+
+    let preferredStartAt: Date | null = null;
+    let preferredEndAt: Date | null = null;
+    let slotForBooking: any = null;
+
+    if (isPreferredMode) {
+      if (!preferredDate || !preferredStartTime || !preferredEndTime) {
+        return Alert.alert(
+          "Error",
+          "Please select your preferred date, start time, and end time.",
+        );
+      }
+
+      preferredStartAt = parsePreferredDateTime(
+        preferredDate,
+        preferredStartTime,
+      );
+      preferredEndAt = parsePreferredDateTime(preferredDate, preferredEndTime);
+
+      if (!preferredStartAt || !preferredEndAt) {
+        return Alert.alert(
+          "Error",
+          "Invalid preferred schedule. Please choose another date and time range.",
+        );
+      }
+
+      if (preferredEndAt <= preferredStartAt) {
+        return Alert.alert(
+          "Error",
+          "End time should be later than the start time.",
+        );
+      }
+
+      if (preferredStartAt.getTime() < Date.now()) {
+        return Alert.alert(
+          "Error",
+          "Preferred schedule must be set in the future.",
+        );
+      }
+
+      const confirmedPreferred = await confirmOneHourWarning(preferredStartAt);
+      if (!confirmedPreferred) return;
+    } else {
+      slotForBooking = timeSlots.find(
+        (s) => String(s.id) === String(selectedSlotId),
+      );
+      if (!slotForBooking) {
+        return Alert.alert("Error", "Time slot not found.");
+      }
+
+      const slotStart = new Date(slotForBooking.start_time);
+      const confirmedSlot = await confirmOneHourWarning(slotStart);
+      if (!confirmedSlot) return;
+    }
+
     setSubmitting(true);
 
     try {
@@ -432,12 +740,13 @@ export default function PropertyDetail() {
       }
 
       // 2. Check Existing Booking
-      const { data: globalActive } = await supabase
+      const { data: globalActiveRows } = await supabase
         .from("bookings")
         .select("id")
         .eq("tenant", session.user.id)
-        .in("status", ["pending", "pending_approval", "approved", "accepted"])
-        .maybeSingle();
+        .in("status", ["pending", "pending_approval", "approved", "accepted"]);
+
+      const globalActive = (globalActiveRows || [])[0];
 
       if (globalActive) {
         throw new Error(
@@ -445,126 +754,157 @@ export default function PropertyDetail() {
         );
       }
 
-      // 3. Create Booking
-      const slot = timeSlots.find(
-        (s) => String(s.id) === String(selectedSlotId),
-      );
-      if (!slot) throw new Error("Time slot not found.");
+      let newBooking: any = null;
 
-      const { data: latestSlot, error: latestSlotError } = await supabase
-        .from("available_time_slots")
-        .select("id, landlord_id, start_time, end_time, is_booked")
-        .eq("id", slot.id)
-        .maybeSingle();
+      if (isPreferredMode && preferredStartAt && preferredEndAt) {
+        const preferredStartIso = preferredStartAt.toISOString();
+        const preferredEndIso = preferredEndAt.toISOString();
 
-      if (latestSlotError || !latestSlot || latestSlot.is_booked) {
-        await loadTimeSlots(property.landlord);
-        throw new Error(
-          "The selected schedule is not available anymore. Please choose another slot.",
-        );
-      }
+        const { data: insertedBooking, error: bookingError } = await supabase
+          .from("bookings")
+          .insert({
+            property_id: id,
+            tenant: session.user.id,
+            landlord: property.landlord,
+            start_time: preferredStartIso,
+            end_time: preferredEndIso,
+            booking_date: preferredStartIso,
+            time_slot_id: null,
+            status: "pending",
+            notes:
+              bookingNote ||
+              `Preferred schedule requested: ${preferredDate} ${formatTimeLabel(preferredStartTime)} - ${formatTimeLabel(preferredEndTime)}`,
+          })
+          .select()
+          .single();
 
-      let didReserveSlot = false;
+        if (bookingError) {
+          throw bookingError;
+        }
 
-      // Prefer lock by exact slot ID, then fallback to matching time range.
-      const { data: lockedByIdRows, error: lockByIdError } = await supabase
-        .from("available_time_slots")
-        .update({ is_booked: true })
-        .eq("id", latestSlot.id)
-        .eq("is_booked", false)
-        .select("id");
+        newBooking = insertedBooking;
+      } else {
+        // 3. Create Booking
+        const slot = slotForBooking;
 
-      if (!lockByIdError && lockedByIdRows && lockedByIdRows.length > 0) {
-        didReserveSlot = true;
-      }
+        const { data: latestSlot, error: latestSlotError } = await supabase
+          .from("available_time_slots")
+          .select("id, landlord_id, start_time, end_time, is_booked")
+          .eq("id", slot.id)
+          .maybeSingle();
 
-      if (!didReserveSlot) {
-        const { data: lockedByRangeRows, error: lockByRangeError } =
+        if (latestSlotError || !latestSlot || latestSlot.is_booked) {
+          await loadTimeSlots(property.landlord);
+          throw new Error(
+            "The selected schedule is not available anymore. Please choose another slot.",
+          );
+        }
+
+        let didReserveSlot = false;
+
+        // Prefer lock by exact slot ID, then fallback to matching time range.
+        const { data: lockedByIdRows, error: lockByIdError } = await supabase
+          .from("available_time_slots")
+          .update({ is_booked: true })
+          .eq("id", latestSlot.id)
+          .eq("is_booked", false)
+          .select("id");
+
+        if (!lockByIdError && lockedByIdRows && lockedByIdRows.length > 0) {
+          didReserveSlot = true;
+        }
+
+        if (!didReserveSlot) {
+          const { data: lockedByRangeRows, error: lockByRangeError } =
+            await supabase
+              .from("available_time_slots")
+              .update({ is_booked: true })
+              .eq("landlord_id", latestSlot.landlord_id)
+              .eq("start_time", latestSlot.start_time)
+              .eq("end_time", latestSlot.end_time)
+              .eq("is_booked", false)
+              .select("id");
+
+          if (
+            !lockByRangeError &&
+            lockedByRangeRows &&
+            lockedByRangeRows.length > 0
+          ) {
+            didReserveSlot = true;
+          } else {
+            const { data: slotConflictRows, error: slotConflictError } =
+              await supabase
+                .from("bookings")
+                .select("id")
+                .eq("property_id", id)
+                .eq("landlord", property.landlord)
+                .eq("start_time", latestSlot.start_time)
+                .eq("end_time", latestSlot.end_time)
+                .in("status", [
+                  "pending",
+                  "pending_approval",
+                  "approved",
+                  "accepted",
+                ]);
+
+            if (slotConflictError) {
+              throw slotConflictError;
+            }
+
+            const slotConflict = (slotConflictRows || [])[0];
+
+            if (slotConflict) {
+              await loadTimeSlots(property.landlord);
+              throw new Error(
+                "Failed to reserve the selected schedule. Please choose another slot.",
+              );
+            }
+
+            // If no active booking conflict exists, continue and rely on booking record.
+            console.log(
+              "Slot lock fallback: proceeding without is_booked lock",
+              lockByIdError || lockByRangeError || "no rows updated",
+            );
+          }
+        }
+
+        const { data: insertedBooking, error: bookingError } = await supabase
+          .from("bookings")
+          .insert({
+            property_id: id,
+            tenant: session.user.id,
+            landlord: property.landlord,
+            start_time: latestSlot.start_time,
+            end_time: latestSlot.end_time,
+            booking_date: latestSlot.start_time,
+            time_slot_id: latestSlot.id,
+            status: "pending",
+            notes: bookingNote || "No message provided",
+          })
+          .select()
+          .single();
+
+        if (bookingError) {
+          if (didReserveSlot) {
+            await supabase
+              .from("available_time_slots")
+              .update({ is_booked: false })
+              .eq("landlord_id", latestSlot.landlord_id)
+              .eq("start_time", latestSlot.start_time)
+              .eq("end_time", latestSlot.end_time);
+          }
+          throw bookingError;
+        }
+
+        // Best-effort sync for schemas/policies where lock fallback path was used.
+        if (!didReserveSlot) {
           await supabase
             .from("available_time_slots")
             .update({ is_booked: true })
-            .eq("landlord_id", latestSlot.landlord_id)
-            .eq("start_time", latestSlot.start_time)
-            .eq("end_time", latestSlot.end_time)
-            .eq("is_booked", false)
-            .select("id");
-
-        if (
-          !lockByRangeError &&
-          lockedByRangeRows &&
-          lockedByRangeRows.length > 0
-        ) {
-          didReserveSlot = true;
-        } else {
-          const { data: slotConflict, error: slotConflictError } =
-            await supabase
-              .from("bookings")
-              .select("id")
-              .eq("property_id", id)
-              .eq("landlord", property.landlord)
-              .eq("start_time", latestSlot.start_time)
-              .eq("end_time", latestSlot.end_time)
-              .in("status", [
-                "pending",
-                "pending_approval",
-                "approved",
-                "accepted",
-              ])
-              .maybeSingle();
-
-          if (slotConflictError) {
-            throw slotConflictError;
-          }
-
-          if (slotConflict) {
-            await loadTimeSlots(property.landlord);
-            throw new Error(
-              "Failed to reserve the selected schedule. Please choose another slot.",
-            );
-          }
-
-          // If no active booking conflict exists, continue and rely on booking record.
-          console.log(
-            "Slot lock fallback: proceeding without is_booked lock",
-            lockByIdError || lockByRangeError || "no rows updated",
-          );
+            .eq("id", latestSlot.id);
         }
-      }
 
-      const { data: newBooking, error: bookingError } = await supabase
-        .from("bookings")
-        .insert({
-          property_id: id,
-          tenant: session.user.id,
-          landlord: property.landlord,
-          start_time: latestSlot.start_time,
-          end_time: latestSlot.end_time,
-          booking_date: latestSlot.start_time,
-          time_slot_id: latestSlot.id,
-          status: "pending",
-          notes: bookingNote || "No message provided",
-        })
-        .select()
-        .single();
-
-      if (bookingError) {
-        if (didReserveSlot) {
-          await supabase
-            .from("available_time_slots")
-            .update({ is_booked: false })
-            .eq("landlord_id", latestSlot.landlord_id)
-            .eq("start_time", latestSlot.start_time)
-            .eq("end_time", latestSlot.end_time);
-        }
-        throw bookingError;
-      }
-
-      // Best-effort sync for schemas/policies where lock fallback path was used.
-      if (!didReserveSlot) {
-        await supabase
-          .from("available_time_slots")
-          .update({ is_booked: true })
-          .eq("id", latestSlot.id);
+        newBooking = insertedBooking;
       }
 
       // 5. Notifications (best-effort, non-blocking)
@@ -635,7 +975,12 @@ export default function PropertyDetail() {
         }
       }
 
-      Alert.alert("Success", "Viewing request sent successfully!");
+      Alert.alert(
+        "Success",
+        isPreferredMode
+          ? "Preferred schedule request sent successfully!"
+          : "Viewing request sent successfully!",
+      );
       handleCancelBooking();
       router.push("/bookings");
     } catch (err: any) {
@@ -2172,7 +2517,9 @@ export default function PropertyDetail() {
                   { marginBottom: 15, color: isDark ? colors.text : "#111" },
                 ]}
               >
-                Book Viewing
+                {bookingMode === "preferred"
+                  ? "Set a Preferred Schedule"
+                  : "Book Viewing"}
               </Text>
               <TouchableOpacity
                 onPress={handleCancelBooking}
@@ -2186,252 +2533,616 @@ export default function PropertyDetail() {
               </TouchableOpacity>
             </View>
 
+            <View
+              style={[
+                styles.bookingModeRow,
+                {
+                  backgroundColor: isDark ? colors.card : "#f3f4f6",
+                  borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                },
+              ]}
+            >
+              <TouchableOpacity
+                onPress={() => setBookingMode("slot")}
+                style={[
+                  styles.bookingModeBtn,
+                  bookingMode === "slot" && [
+                    styles.bookingModeBtnActive,
+                    { backgroundColor: isDark ? colors.text : "#111" },
+                  ],
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.bookingModeBtnText,
+                    { color: isDark ? colors.textMuted : "#6b7280" },
+                    bookingMode === "slot" && {
+                      color: isDark ? colors.background : "white",
+                    },
+                  ]}
+                >
+                  Available Slots
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => {
+                  setBookingMode("preferred");
+                  setSelectedSlotId("");
+                  setSelectedSlotDateKey("");
+                  setPreferredTimeError("");
+                  setShowPreferredStartPicker(false);
+                  setShowPreferredEndPicker(false);
+                }}
+                style={[
+                  styles.bookingModeBtn,
+                  bookingMode === "preferred" && [
+                    styles.bookingModeBtnActive,
+                    { backgroundColor: isDark ? colors.text : "#111" },
+                  ],
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.bookingModeBtnText,
+                    { color: isDark ? colors.textMuted : "#6b7280" },
+                    bookingMode === "preferred" && {
+                      color: isDark ? colors.background : "white",
+                    },
+                  ]}
+                >
+                  Preferred Schedule
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             <ScrollView
               showsVerticalScrollIndicator={false}
               style={{ maxHeight: height * 0.7 }}
             >
-              {/* CALENDAR IMPLEMENTATION COPY */}
-              {(() => {
-                const slotsByDate: any = {};
-                timeSlots.forEach((slot) => {
-                  const d = new Date(slot.start_time);
-                  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-                  if (!slotsByDate[key]) slotsByDate[key] = [];
-                  slotsByDate[key].push(slot);
-                });
+              {bookingMode === "slot" && (
+                <>
+                  {/* CALENDAR IMPLEMENTATION COPY */}
+                  {(() => {
+                    const slotsByDate: any = {};
+                    timeSlots.forEach((slot) => {
+                      const d = new Date(slot.start_time);
+                      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                      if (!slotsByDate[key]) slotsByDate[key] = [];
+                      slotsByDate[key].push(slot);
+                    });
 
-                const today = new Date();
-                const todayStart = new Date(
-                  today.getFullYear(),
-                  today.getMonth(),
-                  today.getDate(),
-                );
-                // Build from day 1 to avoid month-overflow skips (e.g. Mar 31 -> May).
-                const viewDate = new Date(
-                  today.getFullYear(),
-                  today.getMonth() + calendarMonthOffset,
-                  1,
-                );
-                const year = viewDate.getFullYear();
-                const month = viewDate.getMonth();
-                const daysInMonth = new Date(year, month + 1, 0).getDate();
-                const firstDay = new Date(year, month, 1).getDay();
+                    const today = new Date();
+                    const todayStart = new Date(
+                      today.getFullYear(),
+                      today.getMonth(),
+                      today.getDate(),
+                    );
+                    // Build from day 1 to avoid month-overflow skips (e.g. Mar 31 -> May).
+                    const viewDate = new Date(
+                      today.getFullYear(),
+                      today.getMonth() + calendarMonthOffset,
+                      1,
+                    );
+                    const year = viewDate.getFullYear();
+                    const month = viewDate.getMonth();
+                    const daysInMonth = new Date(year, month + 1, 0).getDate();
+                    const firstDay = new Date(year, month, 1).getDay();
 
-                const selectedSlotData = timeSlots.find(
-                  (s) => String(s.id) === String(selectedSlotId),
-                );
-                const selectedDateKey = selectedSlotData
-                  ? `${new Date(selectedSlotData.start_time).getFullYear()}-${String(new Date(selectedSlotData.start_time).getMonth() + 1).padStart(2, "0")}-${String(new Date(selectedSlotData.start_time).getDate()).padStart(2, "0")}`
-                  : null;
+                    const selectedSlotData = timeSlots.find(
+                      (s) => String(s.id) === String(selectedSlotId),
+                    );
+                    const selectedDateKeyFromSlot = selectedSlotData
+                      ? `${new Date(selectedSlotData.start_time).getFullYear()}-${String(new Date(selectedSlotData.start_time).getMonth() + 1).padStart(2, "0")}-${String(new Date(selectedSlotData.start_time).getDate()).padStart(2, "0")}`
+                      : null;
+                    const selectedDateKey =
+                      selectedSlotDateKey || selectedDateKeyFromSlot;
 
-                return (
-                  <View
-                    style={[
-                      styles.calendarContainer,
-                      { backgroundColor: isDark ? colors.card : "white" },
-                    ]}
-                  >
-                    <View style={styles.calendarHeader}>
-                      <TouchableOpacity
-                        onPress={() =>
-                          setCalendarMonthOffset((prev) => prev - 1)
-                        }
-                        style={{ padding: 5 }}
-                      >
-                        <Ionicons
-                          name="chevron-back"
-                          size={20}
-                          color={isDark ? colors.text : "#333"}
-                        />
-                      </TouchableOpacity>
-                      <Text
+                    return (
+                      <View
                         style={[
-                          styles.monthName,
-                          { color: isDark ? colors.text : "#000" },
+                          styles.calendarContainer,
+                          { backgroundColor: isDark ? colors.card : "white" },
                         ]}
                       >
-                        {viewDate.toLocaleDateString("en-US", {
-                          month: "long",
-                          year: "numeric",
-                        })}
-                      </Text>
-                      <TouchableOpacity
-                        onPress={() =>
-                          setCalendarMonthOffset((prev) => prev + 1)
-                        }
-                        style={{ padding: 5 }}
-                      >
-                        <Ionicons
-                          name="chevron-forward"
-                          size={20}
-                          color={isDark ? colors.text : "#333"}
-                        />
-                      </TouchableOpacity>
-                    </View>
-                    <View style={styles.weekRow}>
-                      {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
-                        <Text key={i} style={styles.weekDay}>
-                          {d}
-                        </Text>
-                      ))}
-                    </View>
-                    <View style={styles.daysGrid}>
-                      {Array.from({ length: firstDay }).map((_, i) => (
-                        <View key={`empty-${i}`} style={styles.dayCell} />
-                      ))}
-                      {Array.from({ length: daysInMonth }).map((_, i) => {
-                        const day = i + 1;
-                        const dateKey = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-                        const dateObj = new Date(year, month, day);
-                        const hasSlots = !!slotsByDate[dateKey];
-                        const isSelected = selectedDateKey === dateKey;
-                        const isPast = dateObj < todayStart;
-
-                        return (
+                        <View style={styles.calendarHeader}>
                           <TouchableOpacity
-                            key={day}
-                            disabled={!hasSlots || isPast}
-                            onPress={() => {
-                              const slots = slotsByDate[dateKey];
-                              if (slots && slots.length > 0)
-                                setSelectedSlotId(String(slots[0].id));
-                            }}
+                            onPress={() =>
+                              setCalendarMonthOffset((prev) => prev - 1)
+                            }
+                            style={{ padding: 5 }}
+                          >
+                            <Ionicons
+                              name="chevron-back"
+                              size={20}
+                              color={isDark ? colors.text : "#333"}
+                            />
+                          </TouchableOpacity>
+                          <Text
                             style={[
-                              styles.dayCell,
-                              isSelected && styles.dayCellSelected,
-                              (!hasSlots || isPast) && styles.dayCellDisabled,
+                              styles.monthName,
+                              { color: isDark ? colors.text : "#000" },
+                            ]}
+                          >
+                            {viewDate.toLocaleDateString("en-US", {
+                              month: "long",
+                              year: "numeric",
+                            })}
+                          </Text>
+                          <TouchableOpacity
+                            onPress={() =>
+                              setCalendarMonthOffset((prev) => prev + 1)
+                            }
+                            style={{ padding: 5 }}
+                          >
+                            <Ionicons
+                              name="chevron-forward"
+                              size={20}
+                              color={isDark ? colors.text : "#333"}
+                            />
+                          </TouchableOpacity>
+                        </View>
+                        <View style={styles.weekRow}>
+                          {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+                            <Text key={i} style={styles.weekDay}>
+                              {d}
+                            </Text>
+                          ))}
+                        </View>
+                        <View style={styles.daysGrid}>
+                          {Array.from({ length: firstDay }).map((_, i) => (
+                            <View key={`empty-${i}`} style={styles.dayCell} />
+                          ))}
+                          {Array.from({ length: daysInMonth }).map((_, i) => {
+                            const day = i + 1;
+                            const dateKey = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+                            const dateObj = new Date(year, month, day);
+                            const daySlots = slotsByDate[dateKey] || [];
+                            const hasSlots = daySlots.length > 0;
+                            const availableCount = daySlots.filter(
+                              (slot: any) => !slot.isBookedByTenant,
+                            ).length;
+                            const isFullyBooked =
+                              hasSlots && availableCount === 0;
+                            const isSelected = selectedDateKey === dateKey;
+                            const isPast = dateObj < todayStart;
+
+                            return (
+                              <TouchableOpacity
+                                key={day}
+                                disabled={!hasSlots || isPast}
+                                onPress={() => {
+                                  const slots = slotsByDate[dateKey];
+                                  setSelectedSlotDateKey(dateKey);
+                                  if (slots && slots.length > 0) {
+                                    const firstAvailable = slots.find(
+                                      (slot: any) => !slot.isBookedByTenant,
+                                    );
+                                    setSelectedSlotId(
+                                      firstAvailable
+                                        ? String(firstAvailable.id)
+                                        : "",
+                                    );
+                                  }
+                                }}
+                                style={[
+                                  styles.dayCell,
+                                  isSelected && styles.dayCellSelected,
+                                  (!hasSlots || isPast) &&
+                                    styles.dayCellDisabled,
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.dayText,
+                                    { color: isDark ? colors.text : "#333" },
+                                    isSelected && { color: "white" },
+                                    (!hasSlots || isPast) && {
+                                      color: isDark ? "#555" : "#ccc",
+                                    },
+                                  ]}
+                                >
+                                  {day}
+                                </Text>
+                                {hasSlots && !isPast && !isSelected && (
+                                  <View
+                                    style={[
+                                      styles.dayDot,
+                                      isFullyBooked
+                                        ? styles.dayDotBooked
+                                        : styles.dayDotAvailable,
+                                    ]}
+                                  />
+                                )}
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+
+                        <View
+                          style={[
+                            styles.calendarLegend,
+                            {
+                              borderTopColor: isDark
+                                ? colors.border
+                                : "#f3f4f6",
+                            },
+                          ]}
+                        >
+                          <View style={styles.legendItem}>
+                            <View
+                              style={[styles.legendDot, styles.dayDotAvailable]}
+                            />
+                            <Text
+                              style={{
+                                fontSize: 12,
+                                color: isDark
+                                  ? colors.textSecondary
+                                  : "#374151",
+                              }}
+                            >
+                              Available
+                            </Text>
+                          </View>
+                          <View style={styles.legendItem}>
+                            <View
+                              style={[styles.legendDot, styles.dayDotBooked]}
+                            />
+                            <Text
+                              style={{
+                                fontSize: 12,
+                                color: isDark
+                                  ? colors.textSecondary
+                                  : "#374151",
+                              }}
+                            >
+                              Fully Booked
+                            </Text>
+                          </View>
+                        </View>
+
+                        {selectedDateKey && (
+                          <View
+                            style={[
+                              styles.slotSelector,
+                              {
+                                borderTopColor: isDark
+                                  ? colors.border
+                                  : "#f3f4f6",
+                              },
                             ]}
                           >
                             <Text
                               style={[
-                                styles.dayText,
-                                { color: isDark ? colors.text : "#333" },
-                                isSelected && { color: "white" },
-                                (!hasSlots || isPast) && {
-                                  color: isDark ? "#555" : "#ccc",
-                                },
+                                styles.label,
+                                { color: isDark ? colors.textMuted : "#666" },
                               ]}
                             >
-                              {day}
+                              AVAILABLE TIMES
                             </Text>
-                            {hasSlots && !isPast && !isSelected && (
-                              <View
-                                style={[
-                                  styles.dayDot,
-                                  {
-                                    backgroundColor: isDark
-                                      ? colors.text
-                                      : "black",
-                                  },
-                                ]}
-                              />
-                            )}
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
+                            <View
+                              style={{
+                                flexDirection: "row",
+                                flexWrap: "wrap",
+                                gap: 8,
+                                marginTop: 5,
+                              }}
+                            >
+                              {[...(slotsByDate[selectedDateKey] || [])]
+                                .sort(
+                                  (a: any, b: any) =>
+                                    new Date(a.start_time).getTime() -
+                                    new Date(b.start_time).getTime(),
+                                )
+                                .map((slot: any) => {
+                                  const sortedDaySlots = [
+                                    ...(slotsByDate[selectedDateKey] || []),
+                                  ].sort(
+                                    (a: any, b: any) =>
+                                      new Date(a.start_time).getTime() -
+                                      new Date(b.start_time).getTime(),
+                                  );
+                                  const slotStart = new Date(slot.start_time);
+                                  const slotEnd = new Date(slot.end_time);
+                                  const isMorning = slotStart.getHours() < 12;
+                                  const periodSlots = sortedDaySlots.filter(
+                                    (s: any) => {
+                                      const h = new Date(
+                                        s.start_time,
+                                      ).getHours();
+                                      return isMorning ? h < 12 : h >= 12;
+                                    },
+                                  );
+                                  const periodIndex =
+                                    periodSlots.findIndex(
+                                      (s: any) =>
+                                        String(s.id) === String(slot.id),
+                                    ) + 1;
+                                  const slotLabel = `${isMorning ? "AM" : "PM"} ${Math.max(periodIndex, 1)}`;
+                                  const isActive =
+                                    String(selectedSlotId) === String(slot.id);
+                                  const isBooked = !!slot.isBookedByTenant;
 
-                    {selectedDateKey && (
-                      <View
+                                  return (
+                                    <TouchableOpacity
+                                      key={slot.id}
+                                      disabled={isBooked}
+                                      onPress={() =>
+                                        !isBooked &&
+                                        setSelectedSlotId(String(slot.id))
+                                      }
+                                      style={[
+                                        styles.timeChip,
+                                        {
+                                          backgroundColor: isBooked
+                                            ? isDark
+                                              ? "#3b1010"
+                                              : "#fef2f2"
+                                            : isDark
+                                              ? colors.surface
+                                              : "#f3f4f6",
+                                          borderColor: isBooked
+                                            ? "#ef4444"
+                                            : isDark
+                                              ? colors.cardBorder
+                                              : "#eee",
+                                        },
+                                        isActive &&
+                                          !isBooked &&
+                                          styles.timeChipActive,
+                                      ]}
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.timeChipText,
+                                          {
+                                            color: isBooked
+                                              ? "#ef4444"
+                                              : isDark
+                                                ? colors.text
+                                                : "#333",
+                                          },
+                                          isActive &&
+                                            !isBooked && { color: "white" },
+                                        ]}
+                                      >
+                                        {slotLabel} •{" "}
+                                        {slotStart.toLocaleTimeString([], {
+                                          hour: "numeric",
+                                          minute: "2-digit",
+                                        })}
+                                        {" - "}
+                                        {slotEnd.toLocaleTimeString([], {
+                                          hour: "numeric",
+                                          minute: "2-digit",
+                                        })}
+                                        {isBooked ? " • BOOKED" : ""}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                            </View>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })()}
+                </>
+              )}
+
+              {bookingMode === "preferred" && (
+                <View
+                  style={[
+                    styles.calendarContainer,
+                    { backgroundColor: isDark ? colors.card : "white" },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.label,
+                      {
+                        marginBottom: 8,
+                        color: isDark ? colors.textMuted : "#666",
+                      },
+                    ]}
+                  >
+                    PREFERRED DATE
+                  </Text>
+
+                  <CalendarPicker
+                    selectedDate={preferredDate}
+                    onDateSelect={(date) => {
+                      setPreferredDate(date);
+                      setPreferredStartTime("");
+                      setPreferredEndTime("");
+                      setPreferredTimeError("");
+                      setShowPreferredStartPicker(false);
+                      setShowPreferredEndPicker(false);
+                    }}
+                    allowPastDates={false}
+                    isDark={isDark}
+                    themeColors={{
+                      card: colors.card,
+                      border: colors.cardBorder,
+                      text: colors.text,
+                      textMuted: colors.textMuted,
+                      background: colors.background,
+                    }}
+                  />
+
+                  {preferredDate ? (
+                    <View
+                      style={[
+                        styles.slotSelector,
+                        {
+                          borderTopColor: isDark ? colors.border : "#f3f4f6",
+                        },
+                      ]}
+                    >
+                      <Text
                         style={[
-                          styles.slotSelector,
+                          styles.label,
+                          { color: isDark ? colors.textMuted : "#666" },
+                        ]}
+                      >
+                        START TIME
+                      </Text>
+
+                      <TouchableOpacity
+                        onPress={() => {
+                          if (Platform.OS === "android") {
+                            DateTimePickerAndroid.open({
+                              value: getPreferredStartPickerValue(),
+                              mode: "time",
+                              onChange: handlePreferredStartTimeChange,
+                            });
+                          } else {
+                            setShowPreferredStartPicker((prev) => !prev);
+                          }
+                        }}
+                        style={[
+                          styles.timeInputBtn,
                           {
-                            borderTopColor: isDark ? colors.border : "#f3f4f6",
+                            backgroundColor: isDark
+                              ? colors.surface
+                              : "#f9fafb",
+                            borderColor: isDark ? colors.cardBorder : "#e5e7eb",
                           },
                         ]}
                       >
+                        <Ionicons
+                          name="time-outline"
+                          size={18}
+                          color={isDark ? colors.text : "#111"}
+                        />
                         <Text
                           style={[
-                            styles.label,
-                            { color: isDark ? colors.textMuted : "#666" },
+                            styles.timeInputText,
+                            { color: isDark ? colors.text : "#111" },
                           ]}
                         >
-                          AVAILABLE TIMES
+                          {preferredStartTime
+                            ? formatTimeLabel(preferredStartTime)
+                            : "Tap to input start time"}
                         </Text>
-                        <View
-                          style={{
-                            flexDirection: "row",
-                            flexWrap: "wrap",
-                            gap: 8,
-                            marginTop: 5,
-                          }}
+                      </TouchableOpacity>
+
+                      {Platform.OS === "ios" && showPreferredStartPicker && (
+                        <DateTimePicker
+                          value={getPreferredStartPickerValue()}
+                          mode="time"
+                          display="spinner"
+                          themeVariant={isDark ? "dark" : "light"}
+                          onChange={handlePreferredStartTimeChange}
+                        />
+                      )}
+
+                      <Text
+                        style={[
+                          styles.label,
+                          {
+                            color: isDark ? colors.textMuted : "#666",
+                            marginTop: 12,
+                          },
+                        ]}
+                      >
+                        END TIME
+                      </Text>
+
+                      <TouchableOpacity
+                        disabled={!preferredStartTime}
+                        onPress={() => {
+                          if (Platform.OS === "android") {
+                            DateTimePickerAndroid.open({
+                              value: getPreferredEndPickerValue(),
+                              mode: "time",
+                              onChange: handlePreferredEndTimeChange,
+                            });
+                          } else {
+                            setShowPreferredEndPicker((prev) => !prev);
+                          }
+                        }}
+                        style={[
+                          styles.timeInputBtn,
+                          {
+                            backgroundColor: isDark
+                              ? colors.surface
+                              : "#f9fafb",
+                            borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                          },
+                          !preferredStartTime && styles.dayCellDisabled,
+                        ]}
+                      >
+                        <Ionicons
+                          name="time-outline"
+                          size={18}
+                          color={isDark ? colors.text : "#111"}
+                        />
+                        <Text
+                          style={[
+                            styles.timeInputText,
+                            { color: isDark ? colors.text : "#111" },
+                            !preferredStartTime && {
+                              color: isDark ? "#6b7280" : "#9ca3af",
+                            },
+                          ]}
                         >
-                          {[...(slotsByDate[selectedDateKey] || [])]
-                            .sort(
-                              (a: any, b: any) =>
-                                new Date(a.start_time).getTime() -
-                                new Date(b.start_time).getTime(),
-                            )
-                            .map((slot: any) => {
-                              const sortedDaySlots = [
-                                ...(slotsByDate[selectedDateKey] || []),
-                              ].sort(
-                                (a: any, b: any) =>
-                                  new Date(a.start_time).getTime() -
-                                  new Date(b.start_time).getTime(),
-                              );
-                              const slotStart = new Date(slot.start_time);
-                              const slotEnd = new Date(slot.end_time);
-                              const isMorning = slotStart.getHours() < 12;
-                              const periodSlots = sortedDaySlots.filter(
-                                (s: any) => {
-                                  const h = new Date(s.start_time).getHours();
-                                  return isMorning ? h < 12 : h >= 12;
-                                },
-                              );
-                              const periodIndex =
-                                periodSlots.findIndex(
-                                  (s: any) => String(s.id) === String(slot.id),
-                                ) + 1;
-                              const slotLabel = `${isMorning ? "AM" : "PM"} ${Math.max(periodIndex, 1)}`;
-                              const isActive =
-                                String(selectedSlotId) === String(slot.id);
-                              return (
-                                <TouchableOpacity
-                                  key={slot.id}
-                                  onPress={() =>
-                                    setSelectedSlotId(String(slot.id))
-                                  }
-                                  style={[
-                                    styles.timeChip,
-                                    {
-                                      backgroundColor: isDark
-                                        ? colors.surface
-                                        : "#f3f4f6",
-                                      borderColor: isDark
-                                        ? colors.cardBorder
-                                        : "#eee",
-                                    },
-                                    isActive && styles.timeChipActive,
-                                  ]}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.timeChipText,
-                                      { color: isDark ? colors.text : "#333" },
-                                      isActive && { color: "white" },
-                                    ]}
-                                  >
-                                    {slotLabel} •{" "}
-                                    {slotStart.toLocaleTimeString([], {
-                                      hour: "numeric",
-                                      minute: "2-digit",
-                                    })}
-                                    {" - "}
-                                    {slotEnd.toLocaleTimeString([], {
-                                      hour: "numeric",
-                                      minute: "2-digit",
-                                    })}
-                                  </Text>
-                                </TouchableOpacity>
-                              );
-                            })}
-                        </View>
-                      </View>
-                    )}
-                  </View>
-                );
-              })()}
+                          {preferredEndTime
+                            ? formatTimeLabel(preferredEndTime)
+                            : preferredStartTime
+                              ? "Tap to input end time"
+                              : "Select start time first"}
+                        </Text>
+                      </TouchableOpacity>
+
+                      {Platform.OS === "ios" && showPreferredEndPicker && (
+                        <DateTimePicker
+                          value={getPreferredEndPickerValue()}
+                          mode="time"
+                          display="spinner"
+                          themeVariant={isDark ? "dark" : "light"}
+                          onChange={handlePreferredEndTimeChange}
+                        />
+                      )}
+
+                      {!!preferredTimeError && (
+                        <Text
+                          style={[
+                            styles.preferredErrorText,
+                            { color: isDark ? "#fca5a5" : "#b91c1c" },
+                          ]}
+                        >
+                          {preferredTimeError}
+                        </Text>
+                      )}
+
+                      {preferredStartTime && preferredEndTime && (
+                        <Text
+                          style={[
+                            styles.preferredRangeText,
+                            {
+                              color: isDark ? colors.textSecondary : "#374151",
+                            },
+                          ]}
+                        >
+                          Selected range: {formatTimeLabel(preferredStartTime)}{" "}
+                          - {formatTimeLabel(preferredEndTime)}
+                        </Text>
+                      )}
+                    </View>
+                  ) : (
+                    <Text
+                      style={{
+                        marginTop: 12,
+                        fontSize: 12,
+                        color: isDark ? colors.textMuted : "#6b7280",
+                      }}
+                    >
+                      Select a date first to choose your preferred time range.
+                    </Text>
+                  )}
+                </View>
+              )}
 
               <Text
                 style={[
@@ -2495,17 +3206,36 @@ export default function PropertyDetail() {
               <TouchableOpacity
                 style={[
                   styles.btnBlack,
-                  (!termsAccepted || !selectedSlotId) && {
+                  (!termsAccepted ||
+                    (bookingMode === "slot"
+                      ? !selectedSlotId
+                      : !preferredDate ||
+                        !preferredStartTime ||
+                        !preferredEndTime ||
+                        !!preferredTimeError)) && {
                     backgroundColor: "#ccc",
                   },
                 ]}
-                disabled={!termsAccepted || !selectedSlotId || submitting}
+                disabled={
+                  !termsAccepted ||
+                  submitting ||
+                  (bookingMode === "slot"
+                    ? !selectedSlotId
+                    : !preferredDate ||
+                      !preferredStartTime ||
+                      !preferredEndTime ||
+                      !!preferredTimeError)
+                }
                 onPress={handleConfirmBooking}
               >
                 {submitting ? (
                   <ActivityIndicator color="white" />
                 ) : (
-                  <Text style={styles.btnTextWhite}>Confirm Booking</Text>
+                  <Text style={styles.btnTextWhite}>
+                    {bookingMode === "preferred"
+                      ? "Submit Preferred Schedule"
+                      : "Confirm Booking"}
+                  </Text>
                 )}
               </TouchableOpacity>
               <View style={{ height: 20 }} />
@@ -2556,6 +3286,25 @@ export default function PropertyDetail() {
           <TouchableOpacity style={styles.btnBlack} onPress={handleOpenBooking}>
             <Text style={styles.btnTextWhite}>Book a Viewing</Text>
           </TouchableOpacity>
+          {/* <TouchableOpacity
+            style={[
+              styles.preferredFooterBtn,
+              {
+                borderColor: isDark ? colors.cardBorder : "#d1d5db",
+                backgroundColor: isDark ? colors.card : "#f9fafb",
+              },
+            ]}
+            onPress={handleOpenPreferredBooking}
+          >
+            <Text
+              style={[
+                styles.preferredFooterText,
+                { color: isDark ? colors.text : "#111" },
+              ]}
+            >
+              Set a Preferred Schedule
+            </Text>
+          </TouchableOpacity> */}
         </View>
       )}
     </View>
@@ -2944,6 +3693,30 @@ const styles = StyleSheet.create({
     position: "absolute",
     bottom: 4,
   },
+  dayDotAvailable: {
+    backgroundColor: "#16a34a",
+  },
+  dayDotBooked: {
+    backgroundColor: "#ef4444",
+  },
+  calendarLegend: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 18,
+  },
+  legendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  legendDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+  },
 
   slotSelector: {
     marginTop: 15,
@@ -3070,5 +3843,63 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     lineHeight: 20,
+  },
+  preferredFooterBtn: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  preferredFooterText: {
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  bookingModeRow: {
+    flexDirection: "row",
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 12,
+    gap: 4,
+  },
+  bookingModeBtn: {
+    flex: 1,
+    borderRadius: 8,
+    paddingVertical: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bookingModeBtnActive: {
+    backgroundColor: "#111",
+  },
+  bookingModeBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  timeInputBtn: {
+    marginTop: 6,
+    minHeight: 46,
+    borderWidth: 1,
+    borderRadius: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  timeInputText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  preferredRangeText: {
+    marginTop: 12,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  preferredErrorText: {
+    marginTop: 10,
+    fontSize: 12,
+    fontWeight: "600",
   },
 });

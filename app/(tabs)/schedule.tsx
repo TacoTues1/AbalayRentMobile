@@ -1,17 +1,19 @@
 import { Ionicons } from "@expo/vector-icons";
+import { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BlockingLoader from "../../components/ui/BlockingLoader";
@@ -104,20 +106,6 @@ const to24hString = (hour: number, minute: number) => {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 };
 
-const build12hTimeOptions = (stepMinutes = 30) => {
-  const options: string[] = [];
-  for (let total = 0; total < 24 * 60; total += stepMinutes) {
-    const hour24 = Math.floor(total / 60);
-    const minute = total % 60;
-    const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
-    const suffix = hour24 < 12 ? "AM" : "PM";
-    options.push(`${hour12}:${String(minute).padStart(2, "0")} ${suffix}`);
-  }
-  return options;
-};
-
-const TIME_OPTIONS_12H = build12hTimeOptions(30);
-
 const formatDateKey = (date: Date) => {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -163,6 +151,26 @@ const getNowTotalMinutesForDateKey = (dateKey: string) => {
   return today.getHours() * 60 + today.getMinutes();
 };
 
+const rangesOverlap = (startA: Date, endA: Date, startB: Date, endB: Date) => {
+  return startA.getTime() < endB.getTime() && endA.getTime() > startB.getTime();
+};
+
+const formatRangeLabel = (start: Date, end: Date) => {
+  return `${start.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })} ${start.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  })} - ${end.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  })}`;
+};
+
 export default function Schedule() {
   const router = useRouter();
   const { isDark, colors } = useTheme();
@@ -185,9 +193,6 @@ export default function Schedule() {
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
   const [customStartTime, setCustomStartTime] = useState("");
   const [customEndTime, setCustomEndTime] = useState("");
-  const [timePickerTarget, setTimePickerTarget] = useState<
-    "start" | "end" | null
-  >(null);
   const [submittingCustomSchedule, setSubmittingCustomSchedule] =
     useState(false);
 
@@ -345,6 +350,21 @@ export default function Schedule() {
       );
     }
 
+    const customOverlap = timeSlots.find((existing: any) => {
+      const existingStart = new Date(existing.start_time);
+      const existingEnd = new Date(existing.end_time);
+      return rangesOverlap(start, end, existingStart, existingEnd);
+    });
+
+    if (customOverlap) {
+      const overlapStart = new Date(customOverlap.start_time);
+      const overlapEnd = new Date(customOverlap.end_time);
+      return Alert.alert(
+        "Schedule Conflict",
+        `You cannot add this custom schedule because it overlaps with an existing slot: ${formatRangeLabel(overlapStart, overlapEnd)}.`,
+      );
+    }
+
     if (!session?.user?.id) return;
 
     setSubmittingCustomSchedule(true);
@@ -409,56 +429,71 @@ export default function Schedule() {
     });
   };
 
-  const getTimeOptionsForPicker = () => {
-    const nowTotal = getNowTotalMinutesForDateKey(customDate);
-
-    let options = TIME_OPTIONS_12H;
-
-    if (nowTotal !== null) {
-      options = options.filter((option) => {
-        const parsed = parse12hTimeValue(option);
-        return !!parsed && parsed.total > nowTotal;
-      });
-    }
-
-    if (timePickerTarget !== "end") return options;
-
-    const startParsed = parse12hTimeValue(customStartTime);
-    if (!startParsed) return options;
-
-    return options.filter((option) => {
-      const parsed = parse12hTimeValue(option);
-      return !!parsed && parsed.total > startParsed.total;
-    });
-  };
-
-  const handleTimeSelect = (value: string) => {
-    const nowTotal = getNowTotalMinutesForDateKey(customDate);
-    const selectedParsed = parse12hTimeValue(value);
-    if (
-      nowTotal !== null &&
-      selectedParsed &&
-      selectedParsed.total <= nowTotal
-    ) {
+  const openCustomTimePicker = (target: "start" | "end") => {
+    if (Platform.OS !== "android") {
       Alert.alert(
-        "Slot Unavailable",
-        "You cannot select a custom time that has already passed.",
+        "Time Picker",
+        "Custom time picker is currently optimized for Android.",
       );
       return;
     }
 
-    if (timePickerTarget === "start") {
-      setCustomStartTime(value);
+    const baseDate = parseDateKey(customDate) || new Date();
+    const currentValue = target === "start" ? customStartTime : customEndTime;
+    const parsedCurrent = parse12hTimeValue(currentValue);
 
-      const nextStart = parse12hTimeValue(value);
-      const currentEnd = parse12hTimeValue(customEndTime);
-      if (nextStart && currentEnd && currentEnd.total <= nextStart.total) {
-        setCustomEndTime("");
-      }
-    } else if (timePickerTarget === "end") {
-      setCustomEndTime(value);
+    const initialValue = new Date(baseDate);
+    if (parsedCurrent) {
+      initialValue.setHours(parsedCurrent.hour, parsedCurrent.minute, 0, 0);
+    } else {
+      const now = new Date();
+      initialValue.setHours(now.getHours(), now.getMinutes(), 0, 0);
     }
-    setTimePickerTarget(null);
+
+    DateTimePickerAndroid.open({
+      value: initialValue,
+      mode: "time",
+      is24Hour: false,
+      onChange: (event, selectedDate) => {
+        if (event.type !== "set" || !selectedDate) return;
+
+        const selected12h = to12h(
+          to24hString(selectedDate.getHours(), selectedDate.getMinutes()),
+        );
+        const selectedParsed = parse12hTimeValue(selected12h);
+        if (!selectedParsed) return;
+
+        const nowTotal = getNowTotalMinutesForDateKey(customDate);
+        if (nowTotal !== null && selectedParsed.total <= nowTotal) {
+          Alert.alert(
+            "Slot Unavailable",
+            "You cannot select a custom time that has already passed.",
+          );
+          return;
+        }
+
+        if (target === "start") {
+          setCustomStartTime(selected12h);
+
+          const currentEnd = parse12hTimeValue(customEndTime);
+          if (currentEnd && currentEnd.total <= selectedParsed.total) {
+            setCustomEndTime("");
+          }
+          return;
+        }
+
+        const startParsed = parse12hTimeValue(customStartTime);
+        if (startParsed && selectedParsed.total <= startParsed.total) {
+          Alert.alert(
+            "Invalid Range",
+            "End time must be later than start time.",
+          );
+          return;
+        }
+
+        setCustomEndTime(selected12h);
+      },
+    });
   };
 
   const addTimeSlots = async () => {
@@ -468,6 +503,12 @@ export default function Schedule() {
 
     setSubmitting(true);
     const slotsToCreate = [];
+    const conflicts: {
+      start: Date;
+      end: Date;
+      existingStart: Date;
+      existingEnd: Date;
+    }[] = [];
 
     for (const dateStr of Object.keys(selectedDateSlots)) {
       if (isPastDateKey(dateStr)) continue;
@@ -492,6 +533,22 @@ export default function Schedule() {
 
         if (start < new Date()) continue;
 
+        const overlap = timeSlots.find((existing: any) => {
+          const existingStart = new Date(existing.start_time);
+          const existingEnd = new Date(existing.end_time);
+          return rangesOverlap(start, end, existingStart, existingEnd);
+        });
+
+        if (overlap) {
+          conflicts.push({
+            start,
+            end,
+            existingStart: new Date(overlap.start_time),
+            existingEnd: new Date(overlap.end_time),
+          });
+          continue;
+        }
+
         slotsToCreate.push({
           property_id: null,
           landlord_id: session.user.id,
@@ -500,6 +557,15 @@ export default function Schedule() {
           is_booked: false,
         });
       }
+    }
+
+    if (conflicts.length > 0) {
+      setSubmitting(false);
+      const first = conflicts[0];
+      return Alert.alert(
+        "Schedule Conflict",
+        `Some selected schedules overlap with existing availability. Example conflict:\nNew: ${formatRangeLabel(first.start, first.end)}\nExisting: ${formatRangeLabel(first.existingStart, first.existingEnd)}\n\nPlease remove conflicting selections and try again.`,
+      );
     }
 
     const { error } = await supabase
@@ -1477,7 +1543,7 @@ export default function Schedule() {
                   >
                     <TouchableOpacity
                       style={styles.customTimePickerPressable}
-                      onPress={() => setTimePickerTarget("start")}
+                      onPress={() => openCustomTimePicker("start")}
                       activeOpacity={0.8}
                     >
                       <Ionicons
@@ -1496,7 +1562,7 @@ export default function Schedule() {
                               },
                         ]}
                       >
-                        {customStartTime || "Select start time"}
+                        {customStartTime || "Tap to input start time"}
                       </Text>
                       <Ionicons
                         name="chevron-down"
@@ -1527,7 +1593,7 @@ export default function Schedule() {
                   >
                     <TouchableOpacity
                       style={styles.customTimePickerPressable}
-                      onPress={() => setTimePickerTarget("end")}
+                      onPress={() => openCustomTimePicker("end")}
                       activeOpacity={0.8}
                     >
                       <Ionicons
@@ -1546,7 +1612,7 @@ export default function Schedule() {
                               },
                         ]}
                       >
-                        {customEndTime || "Select end time"}
+                        {customEndTime || "Tap to input end time"}
                       </Text>
                       <Ionicons
                         name="chevron-down"
@@ -1564,7 +1630,7 @@ export default function Schedule() {
                   { color: isDark ? colors.textMuted : "#9ca3af" },
                 ]}
               >
-                Example: 1:30 PM to 3:00 PM
+                Use 12-hour format only. Example: 1:30 PM to 3:00 PM
               </Text>
 
               <TouchableOpacity
@@ -1760,103 +1826,6 @@ export default function Schedule() {
                 )}
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={timePickerTarget !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setTimePickerTarget(null)}
-      >
-        <View style={styles.timePickerOverlay}>
-          <View
-            style={[
-              styles.timePickerCard,
-              { backgroundColor: isDark ? colors.surface : "white" },
-            ]}
-          >
-            <View style={styles.timePickerHeader}>
-              <Text
-                style={[
-                  styles.timePickerTitle,
-                  { color: isDark ? colors.text : "#111" },
-                ]}
-              >
-                {timePickerTarget === "start"
-                  ? "Select Start Time"
-                  : "Select End Time"}
-              </Text>
-              <TouchableOpacity onPress={() => setTimePickerTarget(null)}>
-                <Ionicons
-                  name="close"
-                  size={20}
-                  color={isDark ? colors.textMuted : "#666"}
-                />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView
-              style={styles.timePickerList}
-              contentContainerStyle={styles.timePickerListContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {getTimeOptionsForPicker().length === 0 ? (
-                <Text
-                  style={[
-                    styles.timePickerEmpty,
-                    { color: isDark ? colors.textMuted : "#9ca3af" },
-                  ]}
-                >
-                  No available end times. Select an earlier start time.
-                </Text>
-              ) : (
-                getTimeOptionsForPicker().map((option) => {
-                  const isSelected =
-                    (timePickerTarget === "start" &&
-                      option === customStartTime) ||
-                    (timePickerTarget === "end" && option === customEndTime);
-
-                  return (
-                    <TouchableOpacity
-                      key={option}
-                      style={[
-                        styles.timePickerOption,
-                        {
-                          borderColor: isDark ? colors.cardBorder : "#e5e7eb",
-                          backgroundColor: isDark ? colors.card : "#f9fafb",
-                        },
-                        isSelected && {
-                          borderColor: isDark ? "white" : "#111",
-                          backgroundColor: isDark
-                            ? colors.background
-                            : "#eef2ff",
-                        },
-                      ]}
-                      onPress={() => handleTimeSelect(option)}
-                      activeOpacity={0.85}
-                    >
-                      <Text
-                        style={[
-                          styles.timePickerOptionText,
-                          { color: isDark ? colors.text : "#111" },
-                        ]}
-                      >
-                        {option}
-                      </Text>
-                      {isSelected && (
-                        <Ionicons
-                          name="checkmark-circle"
-                          size={16}
-                          color={isDark ? colors.text : "#111"}
-                        />
-                      )}
-                    </TouchableOpacity>
-                  );
-                })
-              )}
-            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -2298,57 +2267,4 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   confirmBtnText: { color: "white", fontWeight: "700", fontSize: 14 },
-
-  timePickerOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    justifyContent: "center",
-    paddingHorizontal: 24,
-  },
-  timePickerCard: {
-    borderRadius: 16,
-    maxHeight: "75%",
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    overflow: "hidden",
-  },
-  timePickerHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
-  },
-  timePickerTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  timePickerList: {
-    maxHeight: 360,
-  },
-  timePickerListContent: {
-    padding: 12,
-    gap: 8,
-  },
-  timePickerOption: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  timePickerOptionText: {
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  timePickerEmpty: {
-    textAlign: "center",
-    fontSize: 12,
-    fontWeight: "600",
-    paddingVertical: 20,
-  },
 });

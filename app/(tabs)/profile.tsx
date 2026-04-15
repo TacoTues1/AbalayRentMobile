@@ -3,12 +3,14 @@ import { decode } from "base64-arraybuffer";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
     Image,
+    KeyboardAvoidingView,
     Modal,
+    Platform,
     ScrollView,
     StyleSheet,
     Switch,
@@ -20,6 +22,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import PrivacyView from "../../components/profile/PrivacyView";
 import TermsView from "../../components/profile/TermsView";
+import CalendarPicker from "../../components/ui/CalendarPicker";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
 
@@ -137,7 +140,38 @@ export default function Profile() {
   const [otp, setOtp] = useState("");
   const [otpLoading, setOtpLoading] = useState(false);
   const [verifiedPhone, setVerifiedPhone] = useState("");
+  const [localOtpCode, setLocalOtpCode] = useState("");
   const [dbVerifiedPhone, setDbVerifiedPhone] = useState("");
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Cleanup cooldown timer on unmount
+  useEffect(() => {
+    return () => {
+      if (cooldownRef.current) clearInterval(cooldownRef.current);
+    };
+  }, []);
+
+  const startResendCooldown = () => {
+    setResendCooldown(90); // 1 minute 30 seconds
+    if (cooldownRef.current) clearInterval(cooldownRef.current);
+    cooldownRef.current = setInterval(() => {
+      setResendCooldown((prev) => {
+        if (prev <= 1) {
+          if (cooldownRef.current) clearInterval(cooldownRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  const formatCooldown = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+  const [editingPhone, setEditingPhone] = useState(false);
 
   // --- Password STATE ---
   const [currentPassword, setCurrentPassword] = useState("");
@@ -161,6 +195,7 @@ export default function Profile() {
 
   // --- UI STATE ---
   const [showGenderModal, setShowGenderModal] = useState(false);
+  const [showBirthdayPicker, setShowBirthdayPicker] = useState(false);
 
   useEffect(() => {
     getProfile();
@@ -313,31 +348,51 @@ export default function Profile() {
   };
 
   const handleSendVerification = async () => {
-    // (Simplified for brevity - kept logic same as original file)
     if (!phone) return Alert.alert("Error", "Please enter a phone number.");
     setOtpLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/verify-phone`, {
+      const baseUrl = API_URL.replace(/\/+$/, "");
+      const userEmail = session?.user?.email || "";
+      const response = await fetch(`${baseUrl}/api/verify-phone`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "send", phone }),
+        body: JSON.stringify({ action: "send", phone, email: userEmail }),
       });
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) {
+        const text = await response.text();
+        let errorMsg = "Failed to send verification code.";
+        try {
+          const json = JSON.parse(text);
+          errorMsg = json.error || errorMsg;
+        } catch {
+          errorMsg = text || errorMsg;
+        }
+        throw new Error(errorMsg);
+      }
+      const data = await response.json();
       setOtpSent(true);
-      Alert.alert("Success", "Verification code sent!");
+      if (data.method === "email") {
+        Alert.alert(
+          "Code Sent",
+          "SMS was unavailable. A verification code has been sent to your email instead.",
+        );
+      } else {
+        Alert.alert("Code Sent", "Verification code sent via SMS!");
+      }
     } catch (e: any) {
-      Alert.alert("Error", e.message);
+      console.error("Phone verification error:", e);
+      Alert.alert("Error", e.message || "Failed to send verification code.");
     } finally {
       setOtpLoading(false);
     }
   };
 
   const handleVerifyOtp = async () => {
-    // (Simplified logic same as original)
     if (otp.length < 6) return Alert.alert("Error", "Enter 6-digit code");
     setOtpLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/verify-phone`, {
+      const baseUrl = API_URL.replace(/\/+$/, "");
+      const response = await fetch(`${baseUrl}/api/verify-phone`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -352,15 +407,18 @@ export default function Profile() {
       setVerifying(false);
       setOtpSent(false);
       setOtp("");
+      setEditingPhone(false);
       setVerifiedPhone(data.phone);
+      setDbVerifiedPhone(data.phone);
       setPhone(data.phone);
       await supabase
         .from("profiles")
         .update({ phone_verified: true })
         .eq("id", session.user.id);
-      Alert.alert("Success", "Verified!");
+      Alert.alert("Success", "Phone number verified!");
     } catch (e: any) {
-      Alert.alert("Error", e.message);
+      console.error("OTP verification error:", e);
+      Alert.alert("Error", e.message || "Verification failed.");
     } finally {
       setOtpLoading(false);
     }
@@ -369,7 +427,9 @@ export default function Profile() {
   // --- ACTION HANDLERS ---
   const handleUpdateProfile = async () => {
     setSaving(true);
-    const updates = {
+    const normalize = (p: string) => p?.replace(/\D/g, "") || "";
+    const phoneChanged = normalize(phone) !== normalize(dbVerifiedPhone);
+    const updates: Record<string, any> = {
       first_name: firstName,
       middle_name: middleName || "N/A",
       last_name: lastName,
@@ -377,6 +437,10 @@ export default function Profile() {
       birthday: birthday || null,
       gender: gender || null,
     };
+    // If phone changed from the verified one, reset verification
+    if (phoneChanged && dbVerifiedPhone) {
+      updates.phone_verified = false;
+    }
     const { error } = await supabase
       .from("profiles")
       .update(updates)
@@ -384,6 +448,12 @@ export default function Profile() {
     setSaving(false);
     if (error) Alert.alert("Error", error.message);
     else {
+      // Update local verified state if phone changed
+      if (phoneChanged && dbVerifiedPhone) {
+        setVerifiedPhone("");
+        setDbVerifiedPhone("");
+      }
+      setEditingPhone(false);
       Alert.alert("Success", "Profile updated");
       setCurrentView("menu");
     }
@@ -1114,282 +1184,434 @@ export default function Profile() {
         ]}
       >
         <SubHeader title="Personal Details" />
-        <ScrollView contentContainerStyle={{ padding: 20 }}>
-          {/* Avatar Upload */}
-          <View style={{ alignItems: "center", marginBottom: 20 }}>
-            <TouchableOpacity onPress={pickImage} disabled={uploadingAvatar}>
-              <View style={styles.avatarContainer}>
-                {avatarUrl ? (
-                  <Image
-                    source={{ uri: avatarUrl }}
-                    style={styles.avatarImage}
-                  />
-                ) : (
-                  <View
-                    style={[
-                      styles.avatarPlaceholder,
-                      { backgroundColor: isDark ? colors.card : "#eee" },
-                    ]}
-                  >
-                    <Text
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
+        >
+          <ScrollView
+            contentContainerStyle={{ padding: 20 }}
+            keyboardShouldPersistTaps="handled"
+          >
+            {/* Avatar Upload */}
+            <View style={{ alignItems: "center", marginBottom: 20 }}>
+              <TouchableOpacity onPress={pickImage} disabled={uploadingAvatar}>
+                <View style={styles.avatarContainer}>
+                  {avatarUrl ? (
+                    <Image
+                      source={{ uri: avatarUrl }}
+                      style={styles.avatarImage}
+                    />
+                  ) : (
+                    <View
                       style={[
-                        styles.avatarInitials,
-                        { color: isDark ? colors.textMuted : "#ccc" },
+                        styles.avatarPlaceholder,
+                        { backgroundColor: isDark ? colors.card : "#eee" },
                       ]}
                     >
-                      {(firstName?.[0] || "U").toUpperCase()}
-                    </Text>
-                  </View>
-                )}
-                <View style={styles.avatarOverlay}>
-                  {uploadingAvatar ? (
-                    <ActivityIndicator color="white" size="small" />
-                  ) : (
-                    <Ionicons name="camera" size={20} color="white" />
+                      <Text
+                        style={[
+                          styles.avatarInitials,
+                          { color: isDark ? colors.textMuted : "#ccc" },
+                        ]}
+                      >
+                        {(firstName?.[0] || "U").toUpperCase()}
+                      </Text>
+                    </View>
                   )}
+                  <View style={styles.avatarOverlay}>
+                    {uploadingAvatar ? (
+                      <ActivityIndicator color="white" size="small" />
+                    ) : (
+                      <Ionicons name="camera" size={20} color="white" />
+                    )}
+                  </View>
                 </View>
-              </View>
-            </TouchableOpacity>
-          </View>
-
-          <Text
-            style={[
-              styles.label,
-              { color: isDark ? colors.textMuted : "#666" },
-            ]}
-          >
-            First Name
-          </Text>
-          <TextInput
-            style={[
-              styles.input,
-              {
-                backgroundColor: isDark ? colors.card : "#fff",
-                borderColor: isDark ? colors.cardBorder : "#ddd",
-                color: isDark ? colors.text : "#000",
-              },
-            ]}
-            value={firstName}
-            onChangeText={setFirstName}
-          />
-
-          <Text
-            style={[
-              styles.label,
-              { color: isDark ? colors.textMuted : "#666" },
-            ]}
-          >
-            Middle Name
-          </Text>
-          <TextInput
-            style={[
-              styles.input,
-              {
-                backgroundColor: isDark ? colors.card : "#fff",
-                borderColor: isDark ? colors.cardBorder : "#ddd",
-                color: isDark ? colors.text : "#000",
-              },
-            ]}
-            value={middleName}
-            onChangeText={setMiddleName}
-            placeholder="Enter middle name"
-            placeholderTextColor={isDark ? colors.textMuted : "#999"}
-          />
-
-          <Text
-            style={[
-              styles.label,
-              { color: isDark ? colors.textMuted : "#666" },
-            ]}
-          >
-            Last Name
-          </Text>
-          <TextInput
-            style={[
-              styles.input,
-              {
-                backgroundColor: isDark ? colors.card : "#fff",
-                borderColor: isDark ? colors.cardBorder : "#ddd",
-                color: isDark ? colors.text : "#000",
-              },
-            ]}
-            value={lastName}
-            onChangeText={setLastName}
-          />
-
-          <Text
-            style={[
-              styles.label,
-              { color: isDark ? colors.textMuted : "#666" },
-            ]}
-          >
-            Email
-          </Text>
-          <TextInput
-            style={[
-              styles.input,
-              styles.disabled,
-              {
-                backgroundColor: isDark ? colors.surface : "#f3f4f6",
-                borderColor: isDark ? colors.cardBorder : "#ddd",
-                color: isDark ? colors.textMuted : "#999",
-              },
-            ]}
-            value={session?.user?.email || ""}
-            editable={false}
-          />
-
-          <View style={{ flexDirection: "row", gap: 15 }}>
-            <View style={{ flex: 1 }}>
-              <Text
-                style={[
-                  styles.label,
-                  { color: isDark ? colors.textMuted : "#666" },
-                ]}
-              >
-                Birthday
-              </Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    backgroundColor: isDark ? colors.card : "#fff",
-                    borderColor: isDark ? colors.cardBorder : "#ddd",
-                    color: isDark ? colors.text : "#000",
-                  },
-                ]}
-                value={birthday}
-                onChangeText={setBirthday}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={isDark ? colors.textMuted : "#999"}
-              />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text
-                style={[
-                  styles.label,
-                  { color: isDark ? colors.textMuted : "#666" },
-                ]}
-              >
-                Gender
-              </Text>
-              <TouchableOpacity
-                onPress={() => setShowGenderModal(true)}
-                style={[
-                  styles.selectInput,
-                  {
-                    backgroundColor: isDark ? colors.card : "#fff",
-                    borderColor: isDark ? colors.cardBorder : "#ddd",
-                  },
-                ]}
-              >
-                <Text style={{ color: isDark ? colors.text : "#000" }}>
-                  {gender || "Select"}
-                </Text>
-                <Ionicons
-                  name="chevron-down"
-                  size={16}
-                  color={isDark ? colors.textMuted : "#000"}
-                />
               </TouchableOpacity>
             </View>
-          </View>
 
-          <Text
-            style={[
-              styles.label,
-              { color: isDark ? colors.textMuted : "#666" },
-            ]}
-          >
-            Phone Number
-          </Text>
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 10,
-              marginBottom: 15,
-            }}
-          >
+            <Text
+              style={[
+                styles.label,
+                { color: isDark ? colors.textMuted : "#666" },
+              ]}
+            >
+              First Name
+            </Text>
             <TextInput
               style={[
                 styles.input,
                 {
-                  flex: 1,
-                  marginBottom: 0,
                   backgroundColor: isDark ? colors.card : "#fff",
                   borderColor: isDark ? colors.cardBorder : "#ddd",
                   color: isDark ? colors.text : "#000",
                 },
-                isPhoneVerified() && styles.disabled,
               ]}
-              value={phone}
-              onChangeText={setPhone}
-              editable={!isPhoneVerified()}
-              keyboardType="phone-pad"
+              value={firstName}
+              onChangeText={setFirstName}
             />
-            {!isPhoneVerified() && (
-              <TouchableOpacity
-                onPress={() => {
-                  setVerifying(true);
-                  handleSendVerification();
-                }}
-                style={styles.btnSmall}
-              >
-                <Text style={{ color: "white", fontWeight: "bold" }}>
-                  Verify
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
 
-          {/* OTP section same as before... */}
-          {verifying && !isPhoneVerified() && (
-            <View
+            <Text
               style={[
-                styles.otpBox,
+                styles.label,
+                { color: isDark ? colors.textMuted : "#666" },
+              ]}
+            >
+              Middle Name
+            </Text>
+            <TextInput
+              style={[
+                styles.input,
                 {
-                  backgroundColor: isDark ? colors.surface : "#f8fafc",
-                  borderColor: isDark ? colors.cardBorder : "#cbd5e1",
+                  backgroundColor: isDark ? colors.card : "#fff",
+                  borderColor: isDark ? colors.cardBorder : "#ddd",
+                  color: isDark ? colors.text : "#000",
                 },
               ]}
+              value={middleName}
+              onChangeText={setMiddleName}
+              placeholder="Enter middle name"
+              placeholderTextColor={isDark ? colors.textMuted : "#999"}
+            />
+
+            <Text
+              style={[
+                styles.label,
+                { color: isDark ? colors.textMuted : "#666" },
+              ]}
+            >
+              Last Name
+            </Text>
+            <TextInput
+              style={[
+                styles.input,
+                {
+                  backgroundColor: isDark ? colors.card : "#fff",
+                  borderColor: isDark ? colors.cardBorder : "#ddd",
+                  color: isDark ? colors.text : "#000",
+                },
+              ]}
+              value={lastName}
+              onChangeText={setLastName}
+            />
+
+            <Text
+              style={[
+                styles.label,
+                { color: isDark ? colors.textMuted : "#666" },
+              ]}
+            >
+              Email
+            </Text>
+            <TextInput
+              style={[
+                styles.input,
+                styles.disabled,
+                {
+                  backgroundColor: isDark ? colors.surface : "#f3f4f6",
+                  borderColor: isDark ? colors.cardBorder : "#ddd",
+                  color: isDark ? colors.textMuted : "#999",
+                },
+              ]}
+              value={session?.user?.email || ""}
+              editable={false}
+            />
+
+            <View style={{ flexDirection: "row", gap: 15 }}>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.label,
+                    { color: isDark ? colors.textMuted : "#666" },
+                  ]}
+                >
+                  Birthday
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setShowBirthdayPicker(true)}
+                  style={[
+                    styles.selectInput,
+                    {
+                      backgroundColor: isDark ? colors.card : "#fff",
+                      borderColor: isDark ? colors.cardBorder : "#ddd",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      color: birthday
+                        ? isDark
+                          ? colors.text
+                          : "#000"
+                        : isDark
+                          ? colors.textMuted
+                          : "#999",
+                    }}
+                  >
+                    {birthday || "Select date"}
+                  </Text>
+                  <Ionicons
+                    name="calendar-outline"
+                    size={16}
+                    color={isDark ? colors.textMuted : "#666"}
+                  />
+                </TouchableOpacity>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.label,
+                    { color: isDark ? colors.textMuted : "#666" },
+                  ]}
+                >
+                  Gender
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setShowGenderModal(true)}
+                  style={[
+                    styles.selectInput,
+                    {
+                      backgroundColor: isDark ? colors.card : "#fff",
+                      borderColor: isDark ? colors.cardBorder : "#ddd",
+                    },
+                  ]}
+                >
+                  <Text style={{ color: isDark ? colors.text : "#000" }}>
+                    {gender || "Select"}
+                  </Text>
+                  <Ionicons
+                    name="chevron-down"
+                    size={16}
+                    color={isDark ? colors.textMuted : "#000"}
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <Text
+              style={[
+                styles.label,
+                { color: isDark ? colors.textMuted : "#666" },
+              ]}
+            >
+              Phone Number
+            </Text>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+                marginBottom: 15,
+              }}
             >
               <TextInput
                 style={[
-                  styles.otpInput,
+                  styles.input,
                   {
-                    backgroundColor: isDark ? colors.card : "white",
-                    borderColor: isDark ? colors.cardBorder : "#cbd5e1",
+                    flex: 1,
+                    marginBottom: 0,
+                    backgroundColor: isDark ? colors.card : "#fff",
+                    borderColor: isDark ? colors.cardBorder : "#ddd",
                     color: isDark ? colors.text : "#000",
                   },
+                  isPhoneVerified() && !editingPhone && styles.disabled,
                 ]}
-                value={otp}
-                onChangeText={setOtp}
-                placeholder="Code"
+                value={phone}
+                onChangeText={(text) => {
+                  setPhone(text);
+                  // If user changes the phone from the verified one, reset verification
+                  const normalize = (p: string) => p?.replace(/\D/g, "") || "";
+                  if (normalize(text) !== normalize(verifiedPhone)) {
+                    setOtpSent(false);
+                    setOtp("");
+                  }
+                }}
+                editable={!isPhoneVerified() || editingPhone}
+                keyboardType="phone-pad"
                 placeholderTextColor={isDark ? colors.textMuted : "#999"}
-                keyboardType="number-pad"
+              />
+              {isPhoneVerified() && !editingPhone ? (
+                <View
+                  style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+                >
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={18}
+                      color="#10b981"
+                    />
+                    <Text
+                      style={{
+                        color: "#10b981",
+                        fontSize: 12,
+                        fontWeight: "700",
+                      }}
+                    >
+                      Verified
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => setEditingPhone(true)}
+                    style={{
+                      backgroundColor: isDark ? colors.card : "#f3f4f6",
+                      paddingHorizontal: 10,
+                      paddingVertical: 6,
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: isDark ? colors.border : "#e5e7eb",
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: isDark ? colors.text : "#374151",
+                        fontSize: 12,
+                        fontWeight: "700",
+                      }}
+                    >
+                      Change
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  onPress={() => {
+                    setVerifying(true);
+                    handleSendVerification();
+                    startResendCooldown();
+                  }}
+                  disabled={resendCooldown > 0 || otpLoading}
+                  style={[
+                    styles.btnSmall,
+                    (resendCooldown > 0 || otpLoading) && { opacity: 0.5 },
+                  ]}
+                >
+                  <Text style={{ color: "white", fontWeight: "bold", fontSize: 12 }}>
+                    {otpLoading ? "Sending..." : resendCooldown > 0 ? formatCooldown(resendCooldown) : "Verify"}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* OTP section same as before... */}
+            {verifying && !isPhoneVerified() && (
+              <View
+                style={[
+                  styles.otpBox,
+                  {
+                    backgroundColor: isDark ? colors.surface : "#f8fafc",
+                    borderColor: isDark ? colors.cardBorder : "#cbd5e1",
+                  },
+                ]}
+              >
+                <TextInput
+                  style={[
+                    styles.otpInput,
+                    {
+                      backgroundColor: isDark ? colors.card : "white",
+                      borderColor: isDark ? colors.cardBorder : "#cbd5e1",
+                      color: isDark ? colors.text : "#000",
+                    },
+                  ]}
+                  value={otp}
+                  onChangeText={setOtp}
+                  placeholder="Code"
+                  placeholderTextColor={isDark ? colors.textMuted : "#999"}
+                  keyboardType="number-pad"
+                />
+                <TouchableOpacity
+                  onPress={handleVerifyOtp}
+                  style={styles.btnSmall}
+                >
+                  <Text style={{ color: "white" }}>Confirm</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {verifying && !isPhoneVerified() && (
+              <TouchableOpacity
+                onPress={() => {
+                  handleSendVerification();
+                  startResendCooldown();
+                }}
+                disabled={resendCooldown > 0 || otpLoading}
+                style={{ alignSelf: "flex-start", marginBottom: 10 }}
+              >
+                <Text style={{ color: resendCooldown > 0 ? (isDark ? colors.textMuted : "#999") : "#2563eb", fontSize: 13, fontWeight: "600" }}>
+                  {resendCooldown > 0 ? `Resend code in ${formatCooldown(resendCooldown)}` : "Resend code"}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              style={styles.saveBtn}
+              onPress={handleUpdateProfile}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Text style={styles.saveBtnText}>Save Changes</Text>
+              )}
+            </TouchableOpacity>
+          </ScrollView>
+        </KeyboardAvoidingView>
+
+        {/* Birthday Calendar Modal */}
+        <Modal visible={showBirthdayPicker} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View
+              style={[
+                styles.modalContent,
+                {
+                  backgroundColor: isDark ? colors.surface : "white",
+                  paddingBottom: 10,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.modalTitle,
+                  { color: isDark ? colors.text : "#000" },
+                ]}
+              >
+                Select Birthday
+              </Text>
+              <CalendarPicker
+                selectedDate={birthday}
+                onDateSelect={(date) => {
+                  setBirthday(date);
+                  setShowBirthdayPicker(false);
+                }}
+                allowPastDates={true}
+                isDark={isDark}
+                themeColors={colors}
               />
               <TouchableOpacity
-                onPress={handleVerifyOtp}
-                style={styles.btnSmall}
+                onPress={() => setShowBirthdayPicker(false)}
+                style={{
+                  marginTop: 12,
+                  alignItems: "center",
+                  paddingVertical: 10,
+                }}
               >
-                <Text style={{ color: "white" }}>Confirm</Text>
+                <Text
+                  style={{
+                    color: isDark ? colors.textMuted : "#666",
+                    fontWeight: "700",
+                    fontSize: 14,
+                  }}
+                >
+                  Cancel
+                </Text>
               </TouchableOpacity>
             </View>
-          )}
-
-          <TouchableOpacity
-            style={styles.saveBtn}
-            onPress={handleUpdateProfile}
-            disabled={saving}
-          >
-            {saving ? (
-              <ActivityIndicator color="white" />
-            ) : (
-              <Text style={styles.saveBtnText}>Save Changes</Text>
-            )}
-          </TouchableOpacity>
-        </ScrollView>
+          </View>
+        </Modal>
 
         {/* Gender Modal */}
         <Modal visible={showGenderModal} transparent animationType="slide">
