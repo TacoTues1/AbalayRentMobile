@@ -40,10 +40,10 @@ function NotificationManager() {
   }, []);
 
   // Register push notifications (permission, token, foreground listener)
-  usePushNotifications(userId);
+  const { notificationsReady } = usePushNotifications(userId);
 
   // Listen for Supabase realtime notification inserts → trigger native notifications
-  useRealtimeNotifications(userId);
+  useRealtimeNotifications(userId, notificationsReady);
 
   // Handle notification tap → navigate to the appropriate screen
   useEffect(() => {
