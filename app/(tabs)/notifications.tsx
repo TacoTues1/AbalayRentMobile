@@ -384,7 +384,7 @@ export default function NotificationsPage() {
           },
         ]}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
           <TouchableOpacity
             onPress={() =>
               router.canGoBack()
@@ -399,7 +399,9 @@ export default function NotificationsPage() {
             />
           </TouchableOpacity>
           <Text
-            style={[styles.title, { color: isDark ? colors.text : "#000" }]}
+            style={[styles.title, { color: isDark ? colors.text : "#000", flexShrink: 1 }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
           >
             Notifications
           </Text>
@@ -570,6 +572,8 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
     borderBottomWidth: 1,
     borderBottomColor: "#eee",
+    flexWrap: "wrap",
+    gap: 10,
   },
   title: { fontSize: 24, fontWeight: "bold" },
   headerActions: {

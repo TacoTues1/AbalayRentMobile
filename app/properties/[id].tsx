@@ -1,26 +1,27 @@
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker, {
-  DateTimePickerAndroid,
+    DateTimePickerAndroid,
 } from "@react-native-community/datetimepicker";
 import Constants from "expo-constants";
 import * as Linking from "expo-linking";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import * as Location from "expo-location";
+import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  FlatList,
-  Image,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    FlatList,
+    Image,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import CalendarPicker from "../../components/ui/CalendarPicker";
 import WebViewMap from "../../components/WebViewMap";
@@ -39,6 +40,26 @@ const MAPLIBRE_LOW_MEMORY_PROPS = {
   preferredFramesPerSecond: 30,
   surfaceView: Platform.OS === "android",
 };
+
+const CARTO_RASTER_STYLE = JSON.stringify({
+  version: 8,
+  sources: {
+    carto: {
+      type: "raster",
+      tiles: ["https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"],
+      tileSize: 256,
+      attribution: "&copy; OpenStreetMap &copy; CARTO",
+      maxzoom: 19,
+    },
+  },
+  layers: [
+    {
+      id: "carto",
+      type: "raster",
+      source: "carto",
+    },
+  ],
+});
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || "";
 
@@ -61,6 +82,7 @@ export default function PropertyDetail() {
   const [landlordRatingCount, setLandlordRatingCount] = useState(0);
   const [hasActiveOccupancy, setHasActiveOccupancy] = useState(false);
   const [occupiedPropertyTitle, setOccupiedPropertyTitle] = useState("");
+  const [geocodedLocation, setGeocodedLocation] = useState<{lat: number, lng: number} | null>(null);
   const [propertyStatsInfo, setPropertyStatsInfo] = useState({
     isMostFavorite: false,
     isTopRated: false,
@@ -233,6 +255,28 @@ export default function PropertyDetail() {
   useEffect(() => {
     if (property?.landlord) {
       loadTimeSlots(property.landlord);
+    }
+
+    if (property && !property.latitude && !property.location_link) {
+      const addressParts = [
+        property.barangay,
+        property.city,
+        property.state_province,
+        property.country || "Philippines",
+      ].filter(Boolean);
+
+      if (addressParts.length > 0) {
+        Location.geocodeAsync(addressParts.join(", "))
+          .then((results) => {
+            if (results && results.length > 0) {
+              setGeocodedLocation({
+                lat: results[0].latitude,
+                lng: results[0].longitude,
+              });
+            }
+          })
+          .catch((err) => console.log("Geocode error", err));
+      }
     }
   }, [property]);
 
@@ -1004,12 +1048,16 @@ export default function PropertyDetail() {
       ? property.latitude
       : linkCoords
         ? linkCoords.lat
-        : "";
+        : geocodedLocation
+          ? geocodedLocation.lat
+          : "";
     const lng = hasStoredCoords
       ? property.longitude
       : linkCoords
         ? linkCoords.lng
-        : "";
+        : geocodedLocation
+          ? geocodedLocation.lng
+          : "";
 
     router.push({
       pathname: "/getDirections",
@@ -1093,7 +1141,6 @@ export default function PropertyDetail() {
   const fullLocation = [
     property.address,
     cityWithState,
-    property.zip,
     property.country,
   ]
     .filter(Boolean)
@@ -1139,6 +1186,7 @@ export default function PropertyDetail() {
         { backgroundColor: isDark ? colors.background : "#FAFAFA" },
       ]}
     >
+      <Stack.Screen options={{ headerShown: false }} />
       <TouchableOpacity
         style={[
           styles.backButton,
@@ -1259,30 +1307,20 @@ export default function PropertyDetail() {
                       style={{
                         flexDirection: "row",
                         alignItems: "center",
-                        backgroundColor: "#fffbeb",
-                        paddingRight: 10,
-                        paddingLeft: 4,
+                        backgroundColor: isDark ? 'rgba(217, 119, 6, 0.2)' : "#fffbeb",
+                        paddingHorizontal: 10,
                         paddingVertical: 4,
                         borderRadius: 12,
-                        borderColor: "#fde68a",
+                        borderColor: isDark ? 'rgba(217, 119, 6, 0.5)' : "#fde68a",
                         borderWidth: 1,
                       }}
                     >
-                      <Image
-                        source={require("../../assets/images/toprated.png")}
-                        style={{
-                          width: 35,
-                          height: 35,
-                          resizeMode: "contain",
-                          marginRight: 5,
-                        }}
-                      />
                       <View>
                         <Text
                           style={{
                             fontSize: 10,
                             fontWeight: "bold",
-                            color: "#d97706",
+                            color: isDark ? "#fbbf24" : "#d97706",
                             textTransform: "uppercase",
                           }}
                         >
@@ -1292,7 +1330,7 @@ export default function PropertyDetail() {
                           style={{
                             fontSize: 12,
                             fontWeight: "bold",
-                            color: "#92400e",
+                            color: isDark ? "#fcd34d" : "#92400e",
                           }}
                         >
                           {propertyStatsInfo.reviewCount} Reviews
@@ -1305,30 +1343,20 @@ export default function PropertyDetail() {
                       style={{
                         flexDirection: "row",
                         alignItems: "center",
-                        backgroundColor: "#fff1f2",
-                        paddingRight: 10,
-                        paddingLeft: 4,
+                        backgroundColor: isDark ? 'rgba(225, 29, 72, 0.2)' : "#fff1f2",
+                        paddingHorizontal: 10,
                         paddingVertical: 4,
                         borderRadius: 12,
-                        borderColor: "#fecdd3",
+                        borderColor: isDark ? 'rgba(225, 29, 72, 0.5)' : "#fecdd3",
                         borderWidth: 1,
                       }}
                     >
-                      <Image
-                        source={require("../../assets/images/mostfavorite.png")}
-                        style={{
-                          width: 35,
-                          height: 35,
-                          resizeMode: "contain",
-                          marginRight: 5,
-                        }}
-                      />
                       <View>
                         <Text
                           style={{
                             fontSize: 10,
                             fontWeight: "bold",
-                            color: "#e11d48",
+                            color: isDark ? "#f43f5e" : "#e11d48",
                             textTransform: "uppercase",
                           }}
                         >
@@ -1338,7 +1366,7 @@ export default function PropertyDetail() {
                           style={{
                             fontSize: 12,
                             fontWeight: "bold",
-                            color: "#9f1239",
+                            color: isDark ? "#fb7185" : "#9f1239",
                           }}
                         >
                           {propertyStatsInfo.favoriteCount} Favorites
@@ -1987,13 +2015,12 @@ export default function PropertyDetail() {
 
               <View style={styles.mapContainer}>
                 {(() => {
-                  if (
-                    !(
-                      property.location_link ||
-                      (property.latitude && property.longitude)
-                    ) ||
-                    Platform.OS === "web"
-                  ) {
+                  const mapCoords =
+                    property.latitude && property.longitude
+                      ? { lat: property.latitude, lng: property.longitude }
+                      : extractCoordinates(property.location_link) || geocodedLocation;
+
+                  if (!mapCoords || Platform.OS === "web") {
                     return (
                       <View style={styles.center}>
                         <Text style={{ color: "#666" }}>Map not available</Text>
@@ -2001,55 +2028,10 @@ export default function PropertyDetail() {
                     );
                   }
 
-                  const mapCoords =
-                    property.latitude && property.longitude
-                      ? { lat: property.latitude, lng: property.longitude }
-                      : extractCoordinates(property.location_link);
-
                   const centerCoord = [
                     mapCoords?.lng || 123.8854,
                     mapCoords?.lat || 10.3157,
                   ];
-
-                  if (MapLibreGL) {
-                    return (
-                      <MapLibreGL.MapView
-                        style={StyleSheet.absoluteFillObject}
-                        styleURL="https://tiles.openfreemap.org/styles/bright"
-                        scrollEnabled={false}
-                        zoomEnabled={false}
-                        rotateEnabled={false}
-                        pitchEnabled={false}
-                        {...MAPLIBRE_LOW_MEMORY_PROPS}
-                      >
-                        <MapLibreGL.Camera
-                          centerCoordinate={centerCoord}
-                          zoomLevel={14}
-                          animationDuration={0}
-                        />
-                        <MapLibreGL.PointAnnotation
-                          id="property-marker"
-                          coordinate={centerCoord}
-                          title={property.title}
-                        >
-                          <View
-                            style={{
-                              width: 30,
-                              height: 30,
-                              alignItems: "center",
-                              justifyContent: "center",
-                            }}
-                          >
-                            <Ionicons
-                              name="location"
-                              size={30}
-                              color="#ef4444"
-                            />
-                          </View>
-                        </MapLibreGL.PointAnnotation>
-                      </MapLibreGL.MapView>
-                    );
-                  }
 
                   return (
                     <WebViewMap

@@ -4,17 +4,17 @@ import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Dimensions,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import WebViewMap from "../components/WebViewMap";
 const canUseNativeMapLibre =
@@ -30,6 +30,26 @@ const MAPLIBRE_LOW_MEMORY_PROPS = {
   preferredFramesPerSecond: 30,
   surfaceView: Platform.OS === "android",
 };
+
+const CARTO_RASTER_STYLE = JSON.stringify({
+  version: 8,
+  sources: {
+    carto: {
+      type: "raster",
+      tiles: ["https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"],
+      tileSize: 256,
+      attribution: "&copy; OpenStreetMap &copy; CARTO",
+      maxzoom: 19,
+    },
+  },
+  layers: [
+    {
+      id: "carto",
+      type: "raster",
+      source: "carto",
+    },
+  ],
+});
 
 const { width, height } = Dimensions.get("window");
 
@@ -485,127 +505,7 @@ export default function GetDirections() {
   return (
     <View style={styles.container}>
       {/* 1. Map Layer */}
-      {Platform.OS !== "web" && MapLibreGL ? (
-        <MapLibreGL.MapView
-          ref={mapRef}
-          style={StyleSheet.absoluteFillObject}
-          styleURL="https://tiles.openfreemap.org/styles/bright"
-          rotateEnabled={true}
-          pitchEnabled={true}
-          {...MAPLIBRE_LOW_MEMORY_PROPS}
-        >
-          <MapLibreGL.Camera
-            ref={cameraRef}
-            centerCoordinate={[123.8854, 10.3157]}
-            zoomLevel={12}
-          />
-
-          {/* Render Alternate Routes (Gray) */}
-          {routesData[selectedMode].map((route: any, index: number) => {
-            if (index === selectedRouteIndex) return null;
-            const geoJSON = getRouteGeoJSON(route);
-            if (!geoJSON) return null;
-            return (
-              <MapLibreGL.ShapeSource
-                key={`alt-route-${index}`}
-                id={`alt-route-${index}`}
-                shape={geoJSON}
-              >
-                <MapLibreGL.LineLayer
-                  id={`alt-route-line-${index}`}
-                  style={{
-                    lineColor: "#9ca3af",
-                    lineWidth: 5,
-                    lineOpacity: 0.7,
-                    lineCap: "round",
-                    lineJoin: "round",
-                  }}
-                />
-              </MapLibreGL.ShapeSource>
-            );
-          })}
-
-          {/* Render Selected Route (Colored) */}
-          {routesData[selectedMode].length > selectedRouteIndex &&
-            (() => {
-              const geoJSON = getRouteGeoJSON(
-                routesData[selectedMode][selectedRouteIndex],
-              );
-              if (!geoJSON) return null;
-              const color =
-                selectedMode === "bike"
-                  ? "#7c3aed"
-                  : selectedMode === "foot"
-                    ? "#059669"
-                    : "#111827";
-              return (
-                <MapLibreGL.ShapeSource id="selected-route" shape={geoJSON}>
-                  <MapLibreGL.LineLayer
-                    id="selected-route-line"
-                    style={{
-                      lineColor: color,
-                      lineWidth: 7,
-                      lineCap: "round",
-                      lineJoin: "round",
-                    }}
-                  />
-                </MapLibreGL.ShapeSource>
-              );
-            })()}
-
-          {/* User Marker with Animation */}
-          {userLocation && (
-            <MapLibreGL.PointAnnotation
-              id="user-location"
-              coordinate={[userLocation.longitude, userLocation.latitude]}
-              anchor={{ x: 0.5, y: 0.5 }}
-            >
-              <View style={styles.userMarkerContainer}>
-                <Animated.View
-                  style={[
-                    styles.pingCircle,
-                    { transform: [{ scale: pingAnim }], opacity: fadeAnim },
-                  ]}
-                />
-                <View style={styles.userMarkerOuter}>
-                  <View
-                    style={[
-                      styles.userMarkerInner,
-                      {
-                        transform: [
-                          { rotate: `${userLocation.heading || 0}deg` },
-                        ],
-                      },
-                    ]}
-                  >
-                    <View style={styles.directionArrow} />
-                  </View>
-                </View>
-              </View>
-            </MapLibreGL.PointAnnotation>
-          )}
-
-          {/* Destination Marker */}
-          {destLocation && (
-            <MapLibreGL.PointAnnotation
-              id="destination"
-              coordinate={[destLocation.longitude, destLocation.latitude]}
-              title="Destination"
-            >
-              <View
-                style={{
-                  width: 30,
-                  height: 30,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Ionicons name="location" size={30} color="#ef4444" />
-              </View>
-            </MapLibreGL.PointAnnotation>
-          )}
-        </MapLibreGL.MapView>
-      ) : Platform.OS !== "web" ? (
+      {Platform.OS !== "web" ? (
         <WebViewMap
           ref={webMapRef}
           center={webViewCenter}

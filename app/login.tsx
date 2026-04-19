@@ -397,7 +397,7 @@ export default function AuthScreen() {
           )}
         </ScrollView>
 
-        {view === "login" && showLoginNotice && (
+        {/* {view === "login" && showLoginNotice && (
           <View style={styles.floatingLoginNoticeBox}>
             <Text style={styles.loginNoticeText}>
               This is an open testing build. If you find any bugs or errors, 
@@ -405,9 +405,9 @@ export default function AuthScreen() {
               If you do not have an account, use the Report a Bug button at the bottom of the login page.
             </Text>
           </View>
-        )}
+        )} */}
 
-        {view === "login" && (
+        {/* {view === "login" && (
           <TouchableOpacity
             style={styles.bottomReportBugButton}
             activeOpacity={0.85}
@@ -415,7 +415,7 @@ export default function AuthScreen() {
           >
             <Text style={styles.bottomReportBugButtonText}>Report a Bug</Text>
           </TouchableOpacity>
-        )}
+        )} */}
       </KeyboardAvoidingView>
 
       <Modal

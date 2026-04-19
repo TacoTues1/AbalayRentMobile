@@ -99,6 +99,26 @@ const MAPLIBRE_LOW_MEMORY_PROPS = {
   surfaceView: Platform.OS === "android",
 };
 
+const CARTO_RASTER_STYLE = JSON.stringify({
+  version: 8,
+  sources: {
+    carto: {
+      type: "raster",
+      tiles: ["https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"],
+      tileSize: 256,
+      attribution: "&copy; OpenStreetMap &copy; CARTO",
+      maxzoom: 19,
+    },
+  },
+  layers: [
+    {
+      id: "carto",
+      type: "raster",
+      source: "carto",
+    },
+  ],
+});
+
 // --- Distance Calculation Helper ---
 function getDistanceFromLatLonInKm(
   lat1: number,
@@ -744,14 +764,13 @@ export default function AllProperties() {
               <View
                 style={[
                   styles.badge,
-                  { backgroundColor: "#fffbeb", borderColor: "#fde68a" },
+                  { backgroundColor: isDark ? 'rgba(217, 119, 6, 0.2)' : "#fffbeb", borderColor: isDark ? 'rgba(217, 119, 6, 0.5)' : "#fde68a" },
                 ]}
               >
-                <Ionicons name="trophy" size={8} color="#d97706" />
                 <Text
                   style={[
                     styles.badgeText,
-                    { color: "#d97706", marginLeft: 2 },
+                    { color: "#d97706" },
                   ]}
                 >
                   Top Rated
@@ -762,14 +781,13 @@ export default function AllProperties() {
               <View
                 style={[
                   styles.badge,
-                  { backgroundColor: "#fff1f2", borderColor: "#fecdd3" },
+                  { backgroundColor: isDark ? 'rgba(225, 29, 72, 0.2)' : "#fff1f2", borderColor: isDark ? 'rgba(225, 29, 72, 0.5)' : "#fecdd3" },
                 ]}
               >
-                <Ionicons name="heart" size={8} color="#e11d48" />
                 <Text
                   style={[
                     styles.badgeText,
-                    { color: "#e11d48", marginLeft: 2 },
+                    { color: "#e11d48" },
                   ]}
                 >
                   Most Favorite
@@ -1146,113 +1164,7 @@ export default function AllProperties() {
           renderItem={({ item }) => renderSkeletonCard(item)}
           showsVerticalScrollIndicator={false}
         />
-      ) : showMapView && Platform.OS !== "web" && MapLibreGL ? (
-        <View style={{ flex: 1 }}>
-          <MapLibreGL.MapView
-            style={StyleSheet.absoluteFillObject}
-            styleURL="https://tiles.openfreemap.org/styles/bright"
-            rotateEnabled={true}
-            pitchEnabled={true}
-            {...MAPLIBRE_LOW_MEMORY_PROPS}
-          >
-            <MapLibreGL.Camera
-              centerCoordinate={mapCenterCoordinate}
-              zoomLevel={mapZoomLevel}
-            />
-
-            {mapPoints.map(({ item, lat, lng }) => {
-              const priceLabel =
-                item.price >= 1000
-                  ? `₱${(item.price / 1000).toFixed(1)}k/mo`
-                  : `₱${item.price}/mo`;
-
-              return (
-                <MapLibreGL.PointAnnotation
-                  key={`marker-${item.id}`}
-                  id={`marker-${item.id}`}
-                  coordinate={[lng, lat]}
-                  onSelected={() => setSelectedPropertyId(item.id)}
-                >
-                  <View style={styles.mapMarkerWrap}>
-                    <View style={styles.mapMarkerCard}>
-                      <Image
-                        source={{
-                          uri:
-                            item.images?.[0] ||
-                            "https://via.placeholder.com/120x90.png?text=Property",
-                        }}
-                        style={styles.mapMarkerThumb}
-                      />
-                      <View style={styles.mapMarkerInfo}>
-                        <Text style={styles.mapMarkerTitle} numberOfLines={1}>
-                          {item.title || "Property"}
-                        </Text>
-                        <Text style={styles.mapMarkerPrice}>{priceLabel}</Text>
-                      </View>
-                    </View>
-                    <Ionicons
-                      name="location"
-                      size={30}
-                      color={
-                        selectedPropertyId === item.id ? "#111827" : "#ef4444"
-                      }
-                    />
-                  </View>
-                </MapLibreGL.PointAnnotation>
-              );
-            })}
-
-            {filterNearMe &&
-              userLocation &&
-              (() => {
-                const points = 40;
-                const km = 1;
-                const coordinates = [];
-                for (let i = 0; i <= points; i++) {
-                  const a = (i / points) * 2 * Math.PI;
-                  const dx = km * Math.cos(a);
-                  const dy = km * Math.sin(a);
-                  const lat = userLocation.latitude + dy / 111.32;
-                  const lng =
-                    userLocation.longitude +
-                    dx /
-                      (111.32 *
-                        Math.cos((userLocation.latitude * Math.PI) / 180));
-                  coordinates.push([lng, lat]);
-                }
-                return (
-                  <MapLibreGL.ShapeSource
-                    id="near-me-circle"
-                    shape={{
-                      type: "Feature",
-                      geometry: { type: "Polygon", coordinates: [coordinates] },
-                      properties: {},
-                    }}
-                  >
-                    <MapLibreGL.FillLayer
-                      id="near-me-fill"
-                      style={{
-                        fillColor: "rgba(59, 130, 246, 0.2)",
-                        fillOutlineColor: "rgba(59, 130, 246, 0.5)",
-                      }}
-                    />
-                  </MapLibreGL.ShapeSource>
-                );
-              })()}
-
-            {userLocation && (
-              <MapLibreGL.PointAnnotation
-                id="user-location"
-                coordinate={[userLocation.longitude, userLocation.latitude]}
-              >
-                <View style={styles.userLocationMarker}>
-                  <View style={styles.userLocationDot} />
-                </View>
-              </MapLibreGL.PointAnnotation>
-            )}
-          </MapLibreGL.MapView>
-        </View>
-      ) : showMapView && Platform.OS !== "web" && !MapLibreGL ? (
+      ) : showMapView && Platform.OS !== "web" ? (
         <View style={{ flex: 1 }}>
           <WebViewMap
             center={mapCenterCoordinate as [number, number]}

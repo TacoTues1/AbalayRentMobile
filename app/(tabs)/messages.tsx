@@ -7,22 +7,22 @@ import { useNavigation } from "expo-router";
 import * as Sharing from "expo-sharing";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Easing,
-  FlatList,
-  Image,
-  Keyboard,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Easing,
+    FlatList,
+    Image,
+    Keyboard,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    Pressable,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
@@ -1851,6 +1851,48 @@ export default function Messages() {
     });
   };
 
+  const insertGroupEventMessages = async (
+    conversation: any,
+    actorUserId: string,
+    texts: string[],
+  ) => {
+    const normalizedTexts = texts
+      .map((text) => String(text || "").trim())
+      .filter(Boolean);
+
+    if (!conversation?.id || !actorUserId || !normalizedTexts.length) return;
+
+    try {
+      if (isLegacyGroupConversation(conversation)) {
+        const rows = normalizedTexts.map((messageText) => ({
+          conversation_id: conversation.id,
+          sender_id: actorUserId,
+          receiver_id: null,
+          message: messageText,
+        }));
+        await supabase.from("messages").insert(rows);
+        await supabase
+          .from("conversations")
+          .update({ updated_at: new Date().toISOString() })
+          .eq("id", conversation.id);
+        return;
+      }
+
+      const rows = normalizedTexts.map((messageText) => ({
+        group_conversation_id: conversation.id,
+        sender_id: actorUserId,
+        message: messageText,
+      }));
+      await supabase.from("group_messages").insert(rows);
+      await supabase
+        .from("group_conversations")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", conversation.id);
+    } catch (eventError) {
+      console.log("group event message insert error:", eventError);
+    }
+  };
+
   const submitAddMembersToGroup = async () => {
     if (!session?.user?.id || !selectedConv || selectedConv.kind !== "group") {
       return;
@@ -1900,6 +1942,28 @@ export default function Messages() {
       if (error) {
         throw error;
       }
+
+      const candidateById: Record<string, any> = {};
+      (groupMemberCandidates || []).forEach((candidate: any) => {
+        const candidateId = String(candidate?.id || "");
+        if (candidateId) candidateById[candidateId] = candidate;
+      });
+
+      const landlordAddedTexts = uniqueMemberIds.map((memberId) => {
+        const candidate = candidateById[memberId];
+        const fullName =
+          `${candidate?.first_name || ""} ${candidate?.last_name || ""}`
+            .trim()
+            .replace(/\s+/g, " ");
+        const displayName = fullName || "Member";
+        return `Landlord added ${displayName} to the group.`;
+      });
+
+      await insertGroupEventMessages(
+        selectedConv,
+        String(session.user.id),
+        landlordAddedTexts,
+      );
 
       closeAddGroupMembersModal();
       setSelectedGroupAddMemberIds([]);
@@ -1971,6 +2035,28 @@ export default function Messages() {
       if (membersError) {
         throw membersError;
       }
+
+      const candidateById: Record<string, any> = {};
+      (groupCandidates || []).forEach((candidate: any) => {
+        const candidateId = String(candidate?.id || "");
+        if (candidateId) candidateById[candidateId] = candidate;
+      });
+
+      const landlordAddedTexts = uniqueMemberIds.map((memberId) => {
+        const candidate = candidateById[memberId];
+        const fullName =
+          `${candidate?.first_name || ""} ${candidate?.last_name || ""}`
+            .trim()
+            .replace(/\s+/g, " ");
+        const displayName = fullName || "Member";
+        return `Landlord added ${displayName} to the group.`;
+      });
+
+      await insertGroupEventMessages(
+        { id: groupRow.id, kind: "group" },
+        String(session.user.id),
+        landlordAddedTexts,
+      );
 
       setShowAddGroupModal(false);
       setSelectedGroupMemberIds([]);
@@ -2084,6 +2170,81 @@ export default function Messages() {
     }
   };
 
+  const getGroupSystemEventText = (msg: any): string | null => {
+    const rawMessage = String(msg?.message || "").trim();
+    if (!rawMessage || msg?.file_url || msg?.file_name) return null;
+
+    const normalizeSubject = (subject: string) => {
+      const cleaned = (subject || "").trim();
+      return cleaned || "A member";
+    };
+
+    const normalizedKickMatch = rawMessage.match(
+      /^System kick\s+(.+?)\s+from the group\.?$/i,
+    );
+    if (normalizedKickMatch) {
+      return `System kick ${normalizeSubject(normalizedKickMatch[1])} to the group.`;
+    }
+
+    const landlordKickMatch = rawMessage.match(
+      /^Landlord kick\s+(.+?)\s+to the group\.?$/i,
+    );
+    if (landlordKickMatch) {
+      return `Landlord kick ${normalizeSubject(landlordKickMatch[1])} to the group.`;
+    }
+
+    const kickedMatch = rawMessage.match(
+      /^System kicked\s+(.+?)\s+from the chat\.?$/i,
+    );
+    if (kickedMatch) {
+      return `System kick ${normalizeSubject(kickedMatch[1])} to the group.`;
+    }
+
+    const kickedGroupMatch = rawMessage.match(
+      /^System kicked\s+(.+?)\s+from the group\.?$/i,
+    );
+    if (kickedGroupMatch) {
+      return `System kick ${normalizeSubject(kickedGroupMatch[1])} to the group.`;
+    }
+
+    const systemKickToGroupMatch = rawMessage.match(
+      /^System kick\s+(.+?)\s+to the group\.?$/i,
+    );
+    if (systemKickToGroupMatch) {
+      return `System kick ${normalizeSubject(systemKickToGroupMatch[1])} to the group.`;
+    }
+
+    const landlordAddedMatch = rawMessage.match(
+      /^Landlord added\s+(.+?)\s+to the group\.?$/i,
+    );
+    if (landlordAddedMatch) {
+      return `Landlord added ${normalizeSubject(landlordAddedMatch[1])} to the group.`;
+    }
+
+    const systemAddedMatch = rawMessage.match(
+      /^System added\s+(.+?)\s+to the group\.?$/i,
+    );
+    if (systemAddedMatch) {
+      return `Landlord added ${normalizeSubject(systemAddedMatch[1])} to the group.`;
+    }
+
+    const leftChatMatch = rawMessage.match(
+      /^(.+?)\s+left the chat\.?$/i,
+    );
+    if (leftChatMatch) {
+      return `${normalizeSubject(leftChatMatch[1])} left the group.`;
+    }
+
+    const leftGroupMatch = rawMessage.match(
+      /^(.+?)\s+left the group\.?$/i,
+    );
+    if (leftGroupMatch) {
+      return `${normalizeSubject(leftGroupMatch[1])} left the group.`;
+    }
+
+    return null;
+  };
+
   const leaveGroupConversation = async (groupConv: any) => {
     if (!session?.user?.id || !groupConv?.id) return;
 
@@ -2096,6 +2257,17 @@ export default function Messages() {
           text: "Leave",
           style: "destructive",
           onPress: async () => {
+            const displayName =
+              `${profile?.first_name || ""} ${profile?.last_name || ""}`
+                .trim()
+                .replace(/\s+/g, " ") || "A member";
+
+            await insertGroupEventMessages(
+              groupConv,
+              String(session.user.id),
+              [`${displayName} left the group.`],
+            );
+
             const { error } = isLegacyGroupConversation(groupConv)
               ? await supabase
                   .from("conversation_members")
@@ -2123,6 +2295,67 @@ export default function Messages() {
               setSelectedConv(null);
             }
             await loadConversations(session.user.id, profile?.role || "");
+          },
+        },
+      ],
+    );
+  };
+
+  const removeMemberFromGroup = async (
+    groupConv: any,
+    memberId: string,
+  ) => {
+    if (!session?.user?.id || !groupConv?.id || !memberId) return;
+
+    if (memberId === groupConv.created_by) {
+      Alert.alert("Not allowed", "Cannot remove the group creator.");
+      return;
+    }
+
+    const memberProfile = (groupConv.members || []).find(
+      (m: any) => String(m?.user_id || "") === String(memberId),
+    )?.profile;
+    const memberDisplayName =
+      `${memberProfile?.first_name || ""} ${memberProfile?.last_name || ""}`
+        .trim()
+        .replace(/\s+/g, " ") || "A member";
+
+    Alert.alert(
+      "Remove Member",
+      `Are you sure you want to remove ${memberDisplayName} from this group?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: async () => {
+            const { error } = isLegacyGroupConversation(groupConv)
+              ? await supabase
+                  .from("conversation_members")
+                  .delete()
+                  .eq("conversation_id", groupConv.id)
+                  .eq("user_id", memberId)
+              : await supabase
+                  .from("group_conversation_members")
+                  .delete()
+                  .eq("group_conversation_id", groupConv.id)
+                  .eq("user_id", memberId);
+
+            if (error) {
+              Alert.alert(
+                "Unable to remove member",
+                error.message || "Please try again.",
+              );
+              return;
+            }
+
+            await insertGroupEventMessages(
+              groupConv,
+              String(session.user.id),
+              [`Landlord kick ${memberDisplayName} to the group.`],
+            );
+
+            await refreshConversationsAndSelect(groupConv.id, "group");
           },
         },
       ],
@@ -2612,6 +2845,40 @@ export default function Messages() {
                 index === 0 ||
                 new Date(item.created_at).toDateString() !==
                   new Date(messages[index - 1]?.created_at).toDateString();
+
+              const systemEventText = getGroupSystemEventText(item);
+
+              if (systemEventText) {
+                return (
+                  <>
+                    {showDate && (
+                      <View style={styles.dateSeparator}>
+                        <View style={styles.dateLine} />
+                        <Text style={styles.dateText}>
+                          {new Date(item.created_at).toLocaleDateString(
+                            "en-US",
+                            {
+                              month: "short",
+                              day: "numeric",
+                            },
+                          )}
+                        </Text>
+                        <View style={styles.dateLine} />
+                      </View>
+                    )}
+                    <View style={styles.systemEventRow}>
+                      <Text
+                        style={[
+                          styles.systemEventText,
+                          { color: isDark ? colors.textMuted : "#64748b" },
+                        ]}
+                      >
+                        {systemEventText}
+                      </Text>
+                    </View>
+                  </>
+                );
+              }
 
               return (
                 <>
@@ -3134,6 +3401,13 @@ export default function Messages() {
                   const familyPrimary =
                     familyPrimaryNameByMember[String(item?.user_id || "")];
 
+                  const canKickThisMember =
+                    isLandlordGroupDetailsView &&
+                    selectedConv.canRename &&
+                    !isMe &&
+                    String(item?.user_id || "") !==
+                      String(selectedConv?.created_by || "");
+
                   return (
                     <View style={styles.groupDetailsMemberItem}>
                       {renderAvatar(memberProfile, 38, displayName)}
@@ -3174,6 +3448,30 @@ export default function Messages() {
                           {String(item?.role || "member").toLowerCase()}
                         </Text>
                       </View>
+                      {canKickThisMember && (
+                        <TouchableOpacity
+                          onPress={() =>
+                            removeMemberFromGroup(
+                              selectedConv,
+                              String(item?.user_id || ""),
+                            )
+                          }
+                          style={{
+                            paddingHorizontal: 10,
+                            paddingVertical: 6,
+                            borderRadius: 8,
+                            backgroundColor: isDark
+                              ? "rgba(239, 68, 68, 0.15)"
+                              : "rgba(239, 68, 68, 0.08)",
+                          }}
+                        >
+                          <Ionicons
+                            name="person-remove-outline"
+                            size={16}
+                            color="#ef4444"
+                          />
+                        </TouchableOpacity>
+                      )}
                     </View>
                   );
                 }}
@@ -4444,6 +4742,19 @@ const styles = StyleSheet.create({
   },
   dateLine: { flex: 1, height: 1, backgroundColor: "#e5e7eb" },
   dateText: { fontSize: 11, color: "#9ca3af", fontWeight: "600" },
+  systemEventRow: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+    paddingVertical: 2,
+  },
+  systemEventText: {
+    maxWidth: "88%",
+    textAlign: "center",
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 20,
+  },
 
   msgRow: { flexDirection: "row", alignItems: "flex-end", marginBottom: 6 },
   msgBubble: { maxWidth: "78%", borderRadius: 18, overflow: "hidden" },

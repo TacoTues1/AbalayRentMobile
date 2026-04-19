@@ -13,9 +13,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
+import { useTheme } from "../lib/theme";
 
 export default function FavoritesScreen() {
   const router = useRouter();
+  const { isDark, colors } = useTheme();
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<any>(null);
   const [favorites, setFavorites] = useState<any[]>([]);
@@ -100,30 +102,61 @@ export default function FavoritesScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#111" />
+      <View
+        style={[styles.center, { backgroundColor: colors.background }]}
+      >
+        <ActivityIndicator
+          size="large"
+          color={isDark ? colors.text : "#111"}
+        />
       </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
-      <View style={styles.header}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      edges={["top"]}
+    >
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: colors.surface,
+            borderBottomColor: colors.border,
+          },
+        ]}
+      >
         <TouchableOpacity
           onPress={() => router.back()}
-          style={styles.backButton}
+          style={[
+            styles.backButton,
+            { backgroundColor: isDark ? colors.card : "#f3f4f6" },
+          ]}
         >
-          <Ionicons name="arrow-back" size={22} color="#111" />
+          <Ionicons
+            name="arrow-back"
+            size={22}
+            color={colors.text}
+          />
         </TouchableOpacity>
-        <Text style={styles.title}>My Favorites</Text>
+        <Text style={[styles.title, { color: colors.text }]}>
+          My Favorites
+        </Text>
         <View style={{ width: 34 }} />
       </View>
 
       {favorites.length === 0 ? (
         <View style={styles.emptyWrap}>
-          <Ionicons name="heart-outline" size={48} color="#9ca3af" />
-          <Text style={styles.emptyTitle}>No favorite properties yet</Text>
-          <Text style={styles.emptyText}>
+          <Ionicons
+            name="heart-outline"
+            size={48}
+            color={colors.textMuted}
+          />
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>
+            No favorite properties yet
+          </Text>
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
             Tap heart on a property to save it here.
           </Text>
         </View>
@@ -132,7 +165,13 @@ export default function FavoritesScreen() {
           {favorites.map((item) => (
             <TouchableOpacity
               key={item.id}
-              style={styles.card}
+              style={[
+                styles.card,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.cardBorder,
+                },
+              ]}
               activeOpacity={0.9}
               onPress={() => router.push(`/properties/${item.id}` as any)}
             >
@@ -140,27 +179,51 @@ export default function FavoritesScreen() {
                 source={{
                   uri: item.images?.[0] || "https://via.placeholder.com/500",
                 }}
-                style={styles.cardImage}
+                style={[
+                  styles.cardImage,
+                  {
+                    backgroundColor: isDark
+                      ? colors.surface
+                      : "#e5e7eb",
+                  },
+                ]}
               />
 
               <View style={styles.cardBody}>
-                <Text style={styles.cardTitle} numberOfLines={1}>
+                <Text
+                  style={[styles.cardTitle, { color: colors.text }]}
+                  numberOfLines={1}
+                >
                   {item.title || "Untitled Property"}
                 </Text>
-                <Text style={styles.cardMeta} numberOfLines={1}>
+                <Text
+                  style={[
+                    styles.cardMeta,
+                    { color: colors.textSecondary },
+                  ]}
+                  numberOfLines={1}
+                >
                   {[item.city, item.state_province]
                     .filter(Boolean)
                     .join(", ") || "Unknown location"}
                   {" • "}
                   {item.address || "No address"}
                 </Text>
-                <Text style={styles.cardPrice}>
+                <Text style={[styles.cardPrice, { color: colors.text }]}>
                   PHP {Number(item.price || 0).toLocaleString()}
                 </Text>
               </View>
 
               <TouchableOpacity
-                style={styles.heartButton}
+                style={[
+                  styles.heartButton,
+                  {
+                    backgroundColor: isDark ? colors.surface : "#fff",
+                    borderColor: isDark
+                      ? "rgba(239, 68, 68, 0.3)"
+                      : "#fee2e2",
+                  },
+                ]}
                 onPress={() => removeFavorite(item.id)}
               >
                 <Ionicons name="heart" size={18} color="#ef4444" />
@@ -176,13 +239,11 @@ export default function FavoritesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f9fafb",
   },
   center: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#f9fafb",
   },
   header: {
     flexDirection: "row",
@@ -190,9 +251,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: "#fff",
     borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
   },
   backButton: {
     width: 34,
@@ -200,12 +259,10 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#f3f4f6",
   },
   title: {
     fontSize: 18,
     fontWeight: "800",
-    color: "#111827",
   },
   emptyWrap: {
     flex: 1,
@@ -217,12 +274,10 @@ const styles = StyleSheet.create({
     marginTop: 14,
     fontSize: 18,
     fontWeight: "800",
-    color: "#111827",
   },
   emptyText: {
     marginTop: 6,
     fontSize: 13,
-    color: "#6b7280",
   },
   listWrap: {
     padding: 14,
@@ -230,16 +285,13 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   card: {
-    backgroundColor: "#fff",
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#e5e7eb",
     overflow: "hidden",
   },
   cardImage: {
     width: "100%",
     height: 150,
-    backgroundColor: "#e5e7eb",
   },
   cardBody: {
     padding: 12,
@@ -247,17 +299,14 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     fontSize: 16,
-    color: "#111827",
     fontWeight: "800",
   },
   cardMeta: {
     marginTop: 3,
-    color: "#6b7280",
     fontSize: 12,
   },
   cardPrice: {
     marginTop: 8,
-    color: "#111827",
     fontWeight: "800",
     fontSize: 14,
   },
@@ -268,10 +317,8 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "#fff",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "#fee2e2",
   },
 });

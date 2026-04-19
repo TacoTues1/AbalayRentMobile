@@ -1142,7 +1142,7 @@ export default function Profile() {
   }
 
   // --- SUB-VIEWS wrapper ---
-  const SubHeader = ({ title, onBack }: any) => (
+  const SubHeader = ({ title, onBack, rightAction }: any) => (
     <View
       style={[
         styles.subHeader,
@@ -1170,7 +1170,13 @@ export default function Profile() {
       >
         {title}
       </Text>
-      <View style={{ width: 40 }} />
+      {rightAction ? (
+        <View style={{ minWidth: 40, alignItems: "flex-end", justifyContent: "center" }}>
+          {rightAction()}
+        </View>
+      ) : (
+        <View style={{ width: 40 }} />
+      )}
     </View>
   );
 
@@ -1183,7 +1189,24 @@ export default function Profile() {
           { backgroundColor: isDark ? colors.background : "#f9fafb" },
         ]}
       >
-        <SubHeader title="Personal Details" />
+        <SubHeader
+          title="Personal Details"
+          rightAction={() => (
+            <TouchableOpacity
+              onPress={handleUpdateProfile}
+              disabled={saving}
+              style={{ paddingHorizontal: 4, paddingVertical: 4 }}
+            >
+              {saving ? (
+                <ActivityIndicator color={isDark ? colors.text : "#2563eb"} size="small" />
+              ) : (
+                <Text style={{ color: isDark ? colors.text : "#2563eb", fontWeight: "700", fontSize: 16 }}>
+                  Save
+                </Text>
+              )}
+            </TouchableOpacity>
+          )}
+        />
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -1546,18 +1569,6 @@ export default function Profile() {
                 </Text>
               </TouchableOpacity>
             )}
-
-            <TouchableOpacity
-              style={styles.saveBtn}
-              onPress={handleUpdateProfile}
-              disabled={saving}
-            >
-              {saving ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <Text style={styles.saveBtnText}>Save Changes</Text>
-              )}
-            </TouchableOpacity>
           </ScrollView>
         </KeyboardAvoidingView>
 

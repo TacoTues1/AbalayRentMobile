@@ -62,7 +62,8 @@
             "usesCleartextTraffic": true,
             "enableProguardInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": true,
-            "extraProguardRules": "-keep class expo.modules.kotlin.types.** { *; }\n-keep class expo.modules.notifications.** { *; }\n-dontwarn expo.modules.kotlin.types.JSTypeConverterProvider**\n-dontwarn expo.modules.kotlin.types.JSTypeConverterProvider$ContainerProvider"
+            "extraProguardRules": "-keep class expo.modules.kotlin.types.** { *; }\n-keep class expo.modules.notifications.** { *; }\n-dontwarn expo.modules.kotlin.types.JSTypeConverterProvider**\n-dontwarn expo.modules.kotlin.types.JSTypeConverterProvider$ContainerProvider",
+            "enableMinifyInReleaseBuilds": true
           }
         }
       ],
@@ -87,9 +88,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "275e7f6a-6e1c-4953-a990-b5376e1f53de"
+        "projectId": "4c393032-6ac1-4844-b547-e58ddc9e5227"
       }
     },
-    "owner": "alfonzperez"
+    "owner": "abalay"
   }
 }

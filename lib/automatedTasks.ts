@@ -18,6 +18,8 @@ export const runDailyAutomatedTasks = async (landlordId: string) => {
 
         console.log("Running Daily Automated Tasks at 8:00 AM...");
 
+        const getPropTitle = (prop: any) => Array.isArray(prop) ? prop[0]?.title : prop?.title;
+
         const todayDay = now.getDate();
         const todayMonth = now.getMonth();
         const todayYear = now.getFullYear();
@@ -98,7 +100,7 @@ export const runDailyAutomatedTasks = async (landlordId: string) => {
                 await createNotification(
                     occ.tenant_id,
                     'occupancy_ended',
-                    `Your contract for "${occ.property?.title || 'your rental'}" has ended on ${occ.end_request_date}.${reasonText}`,
+                    `Your contract for "${getPropTitle(occ.property) || 'your rental'}" has ended on ${occ.end_request_date}.${reasonText}`,
                     { actor: landlordId },
                 );
             }
@@ -132,7 +134,7 @@ export const runDailyAutomatedTasks = async (landlordId: string) => {
                     .gte('created_at', todayStart).lte('created_at', todayEnd).limit(1);
                     
                 if (!waterNotifs || waterNotifs.length === 0) {
-                    const waterMessage = `Water Bill Reminder (${daysText} into first week): Your water bill for "${occ.property?.title}" is due in the first week of ${monthYear}.`;
+                    const waterMessage = `Water Bill Reminder (${daysText} into first week): Your water bill for "${getPropTitle(occ.property)}" is due in the first week of ${monthYear}.`;
                     await createNotification(occ.tenant_id, 'water_due_reminder', waterMessage, { actor: landlordId });
                     // Optionally push full email/sms endpoints here if required
                 }
@@ -143,7 +145,7 @@ export const runDailyAutomatedTasks = async (landlordId: string) => {
                     .gte('created_at', todayStart).lte('created_at', todayEnd).limit(1);
                     
                 if (!elecNotifs || elecNotifs.length === 0) {
-                    const elecMessage = `Electricity Bill Reminder (${daysText} into first week): Your electricity bill for "${occ.property?.title}" is due in the first week of ${monthYear}.`;
+                    const elecMessage = `Electricity Bill Reminder (${daysText} into first week): Your electricity bill for "${getPropTitle(occ.property)}" is due in the first week of ${monthYear}.`;
                     await createNotification(occ.tenant_id, 'electricity_due_reminder', elecMessage, { actor: landlordId });
                 }
             }
@@ -194,13 +196,13 @@ export const runDailyAutomatedTasks = async (landlordId: string) => {
                             security_deposit_used: newDepositUsed
                         }).eq('id', bill.occupancy.id);
 
-                        const depositMsg = `₱${deductedFromDeposit.toLocaleString()} has been auto-deducted from your security deposit as a late payment penalty for "${bill.property?.title}". Remaining deposit: ₱${(availableDeposit - deductedFromDeposit).toLocaleString()}.`;
+                        const depositMsg = `₱${deductedFromDeposit.toLocaleString()} has been auto-deducted from your security deposit as a late payment penalty for "${getPropTitle(bill.property)}". Remaining deposit: ₱${(availableDeposit - deductedFromDeposit).toLocaleString()}.`;
                         await createNotification(bill.tenant, 'security_deposit_deduction', depositMsg, { actor: landlordId });
                     }
 
                     // Tenant notification for late fee
                     const totalDue = (parseFloat(bill.rent_amount) || 0) + (parseFloat(bill.water_bill) || 0) + (parseFloat(bill.electrical_bill) || 0) + (parseFloat(bill.wifi_bill) || 0) + newOtherBills;
-                    let message = `A late payment fee of ₱${lateFee.toLocaleString()} has been added to your rent bill for "${bill.property?.title}". Total due: ₱${totalDue.toLocaleString()}.`;
+                    let message = `A late payment fee of ₱${lateFee.toLocaleString()} has been added to your rent bill for "${getPropTitle(bill.property)}". Total due: ₱${totalDue.toLocaleString()}.`;
                     if (deductedFromDeposit > 0) message += ` ₱${deductedFromDeposit.toLocaleString()} was deducted from your security deposit.`;
 
                     await createNotification(bill.tenant, 'payment_late_fee', message, { actor: landlordId });

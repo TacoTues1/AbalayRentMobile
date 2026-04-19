@@ -198,7 +198,7 @@ const WebViewMap = forwardRef(function WebViewMap(
           boxZoom: ${interactive}
         }).setView([${center[1]}, ${center[0]}], ${zoom});
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
           maxZoom: 19
         }).addTo(map);
 

@@ -277,32 +277,32 @@ export default function Dashboard() {
           },
         ]}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <TouchableOpacity
-            onPress={() => router.push("/(tabs)/profile")}
-            activeOpacity={0.8}
-          >
-            {profile?.avatar_url ? (
-              <Image
-                source={{ uri: profile.avatar_url }}
-                style={styles.avatarImage}
-              />
-            ) : (
-              <View style={styles.avatarFallback}>
-                <Text style={styles.avatarText}>
-                  {(profile?.first_name || session?.user?.email || "U")
-                    .charAt(0)
-                    .toUpperCase()}
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
-          <View>
+        <TouchableOpacity
+          style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}
+          onPress={() => router.push("/(tabs)/profile")}
+          activeOpacity={0.8}
+        >
+          {profile?.avatar_url ? (
+            <Image
+              source={{ uri: profile.avatar_url }}
+              style={styles.avatarImage}
+            />
+          ) : (
+            <View style={styles.avatarFallback}>
+              <Text style={styles.avatarText}>
+                {(profile?.first_name || session?.user?.email || "U")
+                  .charAt(0)
+                  .toUpperCase()}
+              </Text>
+            </View>
+          )}
+          <View style={{ flex: 1 }}>
             <Text
               style={[
                 styles.headerGreeting,
                 { color: isDark ? colors.text : "#111" },
               ]}
+              numberOfLines={1}
             >
               Hello, {firstname}
             </Text>
@@ -315,7 +315,7 @@ export default function Dashboard() {
               {roleLabel}
             </Text>
           </View>
-        </View>
+        </TouchableOpacity>
 
         <TouchableOpacity
           style={[

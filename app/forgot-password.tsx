@@ -4,10 +4,12 @@ import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -41,7 +43,7 @@ export default function ForgotPassword() {
     }
   }, [countdown]);
 
-  // Step 1: Try Supabase OTP first, fall back to Brevo if rate limited
+  // Step 1: Send OTP via Brevo email
   const handleSendOtp = async () => {
     if (!email.trim()) {
       return Alert.alert("Required", "Please enter your email address.");
@@ -49,101 +51,70 @@ export default function ForgotPassword() {
 
     setLoading(true);
     try {
-      // Try Supabase's built-in OTP first
-      const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
+      const code = generateCode();
+
+      // Store the code in Supabase database via RPC
+      const { error: storeError } = await supabase.rpc("store_reset_code", {
+        p_email: email.trim().toLowerCase(),
+        p_code: code,
       });
 
-      if (!error) {
-        // Supabase sent the email successfully
-        setUseCustomOtp(false);
+      if (storeError) {
+        Alert.alert(
+          "Error",
+          "Failed to generate reset code. Please try again.",
+        );
+        setLoading(false);
+        return;
+      }
+
+      // Send via Brevo REST API
+      if (!BREVO_API_KEY) {
+        Alert.alert(
+          "Error",
+          "Email service is not configured. Please contact support.",
+        );
+        setLoading(false);
+        return;
+      }
+
+      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "api-key": BREVO_API_KEY,
+        },
+        body: JSON.stringify({
+          sender: { name: "Abalay", email: "alfnzperez@gmail.com" },
+          to: [{ email: email.trim() }],
+          subject: "Password Reset Code - Abalay",
+          htmlContent: `
+            <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 30px;">
+              <h2 style="color: #111; text-align: center;">Password Reset</h2>
+              <p style="color: #666; text-align: center;">You requested a password reset for your Abalay account. Enter this code in the app:</p>
+              <div style="background: #f3f4f6; border-radius: 12px; padding: 24px; text-align: center; margin: 24px 0;">
+                <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #111;">${code}</span>
+              </div>
+              <p style="color: #999; font-size: 13px; text-align: center;">This code expires in 10 minutes. If you didn't request this, please ignore this email.</p>
+            </div>
+          `,
+        }),
+      });
+
+      if (response.ok || response.status === 201) {
+        setUseCustomOtp(true);
         Alert.alert(
           "Code Sent!",
           "Check your email for the 6-digit verification code.",
         );
         setCountdown(90);
         setStep("otp");
-        setLoading(false);
-        return;
-      }
-
-      // Check if it's a rate limit or sending error
-      const msg = error.message.toLowerCase();
-      if (
-        msg.includes("rate limit") ||
-        msg.includes("exceeded") ||
-        msg.includes("error sending")
-      ) {
-        // Fall back to Brevo
-        console.log("Supabase rate limited, falling back to Brevo...");
-        const code = generateCode();
-
-        // Store the code in Supabase database
-        const { error: storeError } = await supabase.rpc("store_reset_code", {
-          p_email: email.trim().toLowerCase(),
-          p_code: code,
-        });
-
-        if (storeError) {
-          Alert.alert(
-            "Error",
-            "Failed to generate reset code. Please try again.",
-          );
-          setLoading(false);
-          return;
-        }
-
-        // Send via Brevo REST API
-        if (!BREVO_API_KEY) {
-          Alert.alert(
-            "Error",
-            "Email service is not configured. Please contact support.",
-          );
-          setLoading(false);
-          return;
-        }
-
-        const response = await fetch("https://api.brevo.com/v3/smtp/email", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "api-key": BREVO_API_KEY,
-          },
-          body: JSON.stringify({
-            sender: { name: "Abalay", email: "alfnzperez@gmail.com" },
-            to: [{ email: email.trim() }],
-            subject: "Password Reset Code - Abalay",
-            htmlContent: `
-              <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 30px;">
-                <h2 style="color: #111; text-align: center;">Password Reset</h2>
-                <p style="color: #666; text-align: center;">You requested a password reset for your Abalay account. Enter this code in the app:</p>
-                <div style="background: #f3f4f6; border-radius: 12px; padding: 24px; text-align: center; margin: 24px 0;">
-                  <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #111;">${code}</span>
-                </div>
-                <p style="color: #999; font-size: 13px; text-align: center;">This code expires in 10 minutes. If you didn't request this, please ignore this email.</p>
-              </div>
-            `,
-          }),
-        });
-
-        if (response.ok || response.status === 201) {
-          setUseCustomOtp(true);
-          Alert.alert(
-            "Code Sent!",
-            "Check your email for the 6-digit verification code.",
-          );
-          setCountdown(90);
-          setStep("otp");
-        } else {
-          const result = await response.json();
-          Alert.alert(
-            "Error",
-            result.message || "Failed to send email. Please try again.",
-          );
-        }
       } else {
-        // Other Supabase error
-        Alert.alert("Error", error.message);
+        const result = await response.json();
+        Alert.alert(
+          "Error",
+          result.message || "Failed to send email. Please try again.",
+        );
       }
     } catch (err: any) {
       Alert.alert(
@@ -167,7 +138,7 @@ export default function ForgotPassword() {
     setStep("newpassword");
   };
 
-  // Step 3: Set new password - uses different method based on OTP source
+  // Step 3: Set new password via RPC verification
   const handleResetPassword = async () => {
     if (newPassword.length < 6) {
       return Alert.alert("Error", "Password must be at least 6 characters.");
@@ -178,54 +149,26 @@ export default function ForgotPassword() {
 
     setLoading(true);
     try {
-      if (useCustomOtp) {
-        // Custom OTP (Brevo) - verify via RPC
-        const { data, error } = await supabase.rpc(
-          "verify_and_reset_password",
-          {
-            p_email: email.trim().toLowerCase(),
-            p_code: otp.trim(),
-            p_new_password: newPassword,
-          },
-        );
+      const { data, error } = await supabase.rpc(
+        "verify_and_reset_password",
+        {
+          p_email: email.trim().toLowerCase(),
+          p_code: otp.trim(),
+          p_new_password: newPassword,
+        },
+      );
 
-        if (error) {
-          Alert.alert("Error", error.message);
-          setLoading(false);
-          return;
-        }
+      if (error) {
+        Alert.alert("Error", error.message);
+        setLoading(false);
+        return;
+      }
 
-        if (data?.success) {
-          await supabase.auth.signOut();
-          setStep("success");
-        } else {
-          Alert.alert("Error", data?.message || "Failed to reset password.");
-        }
+      if (data?.success) {
+        await supabase.auth.signOut();
+        setStep("success");
       } else {
-        // Supabase OTP - verify via Supabase auth
-        const { error: verifyError } = await supabase.auth.verifyOtp({
-          email: email.trim(),
-          token: otp.trim(),
-          type: "email",
-        });
-
-        if (verifyError) {
-          Alert.alert("Invalid Code", verifyError.message);
-          setLoading(false);
-          return;
-        }
-
-        // Now update the password
-        const { error: updateError } = await supabase.auth.updateUser({
-          password: newPassword,
-        });
-
-        if (updateError) {
-          Alert.alert("Error", updateError.message);
-        } else {
-          await supabase.auth.signOut();
-          setStep("success");
-        }
+        Alert.alert("Error", data?.message || "Failed to reset password.");
       }
     } catch (err: any) {
       Alert.alert("Error", err.message || "Something went wrong.");
@@ -259,6 +202,7 @@ export default function ForgotPassword() {
   }
 
   return (
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
     <SafeAreaView style={styles.container}>
       <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
         <Ionicons name="arrow-back" size={24} color="black" />
@@ -453,6 +397,7 @@ export default function ForgotPassword() {
         )}
       </View>
     </SafeAreaView>
+    </TouchableWithoutFeedback>
   );
 }
 
