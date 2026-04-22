@@ -9,11 +9,7 @@
     "scheme": "abalay",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "platforms": [
-      "android",
-      "ios",
-      "web"
-    ],
+    "platforms": ["android", "ios", "web"],
     "ios": {
       "supportsTablet": true
     },
@@ -31,9 +27,7 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.POST_NOTIFICATIONS"
       ],
-      "blockedPermissions": [
-        "com.google.android.gms.permission.AD_ID"
-      ]
+      "blockedPermissions": ["com.google.android.gms.permission.AD_ID"]
     },
     "web": {
       "output": "static",

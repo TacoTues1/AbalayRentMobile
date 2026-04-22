@@ -76,6 +76,7 @@ export default function NewProperty() {
     property_type: "House Apartment",
     bed_type: "Single Bed",
     max_occupancy: "1",
+    is_no_limit: false,
     has_security_deposit: true,
     security_deposit_amount: "",
     deposit_same_as_rent: true,
@@ -337,7 +338,7 @@ export default function NewProperty() {
       bedrooms: sanitize(form.bedrooms),
       bathrooms: sanitize(form.bathrooms),
       area_sqft: sanitize(form.area_sqft),
-      max_occupancy: sanitize(form.max_occupancy),
+      max_occupancy: form.is_no_limit ? 0 : sanitize(form.max_occupancy),
       images: form.images.length > 0 ? form.images : null,
       has_security_deposit: form.has_security_deposit,
       security_deposit_amount: form.has_security_deposit
@@ -1108,10 +1109,66 @@ export default function NewProperty() {
                     onChangeText={(t) => setForm({ ...form, area_sqft: t })}
                   />
                 </View>
+                <View style={[styles.fieldGroup, { flex: 1, marginLeft: 10 }]}>
+                  <Text
+                    style={[
+                      styles.subLabel,
+                      { color: isDark ? colors.textMuted : "#6B7280" },
+                    ]}
+                  >
+                    Good for (People)
+                  </Text>
+                  <TextInput
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: isDark ? colors.inputBg : "#FFFFFF",
+                        borderColor: isDark ? colors.inputBorder : "#E5E7EB",
+                        color: isDark ? colors.text : "#111",
+                      },
+                    ]}
+                    keyboardType="numeric"
+                    value={form.is_no_limit ? "No Limits" : form.max_occupancy}
+                    editable={!form.is_no_limit}
+                    onChangeText={(t) => setForm({ ...form, max_occupancy: t })}
+                  />
+                  <TouchableOpacity
+                    onPress={() =>
+                      setForm({
+                        ...form,
+                        is_no_limit: !form.is_no_limit,
+                        max_occupancy: !form.is_no_limit ? "0" : "1",
+                      })
+                    }
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      marginTop: 5,
+                    }}
+                  >
+                    <Ionicons
+                      name={form.is_no_limit ? "checkbox" : "square-outline"}
+                      size={18}
+                      color={isDark ? colors.text : "black"}
+                    />
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        marginLeft: 5,
+                        color: isDark ? colors.textSecondary : "#4B5563",
+                      }}
+                    >
+                      No Limits
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.row}>
                 <View
                   style={[
                     styles.fieldGroup,
-                    { flex: 1, marginLeft: 10, position: "relative" },
+                    { flex: 1, position: "relative" },
                   ]}
                 >
                   <Text

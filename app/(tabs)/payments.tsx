@@ -28,6 +28,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { createNotification } from "../../lib/notifications";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
+import GuestGuard from "../../components/auth/GuestGuard";
 
 // Helper to get Month Year string
 function getRentMonth(dueDateString: string) {
@@ -2593,6 +2594,15 @@ export default function Payments() {
       Math.min(prev + PAYMENT_LIST_PAGE_SIZE, filteredBills.length),
     );
   };
+
+  if (!loading && !session) {
+    return (
+      <GuestGuard
+        message="Please log in to view and manage your payments."
+        returnTo="/(tabs)/payments"
+      />
+    );
+  }
 
   return (
     <SafeAreaView

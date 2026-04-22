@@ -168,7 +168,9 @@ function SkeletonBlock({
   );
 }
 
-export default function TenantDashboard({ session, profile }: any) {
+let authModalDismissedThisSession = false;
+
+export default function VisitorDashboard({ session, profile }: any) {
   const router = useRouter();
   const { isDark, colors } = useTheme();
 
@@ -183,6 +185,20 @@ export default function TenantDashboard({ session, profile }: any) {
   const [propertyStats, setPropertyStats] = useState<any>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(!session && !authModalDismissedThisSession);
+
+  useEffect(() => {
+    if (!session && !authModalDismissedThisSession) {
+      // Ensure it stays true or re-triggers if needed, 
+      // but initial state handles the "immediate" requirement
+      setShowAuthModal(true);
+    }
+  }, [session]);
+
+  const dismissAuthModal = () => {
+    setShowAuthModal(false);
+    authModalDismissedThisSession = true;
+  };
 
   // Location-based state (matches web)
   const [userLocationCity, setUserLocationCity] = useState("");
@@ -334,9 +350,7 @@ export default function TenantDashboard({ session, profile }: any) {
 
   // --- INITIAL LOAD ---
   useEffect(() => {
-    if (session) {
-      loadInitialData();
-    }
+    loadInitialData();
   }, [session, profile]);
 
   // --- AUTO-SLIDING IMAGES (matches web) ---
@@ -373,7 +387,7 @@ export default function TenantDashboard({ session, profile }: any) {
 
   useFocusEffect(
     useCallback(() => {
-      if (session && !loading) {
+      if (!loading) {
         // Only refresh silently if it already loaded once
         loadInitialData({ silentRefresh: true });
       }
@@ -383,7 +397,7 @@ export default function TenantDashboard({ session, profile }: any) {
   useRealtime(
     ["tenant_occupancies", "payment_requests", "payments", "family_members"],
     () => {
-      console.log("Realtime update triggered reload for tenant dashboard");
+      console.log("Realtime update triggered reload for visitor dashboard");
       loadInitialData();
     },
     !!profile,
@@ -1271,7 +1285,6 @@ export default function TenantDashboard({ session, profile }: any) {
         )
         .eq("tenant_id", session.user.id)
         .in("status", ["active", "pending_end", "approved", "signed"])
-        .lte("start_date", new Date().toISOString())
         .order("start_date", { ascending: false });
 
       if (error) {
@@ -1832,13 +1845,13 @@ export default function TenantDashboard({ session, profile }: any) {
           if (!error) return true;
           if (!isDuplicateLinkError(error)) {
             console.error(
-              "TenantDashboard ensureFamilyLink upsert error:",
+              "VisitorDashboard ensureFamilyLink upsert error:",
               error,
             );
           }
         } catch (upsertErr) {
           console.error(
-            "TenantDashboard ensureFamilyLink upsert exception:",
+            "VisitorDashboard ensureFamilyLink upsert exception:",
             upsertErr,
           );
         }
@@ -1951,7 +1964,7 @@ export default function TenantDashboard({ session, profile }: any) {
             const ensured = await ensureFamilyLink();
             if (!ensured) {
               console.warn(
-                "TenantDashboard addFamilyMember: API succeeded but direct DB ensure failed.",
+                "VisitorDashboard addFamilyMember: API succeeded but direct DB ensure failed.",
               );
             }
             Alert.alert("Success", "Family member added successfully!");
@@ -2381,30 +2394,14 @@ export default function TenantDashboard({ session, profile }: any) {
 
   // --- ACTIONS ---
 
-  const confirmRequestEnd = () => {
+  const requestEndOccupancy = async () => {
     if (isFamilyMember)
       return Alert.alert(
         "Error",
         "Only the primary tenant can end the contract.",
       );
     if (!occupancy || !endRequestDate || !endRequestReason)
-      return Alert.alert("Error", "Please fill in all fields (date and reason).");
-
-    Alert.alert(
-      "Confirm Move-Out Request",
-      `Are you sure you want to request to leave on ${new Date(endRequestDate).toLocaleDateString()}? Once submitted, this request cannot be undone or changed without landlord approval.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { 
-          text: "Confirm", 
-          style: "destructive", 
-          onPress: () => requestEndOccupancy() 
-        }
-      ]
-    );
-  };
-
-  const requestEndOccupancy = async () => {
+      return Alert.alert("Error", "Fill all fields");
     setSubmittingEndRequest(true);
     try {
       const unresolvedPaymentStatuses = [
@@ -3252,15 +3249,15 @@ export default function TenantDashboard({ session, profile }: any) {
     );
   };
 
-  if (loading && !occupancy) {
-    return (
-      <View
-        style={[
-          styles.container,
-          { backgroundColor: isDark ? colors.background : "#f8fafc" },
-        ]}
-      >
-        <ScrollView contentContainerStyle={{ paddingBottom: 130 }}>
+  return (
+    <View
+      style={[
+        styles.container,
+        { backgroundColor: isDark ? colors.background : "#f8fafc" },
+      ]}
+    >
+      {loading && !occupancy ? (
+        <ScrollView key="loading-scroll" contentContainerStyle={{ paddingBottom: 130 }}>
           <View
             style={{
               flexDirection: "row",
@@ -3316,23 +3313,14 @@ export default function TenantDashboard({ session, profile }: any) {
             ).map((itemKey) => renderNoOccupancySkeletonCard(itemKey))}
           </View>
         </ScrollView>
-      </View>
-    );
-  }
-
-  return (
-    <View
-      style={[
-        styles.container,
-        { backgroundColor: isDark ? colors.background : "#f8fafc" },
-      ]}
-    >
-      <ScrollView
-        contentContainerStyle={{ paddingBottom: 130 }}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
+      ) : (
+        <ScrollView
+          key="main-scroll"
+          contentContainerStyle={{ paddingBottom: 130 }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
         {occupancy ? (
           <View style={styles.dashboardContent}>
             {/* Header */}
@@ -5912,6 +5900,8 @@ export default function TenantDashboard({ session, profile }: any) {
           </View>
         )}
       </ScrollView>
+    )}
+
 
       {/* Compare Button */}
       {comparisonList.length > 0 && (
@@ -6019,7 +6009,7 @@ export default function TenantDashboard({ session, profile }: any) {
                         styles.confirmBtn,
                         { backgroundColor: isDark ? colors.text : "#111" },
                       ]}
-                      onPress={confirmRequestEnd}
+                      onPress={requestEndOccupancy}
                     >
                       <Text
                         style={[
@@ -6354,13 +6344,29 @@ export default function TenantDashboard({ session, profile }: any) {
             <View
               style={[
                 styles.modalIconContainer,
-                { backgroundColor: "#f3f4f6" },
+                { backgroundColor: isDark ? colors.border : "#f3f4f6" },
               ]}
             >
-              <Ionicons name="document-text" size={28} color="#333" />
+              <Ionicons
+                name="document-text"
+                size={28}
+                color={isDark ? colors.text : "#333"}
+              />
             </View>
-            <Text style={styles.modalTitle}>Property Terms & Conditions</Text>
-            <Text style={styles.modalSubtitle}>
+            <Text
+              style={[
+                styles.modalTitle,
+                { color: isDark ? colors.text : "#111" },
+              ]}
+            >
+              Property Terms & Conditions
+            </Text>
+            <Text
+              style={[
+                styles.modalSubtitle,
+                { color: isDark ? colors.textSecondary : "#666" },
+              ]}
+            >
               {occupancy?.property?.title}
             </Text>
             <ScrollView
@@ -6398,6 +6404,53 @@ export default function TenantDashboard({ session, profile }: any) {
             </TouchableOpacity>
           </View>
         </View>
+      </Modal>
+
+      {/* Auth Prompt Modal */}
+      <Modal visible={showAuthModal && !session} transparent animationType="slide">
+        <TouchableWithoutFeedback onPress={dismissAuthModal}>
+          <View style={styles.authModalBackdrop}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.authModalContent, isDark && { backgroundColor: colors.card }]}>
+                <View style={[styles.authModalHandle, isDark && { backgroundColor: '#374151' }]} />
+                <Text style={[styles.authModalTitle, isDark && { color: colors.text }]}>
+                  Welcome to Abalay
+                </Text>
+                
+                <TouchableOpacity 
+                  style={styles.authModalPrimaryBtn}
+                  onPress={() => {
+                    dismissAuthModal();
+                    router.push("/login");
+                  }}
+                >
+                  <Text style={styles.authModalPrimaryBtnText}>Log In</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={[styles.authModalSecondaryBtn, isDark && { borderColor: colors.border }]}
+                  onPress={() => {
+                    dismissAuthModal();
+                    router.push("/login?tab=signup");
+                  }}
+                >
+                  <Text style={[styles.authModalSecondaryBtnText, isDark && { color: colors.text }]}>
+                    Create Account
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={{ marginTop: 20 }}
+                  onPress={dismissAuthModal}
+                >
+                  <Text style={{ color: '#6b7280', fontSize: 14, fontWeight: '600' }}>
+                    Continue as Guest
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
       </Modal>
     </View>
   );
@@ -6985,4 +7038,71 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
   checkboxContainer: { marginBottom: 20 },
+  authModalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  authModalContent: {
+    backgroundColor: "white",
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    padding: 24,
+    paddingBottom: Platform.OS === "ios" ? 40 : 30,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 20,
+  },
+  authModalHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: "#e5e7eb",
+    borderRadius: 2,
+    marginBottom: 24,
+  },
+  authModalTitle: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#111827",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  authModalSubtitle: {
+    fontSize: 15,
+    color: "#6b7280",
+    textAlign: "center",
+    marginBottom: 32,
+    lineHeight: 22,
+    paddingHorizontal: 20,
+  },
+  authModalPrimaryBtn: {
+    width: "100%",
+    backgroundColor: "#111827",
+    paddingVertical: 16,
+    borderRadius: 16,
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  authModalPrimaryBtnText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  authModalSecondaryBtn: {
+    width: "100%",
+    backgroundColor: "transparent",
+    paddingVertical: 16,
+    borderRadius: 16,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+  },
+  authModalSecondaryBtnText: {
+    color: "#111827",
+    fontSize: 16,
+    fontWeight: "700",
+  },
 });

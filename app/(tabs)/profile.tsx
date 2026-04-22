@@ -2,22 +2,25 @@ import { Ionicons } from "@expo/vector-icons";
 import { decode } from "base64-arraybuffer";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  Linking,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import PrivacyView from "../../components/profile/PrivacyView";
@@ -25,10 +28,165 @@ import TermsView from "../../components/profile/TermsView";
 import CalendarPicker from "../../components/ui/CalendarPicker";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
+import GuestGuard from "../../components/auth/GuestGuard";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || "";
 const BREVO_API_KEY = process.env.EXPO_PUBLIC_BREVO_API_KEY || "";
 const BUG_REPORT_RECIPIENT = "alfonzperez92@gmail.com";
+
+type EmergencyContact = {
+  id: string;
+  name: string;
+  category: string;
+  phone: string;
+  note?: string;
+  sourceLabel?: string;
+  sourceUrl?: string;
+};
+
+type EmergencyCityEntry = {
+  label: string;
+  aliases: string[];
+  contacts: EmergencyContact[];
+};
+
+const DEFAULT_EMERGENCY_CITY_KEY = "dumaguete";
+
+const NATIONAL_EMERGENCY_CONTACTS: EmergencyContact[] = [
+  {
+    id: "national-911",
+    name: "National Emergency Hotline",
+    category: "Hotline",
+    phone: "911",
+    note: "Free 24/7 hotline for police, fire, medical, and disaster response.",
+    sourceLabel: "Philippine Information Agency",
+    sourceUrl:
+      "https://pia.gov.ph/news/dilg-to-roll-out-unified-911-emergency-hotline-on-sept-11/",
+  },
+  {
+    id: "red-cross",
+    name: "Philippine Red Cross",
+    category: "Medical",
+    phone: "143",
+    note: "Emergency hotline listed by Philippine Red Cross.",
+    sourceLabel: "Philippine Red Cross",
+    sourceUrl: "https://redcross.org.ph/",
+  },
+];
+
+const EMERGENCY_CONTACTS_BY_CITY: Record<string, EmergencyCityEntry> = {
+  dumaguete: {
+    label: "Dumaguete City, Negros Oriental",
+    aliases: ["dumaguete", "negros oriental"],
+    contacts: [
+      {
+        id: "dum-cmo-main",
+        name: "Dumaguete City Mayor's Office",
+        category: "Local Government",
+        phone: "0352250640",
+        note: "City Mayor's Office contact for local assistance.",
+        sourceLabel: "Dumaguete City Mayor's Office",
+        sourceUrl: "https://dumaguetecity.gov.ph/city-mayors-office/",
+      },
+      {
+        id: "dum-city-hall",
+        name: "Dumaguete City Hall",
+        category: "Local Government",
+        phone: "0352253775",
+        note: "City Hall trunkline listed on the city government page.",
+        sourceLabel: "Dumaguete City Mayor's Office",
+        sourceUrl: "https://dumaguetecity.gov.ph/city-mayors-office/",
+      },
+    ],
+  },
+  cebu: {
+    label: "Cebu City, Cebu",
+    aliases: ["cebu city", "cebu"],
+    contacts: [],
+  },
+  manila: {
+    label: "Manila, Metro Manila",
+    aliases: ["manila", "metro manila", "ncr"],
+    contacts: [],
+  },
+  davao: {
+    label: "Davao City, Davao del Sur",
+    aliases: ["davao", "davao city"],
+    contacts: [
+      {
+        id: "dav-kean-gabriel",
+        name: "Kean Gabriel Hotline",
+        category: "Child Protection",
+        phone: "09088184444",
+        note: "Anti-child-abuse reporting hotline.",
+        sourceLabel: "Davao City Government",
+        sourceUrl:
+          "https://davaocity.gov.ph/local-government/kean-gabriel-hotline-bags-regional-recognition/",
+      },
+      {
+        id: "dav-city-main",
+        name: "Davao City Government Contact Line",
+        category: "Local Government",
+        phone: "0822411000",
+        note: "City government contact line for reports and concerns.",
+        sourceLabel: "Davao City Government",
+        sourceUrl: "https://davaocity.gov.ph/contact-us/",
+      },
+    ],
+  },
+};
+
+const normalizeLocationToken = (value: string | null | undefined) =>
+  String(value || "")
+    .trim()
+    .toLowerCase();
+
+const findEmergencyCityByGeocode = (
+  address: Location.LocationGeocodedAddress | null,
+) => {
+  if (!address) return null;
+
+  const candidates = [
+    address.city,
+    address.subregion,
+    address.region,
+    address.district,
+    address.street,
+    address.name,
+  ]
+    .map(normalizeLocationToken)
+    .filter(Boolean);
+
+  for (const [cityKey, entry] of Object.entries(EMERGENCY_CONTACTS_BY_CITY)) {
+    const matches = entry.aliases.some((alias) => {
+      const normalizedAlias = normalizeLocationToken(alias);
+      return candidates.some(
+        (value) =>
+          value.includes(normalizedAlias) || normalizedAlias.includes(value),
+      );
+    });
+
+    if (matches) {
+      return { cityKey, entry };
+    }
+  }
+
+  return null;
+};
+
+const mergeEmergencyContacts = (cityContacts: EmergencyContact[]) => {
+  const seen = new Set<string>();
+  const merged: EmergencyContact[] = [];
+
+  for (const contact of [...cityContacts, ...NATIONAL_EMERGENCY_CONTACTS]) {
+    const key = `${contact.name}|${contact.phone}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(contact);
+  }
+
+  return merged;
+};
 
 async function sendBugReportViaBrevo({
   reporterName,
@@ -102,6 +260,7 @@ export default function Profile() {
     | "personal"
     | "Password"
     | "notifications"
+    | "emergency_contacts"
     | "terms"
     | "privacy"
     | "report_bug"
@@ -125,16 +284,11 @@ export default function Profile() {
   const [bugReportAttachment, setBugReportAttachment] =
     useState<ImagePicker.ImagePickerAsset | null>(null);
   const [sendingBugReport, setSendingBugReport] = useState(false);
-
-  // --- LANDLORD RATING STATE ---
   const [landlordRating, setLandlordRating] = useState({
     average: 0,
     count: 0,
   });
-
   const [saving, setSaving] = useState(false);
-
-  // Verification State
   const [verifying, setVerifying] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
   const [otp, setOtp] = useState("");
@@ -144,11 +298,13 @@ export default function Profile() {
   const [dbVerifiedPhone, setDbVerifiedPhone] = useState("");
   const [resendCooldown, setResendCooldown] = useState(0);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const modalRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Cleanup cooldown timer on unmount
   useEffect(() => {
     return () => {
       if (cooldownRef.current) clearInterval(cooldownRef.current);
+      if (modalRetryTimerRef.current) clearTimeout(modalRetryTimerRef.current);
     };
   }, []);
 
@@ -196,6 +352,52 @@ export default function Profile() {
   // --- UI STATE ---
   const [showGenderModal, setShowGenderModal] = useState(false);
   const [showBirthdayPicker, setShowBirthdayPicker] = useState(false);
+  const [emergencyContacts, setEmergencyContacts] = useState<
+    EmergencyContact[]
+  >(() =>
+    mergeEmergencyContacts(
+      EMERGENCY_CONTACTS_BY_CITY[DEFAULT_EMERGENCY_CITY_KEY].contacts,
+    ),
+  );
+  const [emergencyLocationLabel, setEmergencyLocationLabel] = useState(
+    `${EMERGENCY_CONTACTS_BY_CITY[DEFAULT_EMERGENCY_CITY_KEY].label} (default)`,
+  );
+  const [emergencyPermissionState, setEmergencyPermissionState] = useState<
+    "idle" | "granted" | "denied" | "error"
+  >("idle");
+  const [loadingEmergencyContacts, setLoadingEmergencyContacts] =
+    useState(false);
+  const emergencyLoadedRef = useRef(false);
+
+  const openModalSafely = (openModal: () => void) => {
+    Keyboard.dismiss();
+
+    if (modalRetryTimerRef.current) {
+      clearTimeout(modalRetryTimerRef.current);
+      modalRetryTimerRef.current = null;
+    }
+
+    requestAnimationFrame(() => openModal());
+
+    // Some devices drop the first modal open while keyboard/scroll interactions settle.
+    modalRetryTimerRef.current = setTimeout(
+      () => {
+        requestAnimationFrame(() => openModal());
+        modalRetryTimerRef.current = null;
+      },
+      Platform.OS === "android" ? 180 : 90,
+    );
+  };
+
+  const openBirthdayPicker = () => {
+    setShowGenderModal(false);
+    openModalSafely(() => setShowBirthdayPicker(true));
+  };
+
+  const openGenderPicker = () => {
+    setShowBirthdayPicker(false);
+    openModalSafely(() => setShowGenderModal(true));
+  };
 
   useEffect(() => {
     getProfile();
@@ -504,6 +706,95 @@ export default function Profile() {
     setCurrentView("report_bug");
   };
 
+  const setDefaultEmergencyContacts = (reason: "denied" | "error" | "idle") => {
+    const fallback = EMERGENCY_CONTACTS_BY_CITY[DEFAULT_EMERGENCY_CITY_KEY];
+    setEmergencyContacts(mergeEmergencyContacts(fallback.contacts));
+    setEmergencyLocationLabel(`${fallback.label} (default)`);
+    setEmergencyPermissionState(reason);
+  };
+
+  const loadEmergencyContacts = async () => {
+    setLoadingEmergencyContacts(true);
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+
+      if (permission.status !== "granted") {
+        setDefaultEmergencyContacts("denied");
+        return;
+      }
+
+      setEmergencyPermissionState("granted");
+
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const reverseResult = await Location.reverseGeocodeAsync({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      });
+
+      const resolved = findEmergencyCityByGeocode(reverseResult?.[0] || null);
+      if (!resolved) {
+        const fallback = EMERGENCY_CONTACTS_BY_CITY[DEFAULT_EMERGENCY_CITY_KEY];
+        setEmergencyContacts(mergeEmergencyContacts(fallback.contacts));
+        setEmergencyLocationLabel(
+          `${fallback.label} (location not listed, using default)`,
+        );
+        return;
+      }
+
+      setEmergencyContacts(mergeEmergencyContacts(resolved.entry.contacts));
+      setEmergencyLocationLabel(
+        resolved.entry.contacts.length > 0
+          ? resolved.entry.label
+          : `${resolved.entry.label} (using verified national contacts)`,
+      );
+    } catch (error) {
+      console.warn("Emergency contacts location error:", error);
+      setDefaultEmergencyContacts("error");
+    } finally {
+      setLoadingEmergencyContacts(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentView !== "emergency_contacts") return;
+    if (emergencyLoadedRef.current) return;
+
+    emergencyLoadedRef.current = true;
+    loadEmergencyContacts();
+  }, [currentView]);
+
+  const handleCallEmergencyContact = async (phone: string) => {
+    const cleanPhone = String(phone || "").replace(/[^0-9+]/g, "");
+    if (!cleanPhone) {
+      Alert.alert(
+        "Unavailable",
+        "This emergency contact has no valid phone number.",
+      );
+      return;
+    }
+
+    const telUrl = `tel:${cleanPhone}`;
+    const canOpen = await Linking.canOpenURL(telUrl);
+    if (!canOpen) {
+      Alert.alert("Cannot Call", "Calling is not supported on this device.");
+      return;
+    }
+
+    await Linking.openURL(telUrl);
+  };
+
+  const handleOpenEmergencySource = async (sourceUrl: string) => {
+    const canOpen = await Linking.canOpenURL(sourceUrl);
+    if (!canOpen) {
+      Alert.alert("Unavailable", "Cannot open source link on this device.");
+      return;
+    }
+
+    await Linking.openURL(sourceUrl);
+  };
+
   const pickBugAttachment = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -735,7 +1026,7 @@ export default function Profile() {
 
       await supabase.auth.signOut();
       Alert.alert("Success", "Your account has been deleted successfully.", [
-        { text: "OK", onPress: () => router.replace("/login") },
+        { text: "OK", onPress: () => router.replace("/") },
       ]);
     } catch (e: any) {
       Alert.alert("Error", e.message);
@@ -852,10 +1143,10 @@ export default function Profile() {
                   { color: isDark ? colors.text : "#111" },
                 ]}
               >
-                {firstName} {lastName}
+                {session ? `${firstName} ${lastName}` : "Guest User"}
               </Text>
               {/* Landlord Rating Stars */}
-              {profileRole === "landlord" && (
+              {session && profileRole === "landlord" && (
                 <View style={styles.ratingContainer}>
                   <View style={{ flexDirection: "row", gap: 2 }}>
                     {[1, 2, 3, 4, 5].map((star) => {
@@ -896,196 +1187,221 @@ export default function Profile() {
                   </Text>
                 </View>
               )}
-              <TouchableOpacity
-                style={styles.editProfileBtn}
-                onPress={() => setCurrentView("personal")}
-              >
-                <Text style={styles.editProfileText}>Edit Profile</Text>
-                <Ionicons name="chevron-forward" size={12} color="white" />
-              </TouchableOpacity>
+              {session ? (
+                <TouchableOpacity
+                  style={styles.editProfileBtn}
+                  onPress={() => setCurrentView("personal")}
+                >
+                  <Text style={styles.editProfileText}>Edit Profile</Text>
+                  <Ionicons name="chevron-forward" size={12} color="white" />
+                </TouchableOpacity>
+              ) : (
+                <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+                  <TouchableOpacity
+                    style={[styles.authSmallBtn, { backgroundColor: '#111' }]}
+                    onPress={() => router.push("/login")}
+                  >
+                    <Text style={styles.authSmallBtnText}>Log In</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.authSmallBtn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#eee' }]}
+                    onPress={() => router.push("/login?tab=signup")}
+                  >
+                    <Text style={[styles.authSmallBtnText, { color: '#111' }]}>Join</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           </View>
 
           {/* Management Section */}
-          <Text
-            style={[
-              styles.sectionHeader,
-              { color: isDark ? colors.text : "#111" },
-            ]}
-          >
-            Management
-          </Text>
-          <View
-            style={[
-              styles.menuSection,
-              { backgroundColor: isDark ? colors.card : "white" },
-            ]}
-          >
-            <MenuRow
-              icon="business-outline"
-              label="All Properties"
-              onPress={() => router.push("/(tabs)/allproperties")}
-            />
-            <MenuRow
-              icon="search-outline"
-              label="Search Landlords"
-              onPress={() => router.push("/(tabs)/landlords")}
-            />
-            {profileRole === "landlord" && (
-              <>
+          {session && (
+            <>
+              <Text
+                style={[
+                  styles.sectionHeader,
+                  { color: isDark ? colors.text : "#111" },
+                ]}
+              >
+                Management
+              </Text>
+              <View
+                style={[
+                  styles.menuSection,
+                  { backgroundColor: isDark ? colors.card : "white" },
+                ]}
+              >
                 <MenuRow
-                  icon="home-outline"
-                  label="My Properties"
-                  onPress={() => router.push("/(tabs)/landlordproperties")}
+                  icon="business-outline"
+                  label="All Properties"
+                  onPress={() => router.push("/(tabs)/allproperties")}
                 />
                 <MenuRow
-                  icon="calendar-outline"
-                  label="Schedule"
-                  onPress={() => router.push("/(tabs)/schedule")}
+                  icon="search-outline"
+                  label="Search Landlords"
+                  onPress={() => router.push("/(tabs)/landlords")}
                 />
-              </>
-            )}
-            <MenuRow
-              icon="people-outline"
-              label="Bookings"
-              onPress={() => router.push("/(tabs)/bookings")}
-            />
-            <MenuRow
-              icon="hammer-outline"
-              label="Maintenance"
-              onPress={() => router.push("/(tabs)/maintenance")}
-            />
-            <MenuRow
-              icon="card-outline"
-              label="Payments"
-              onPress={() => router.push("/(tabs)/payments")}
-            />
-          </View>
+                {profileRole === "landlord" && (
+                  <>
+                    <MenuRow
+                      icon="home-outline"
+                      label="My Properties"
+                      onPress={() => router.push("/(tabs)/landlordproperties")}
+                    />
+                    <MenuRow
+                      icon="calendar-outline"
+                      label="Schedule"
+                      onPress={() => router.push("/(tabs)/schedule")}
+                    />
+                  </>
+                )}
+                <MenuRow
+                  icon="people-outline"
+                  label="Bookings"
+                  onPress={() => router.push("/(tabs)/bookings")}
+                />
+                <MenuRow
+                  icon="hammer-outline"
+                  label="Maintenance"
+                  onPress={() => router.push("/(tabs)/maintenance")}
+                />
+                <MenuRow
+                  icon="card-outline"
+                  label="Payments"
+                  onPress={() => router.push("/(tabs)/payments")}
+                />
+              </View>
+            </>
+          )}
 
           {/* General Section */}
-          <Text
-            style={[
-              styles.sectionHeader,
-              { color: isDark ? colors.text : "#111" },
-            ]}
-          >
-            Account
-          </Text>
-          <View
-            style={[
-              styles.menuSection,
-              { backgroundColor: isDark ? colors.card : "white" },
-            ]}
-          >
-            <MenuRow
-              icon="person-outline"
-              label="Personal Details"
-              onPress={() => setCurrentView("personal")}
-            />
-            <MenuRow
-              icon="lock-closed-outline"
-              label="Password"
-              onPress={() => setCurrentView("Password")}
-            />
-            <MenuRow
-              icon="notifications-outline"
-              label="Notifications"
-              onPress={() => setCurrentView("notifications")}
-            />
-            {/* Dark Mode Toggle */}
-            <View
-              style={[
-                styles.menuRow,
-                {
-                  borderBottomColor: isDark ? colors.border : "#f3f4f6",
-                  flexDirection: "column",
-                  alignItems: "stretch",
-                  gap: 10,
-                },
-              ]}
-            >
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 12 }}
+          {session && (
+            <>
+              <Text
+                style={[
+                  styles.sectionHeader,
+                  { color: isDark ? colors.text : "#111" },
+                ]}
               >
+                Account
+              </Text>
+              <View
+                style={[
+                  styles.menuSection,
+                  { backgroundColor: isDark ? colors.card : "white" },
+                ]}
+              >
+                <MenuRow
+                  icon="person-outline"
+                  label="Personal Details"
+                  onPress={() => setCurrentView("personal")}
+                />
+                <MenuRow
+                  icon="lock-closed-outline"
+                  label="Password"
+                  onPress={() => setCurrentView("Password")}
+                />
+                <MenuRow
+                  icon="notifications-outline"
+                  label="Notifications"
+                  onPress={() => setCurrentView("notifications")}
+                />
+                {/* Dark Mode Toggle */}
                 <View
                   style={[
-                    styles.menuIconBox,
-                    { backgroundColor: isDark ? "#2b2b2b" : "#f3f4f6" },
+                    styles.menuRow,
+                    {
+                      borderBottomColor: isDark ? colors.border : "#f3f4f6",
+                      flexDirection: "column",
+                      alignItems: "stretch",
+                      gap: 10,
+                    },
                   ]}
                 >
-                  <Ionicons
-                    name="moon-outline"
-                    size={20}
-                    color={isDark ? "#a78bfa" : "#333"}
-                  />
-                </View>
-                <Text
-                  style={[
-                    styles.menuLabel,
-                    { color: isDark ? colors.text : "#333" },
-                  ]}
-                >
-                  Dark Mode
-                </Text>
-              </View>
-              <View
-                style={{
-                  flexDirection: "row",
-                  backgroundColor: isDark ? "#2b2b2b" : "#f3f4f6",
-                  borderRadius: 10,
-                  padding: 3,
-                }}
-              >
-                {(["light", "auto", "dark"] as const).map((mode) => (
-                  <TouchableOpacity
-                    key={mode}
-                    onPress={() => setThemeMode(mode)}
+                  <View
+                    style={{ flexDirection: "row", alignItems: "center", gap: 12 }}
+                  >
+                    <View
+                      style={[
+                        styles.menuIconBox,
+                        { backgroundColor: isDark ? "#2b2b2b" : "#f3f4f6" },
+                      ]}
+                    >
+                      <Ionicons
+                        name="moon-outline"
+                        size={20}
+                        color={isDark ? "#a78bfa" : "#333"}
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.menuLabel,
+                        { color: isDark ? colors.text : "#333" },
+                      ]}
+                    >
+                      Dark Mode
+                    </Text>
+                  </View>
+                  <View
                     style={{
-                      flex: 1,
-                      paddingVertical: 7,
-                      borderRadius: 8,
-                      alignItems: "center",
-                      backgroundColor:
-                        themeMode === mode
-                          ? isDark
-                            ? "#555"
-                            : "white"
-                          : "transparent",
-                      ...(themeMode === mode
-                        ? {
-                            shadowColor: "#000",
-                            shadowOpacity: 0.1,
-                            shadowRadius: 2,
-                            elevation: 2,
-                          }
-                        : {}),
+                      flexDirection: "row",
+                      backgroundColor: isDark ? "#2b2b2b" : "#f3f4f6",
+                      borderRadius: 10,
+                      padding: 3,
                     }}
                   >
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        fontWeight: themeMode === mode ? "700" : "500",
-                        color:
-                          themeMode === mode
-                            ? isDark
-                              ? "#fff"
-                              : "#111"
-                            : isDark
-                              ? "#888"
-                              : "#666",
-                      }}
-                    >
-                      {mode === "light"
-                        ? "Off"
-                        : mode === "dark"
-                          ? "On"
-                          : "Auto"}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                    {(["light", "auto", "dark"] as const).map((mode) => (
+                      <TouchableOpacity
+                        key={mode}
+                        onPress={() => setThemeMode(mode)}
+                        style={{
+                          flex: 1,
+                          paddingVertical: 7,
+                          borderRadius: 8,
+                          alignItems: "center",
+                          backgroundColor:
+                            themeMode === mode
+                              ? isDark
+                                ? "#555"
+                                : "white"
+                              : "transparent",
+                          ...(themeMode === mode
+                            ? {
+                                shadowColor: "#000",
+                                shadowOpacity: 0.1,
+                                shadowRadius: 2,
+                                elevation: 2,
+                              }
+                            : {}),
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 12,
+                            fontWeight: themeMode === mode ? "700" : "500",
+                            color:
+                              themeMode === mode
+                                ? isDark
+                                  ? "#fff"
+                                  : "#111"
+                                : isDark
+                                  ? "#888"
+                                  : "#666",
+                          }}
+                        >
+                          {mode === "light"
+                            ? "Off"
+                            : mode === "dark"
+                              ? "On"
+                              : "Auto"}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
               </View>
-            </View>
-          </View>
+            </>
+          )}
 
           {/* Legal Section */}
           <Text
@@ -1125,16 +1441,23 @@ export default function Profile() {
             ]}
           >
             <MenuRow
+              icon="shield-outline"
+              label="Emergency Contacts"
+              onPress={() => setCurrentView("emergency_contacts")}
+            />
+            <MenuRow
               icon="bug-outline"
               label="Report a Bug"
               onPress={handleReportBug}
             />
-            <MenuRow
-              icon="log-out-outline"
-              label="Sign Out"
-              onPress={handleSignOut}
-              danger
-            />
+            {session && (
+              <MenuRow
+                icon="log-out-outline"
+                label="Log Out"
+                onPress={handleSignOut}
+                danger
+              />
+            )}
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -1171,7 +1494,13 @@ export default function Profile() {
         {title}
       </Text>
       {rightAction ? (
-        <View style={{ minWidth: 40, alignItems: "flex-end", justifyContent: "center" }}>
+        <View
+          style={{
+            minWidth: 40,
+            alignItems: "flex-end",
+            justifyContent: "center",
+          }}
+        >
           {rightAction()}
         </View>
       ) : (
@@ -1182,6 +1511,15 @@ export default function Profile() {
 
   // --- PERSONAL DETAILS ---
   if (currentView === "personal") {
+    if (!loading && !session) {
+      return (
+        <GuestGuard
+          message="Please log in to view and edit your personal details."
+          onBack={() => setCurrentView("menu")}
+          returnTo="/(tabs)/profile"
+        />
+      );
+    }
     return (
       <SafeAreaView
         style={[
@@ -1198,9 +1536,18 @@ export default function Profile() {
               style={{ paddingHorizontal: 4, paddingVertical: 4 }}
             >
               {saving ? (
-                <ActivityIndicator color={isDark ? colors.text : "#2563eb"} size="small" />
+                <ActivityIndicator
+                  color={isDark ? colors.text : "#2563eb"}
+                  size="small"
+                />
               ) : (
-                <Text style={{ color: isDark ? colors.text : "#2563eb", fontWeight: "700", fontSize: 16 }}>
+                <Text
+                  style={{
+                    color: isDark ? colors.text : "#2563eb",
+                    fontWeight: "700",
+                    fontSize: 16,
+                  }}
+                >
                   Save
                 </Text>
               )}
@@ -1214,7 +1561,7 @@ export default function Profile() {
         >
           <ScrollView
             contentContainerStyle={{ padding: 20 }}
-            keyboardShouldPersistTaps="handled"
+            keyboardShouldPersistTaps="always"
           >
             {/* Avatar Upload */}
             <View style={{ alignItems: "center", marginBottom: 20 }}>
@@ -1351,7 +1698,7 @@ export default function Profile() {
                   Birthday
                 </Text>
                 <TouchableOpacity
-                  onPress={() => setShowBirthdayPicker(true)}
+                  onPress={openBirthdayPicker}
                   style={[
                     styles.selectInput,
                     {
@@ -1390,7 +1737,7 @@ export default function Profile() {
                   Gender
                 </Text>
                 <TouchableOpacity
-                  onPress={() => setShowGenderModal(true)}
+                  onPress={openGenderPicker}
                   style={[
                     styles.selectInput,
                     {
@@ -1514,8 +1861,14 @@ export default function Profile() {
                     (resendCooldown > 0 || otpLoading) && { opacity: 0.5 },
                   ]}
                 >
-                  <Text style={{ color: "white", fontWeight: "bold", fontSize: 12 }}>
-                    {otpLoading ? "Sending..." : resendCooldown > 0 ? formatCooldown(resendCooldown) : "Verify"}
+                  <Text
+                    style={{ color: "white", fontWeight: "bold", fontSize: 12 }}
+                  >
+                    {otpLoading
+                      ? "Sending..."
+                      : resendCooldown > 0
+                        ? formatCooldown(resendCooldown)
+                        : "Verify"}
                   </Text>
                 </TouchableOpacity>
               )}
@@ -1564,8 +1917,21 @@ export default function Profile() {
                 disabled={resendCooldown > 0 || otpLoading}
                 style={{ alignSelf: "flex-start", marginBottom: 10 }}
               >
-                <Text style={{ color: resendCooldown > 0 ? (isDark ? colors.textMuted : "#999") : "#2563eb", fontSize: 13, fontWeight: "600" }}>
-                  {resendCooldown > 0 ? `Resend code in ${formatCooldown(resendCooldown)}` : "Resend code"}
+                <Text
+                  style={{
+                    color:
+                      resendCooldown > 0
+                        ? isDark
+                          ? colors.textMuted
+                          : "#999"
+                        : "#2563eb",
+                    fontSize: 13,
+                    fontWeight: "600",
+                  }}
+                >
+                  {resendCooldown > 0
+                    ? `Resend code in ${formatCooldown(resendCooldown)}`
+                    : "Resend code"}
                 </Text>
               </TouchableOpacity>
             )}
@@ -1573,7 +1939,13 @@ export default function Profile() {
         </KeyboardAvoidingView>
 
         {/* Birthday Calendar Modal */}
-        <Modal visible={showBirthdayPicker} transparent animationType="fade">
+        <Modal
+          visible={showBirthdayPicker}
+          transparent
+          animationType="fade"
+          statusBarTranslucent
+          onRequestClose={() => setShowBirthdayPicker(false)}
+        >
           <View style={styles.modalOverlay}>
             <View
               style={[
@@ -1625,7 +1997,13 @@ export default function Profile() {
         </Modal>
 
         {/* Gender Modal */}
-        <Modal visible={showGenderModal} transparent animationType="slide">
+        <Modal
+          visible={showGenderModal}
+          transparent
+          animationType="slide"
+          statusBarTranslucent
+          onRequestClose={() => setShowGenderModal(false)}
+        >
           <View style={styles.modalOverlay}>
             <View
               style={[
@@ -1678,7 +2056,197 @@ export default function Profile() {
   }
 
   // --- Password ---
+  if (currentView === "emergency_contacts") {
+    return (
+      <SafeAreaView
+        style={[
+          styles.container,
+          { backgroundColor: isDark ? colors.background : "#f9fafb" },
+        ]}
+      >
+        <SubHeader title="Emergency Contacts" />
+        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+          <View
+            style={[
+              styles.emergencyInfoBox,
+              {
+                backgroundColor: isDark ? colors.card : "#eef2ff",
+                borderColor: isDark ? colors.border : "#c7d2fe",
+              },
+            ]}
+          >
+            <Text
+              style={{
+                fontSize: 14,
+                fontWeight: "700",
+                color: isDark ? colors.text : "#1e1b4b",
+                marginBottom: 4,
+              }}
+            >
+              Active Emergency List
+            </Text>
+            <Text
+              style={{
+                fontSize: 12,
+                color: isDark ? colors.textMuted : "#4338ca",
+              }}
+            >
+              {emergencyLocationLabel}
+            </Text>
+            <Text
+              style={{
+                fontSize: 11,
+                color: isDark ? colors.textMuted : "#4338ca",
+              }}
+            >
+              Showing only contacts with official, verifiable sources.
+            </Text>
+            {loadingEmergencyContacts && (
+              <View
+                style={{
+                  marginTop: 8,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <ActivityIndicator
+                  size="small"
+                  color={isDark ? colors.text : "#3730a3"}
+                />
+                <Text
+                  style={{
+                    fontSize: 11,
+                    color: isDark ? colors.textMuted : "#4338ca",
+                  }}
+                >
+                  Detecting your location automatically...
+                </Text>
+              </View>
+            )}
+            {emergencyPermissionState !== "granted" && (
+              <Text
+                style={{
+                  marginTop: 6,
+                  fontSize: 11,
+                  color: isDark ? "#fca5a5" : "#b91c1c",
+                }}
+              >
+                Location permission not granted. Showing Dumaguete contacts by
+                default plus national hotlines.
+              </Text>
+            )}
+          </View>
+
+          {emergencyContacts.map((contact) => (
+            <View
+              key={contact.id}
+              style={[
+                styles.emergencyContactCard,
+                {
+                  backgroundColor: isDark ? colors.card : "white",
+                  borderColor: isDark ? colors.border : "#e5e7eb",
+                },
+              ]}
+            >
+              <View style={styles.emergencyContactHeader}>
+                <Text
+                  style={{
+                    fontSize: 15,
+                    fontWeight: "700",
+                    color: isDark ? colors.text : "#111827",
+                    flex: 1,
+                  }}
+                >
+                  {contact.name}
+                </Text>
+                <View
+                  style={[
+                    styles.emergencyCategoryChip,
+                    { backgroundColor: isDark ? colors.surface : "#f3f4f6" },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      fontSize: 10,
+                      fontWeight: "700",
+                      color: isDark ? colors.textMuted : "#4b5563",
+                    }}
+                  >
+                    {contact.category}
+                  </Text>
+                </View>
+              </View>
+
+              <Text
+                style={{
+                  fontSize: 14,
+                  color: isDark ? colors.text : "#111827",
+                  marginTop: 8,
+                  fontWeight: "600",
+                }}
+              >
+                {contact.phone}
+              </Text>
+
+              {!!contact.note && (
+                <Text
+                  style={{
+                    marginTop: 6,
+                    fontSize: 12,
+                    color: isDark ? colors.textMuted : "#6b7280",
+                  }}
+                >
+                  {contact.note}
+                </Text>
+              )}
+
+              {!!contact.sourceUrl && (
+                <TouchableOpacity
+                  style={styles.emergencySourceBtn}
+                  onPress={() => handleOpenEmergencySource(contact.sourceUrl!)}
+                >
+                  <Ionicons
+                    name="link-outline"
+                    size={12}
+                    color={isDark ? colors.textMuted : "#4f46e5"}
+                  />
+                  <Text
+                    style={[
+                      styles.emergencySourceText,
+                      { color: isDark ? colors.textMuted : "#4f46e5" },
+                    ]}
+                  >
+                    Source: {contact.sourceLabel || "Official reference"}
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={styles.emergencyCallBtn}
+                onPress={() => handleCallEmergencyContact(contact.phone)}
+              >
+                <Ionicons name="call" size={14} color="white" />
+                <Text style={styles.emergencyCallBtnText}>Call</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // --- Password ---
   if (currentView === "Password") {
+    if (!loading && !session) {
+      return (
+        <GuestGuard
+          message="Please log in to change your password."
+          onBack={() => setCurrentView("menu")}
+          returnTo="/(tabs)/profile"
+        />
+      );
+    }
     return (
       <SafeAreaView
         style={[
@@ -2073,6 +2641,15 @@ export default function Profile() {
 
   // --- NOTIFICATIONS ---
   if (currentView === "notifications") {
+    if (!loading && !session) {
+      return (
+        <GuestGuard
+          message="Please log in to manage your notification settings."
+          onBack={() => setCurrentView("menu")}
+          returnTo="/(tabs)/profile"
+        />
+      );
+    }
     return (
       <SafeAreaView
         style={[
@@ -2751,5 +3328,68 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginTop: 20,
     marginBottom: 4,
+  },
+
+  emergencyInfoBox: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 14,
+    gap: 8,
+  },
+  emergencyContactCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+  },
+  emergencyContactHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  emergencyCategoryChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  emergencyCallBtn: {
+    marginTop: 12,
+    alignSelf: "flex-start",
+    backgroundColor: "#111827",
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  emergencyCallBtnText: {
+    color: "white",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  emergencySourceBtn: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  emergencySourceText: {
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  authSmallBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 90,
+  },
+  authSmallBtnText: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "700",
   },
 });

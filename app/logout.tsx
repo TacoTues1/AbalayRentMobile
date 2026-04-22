@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
@@ -11,17 +12,34 @@ export default function LogoutScreen() {
 
         const performLogout = async () => {
             try {
-                // 1. Sign out from Supabase (clears local session)
-                const { error } = await supabase.auth.signOut();
-                if (error) throw error;
+                // 1. Standard Sign Out
+                await supabase.auth.signOut();
+                
+                // 2. Forceful manual clear of AsyncStorage keys related to Supabase
+                // This ensures that even if signOut() fails or throws an error,
+                // the local session is definitively removed.
+                const keys = await AsyncStorage.getAllKeys();
+                const authKeys = keys.filter(key => key.includes('auth-token'));
+                for (const key of authKeys) {
+                    await AsyncStorage.removeItem(key);
+                }
+
+                // 3. Wait to ensure filesystem writes are finished
+                await new Promise(resolve => setTimeout(resolve, 1000));
             } catch (error) {
-                console.error("Logout error:", error);
+                console.log("Logout error caught, proceeding with manual clear:", error);
+                try {
+                    const keys = await AsyncStorage.getAllKeys();
+                    const authKeys = keys.filter(key => key.includes('auth-token'));
+                    for (const key of authKeys) {
+                        await AsyncStorage.removeItem(key);
+                    }
+                } catch (e) {
+                    console.log("Manual clear failed:", e);
+                }
             } finally {
-                // 2. Wrap redirect in small timeout to ensure state clears fully in Expo Go
                 if (isMounted) {
-                    setTimeout(() => {
-                        router.replace('/login');
-                    }, 500);
+                    router.replace('/');
                 }
             }
         };

@@ -17,6 +17,7 @@ import { useTheme } from "../../lib/theme";
 // Import Dashboards
 import LandlordDashboard from "../../components/auth/dashboard/LandlordDashboard";
 import TenantDashboard from "../../components/auth/dashboard/TenantDashboard";
+import VisitorDashboard from "../../components/auth/dashboard/VisitorDashboard";
 
 export default function Dashboard() {
   const router = useRouter();
@@ -95,7 +96,7 @@ export default function Dashboard() {
       } = await supabase.auth.getSession();
 
       if (!session) {
-        router.replace("/");
+        setLoading(false);
         return;
       }
 
@@ -241,23 +242,20 @@ export default function Dashboard() {
     );
   }
 
-  // If no session (logged out), show loading - logout function handles navigation
-  if (!session) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="black" />
-      </View>
-    );
-  }
+  // If no session (logged out), we now allow viewing as a Guest/Visitor
+  // The logic below will handle the profile/session being null
+  const firstname = session
+    ? `${profile?.first_name || ""}`.trim() ||
+      session?.user?.user_metadata?.full_name ||
+      session?.user?.email?.split("@")[0] ||
+      "User"
+    : "Guest";
 
-  const firstname =
-    `${profile?.first_name || ""}`.trim() ||
-    session?.user?.user_metadata?.full_name ||
-    session?.user?.email?.split("@")[0] ||
-    "User";
   const roleLabel = profile?.role
     ? profile.role.charAt(0).toUpperCase() + profile.role.slice(1)
-    : "User";
+    : session
+      ? "User"
+      : "Visitor";
 
   return (
     <SafeAreaView
@@ -279,7 +277,13 @@ export default function Dashboard() {
       >
         <TouchableOpacity
           style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}
-          onPress={() => router.push("/(tabs)/profile")}
+          onPress={() => {
+            if (session) {
+              router.push("/(tabs)/profile");
+            } else {
+              router.push("/(tabs)/profile");
+            }
+          }}
           activeOpacity={0.8}
         >
           {profile?.avatar_url ? (
@@ -290,9 +294,11 @@ export default function Dashboard() {
           ) : (
             <View style={styles.avatarFallback}>
               <Text style={styles.avatarText}>
-                {(profile?.first_name || session?.user?.email || "U")
-                  .charAt(0)
-                  .toUpperCase()}
+                {session
+                  ? (profile?.first_name || session?.user?.email || "U")
+                      .charAt(0)
+                      .toUpperCase()
+                  : "G"}
               </Text>
             </View>
           )}
@@ -375,9 +381,9 @@ export default function Dashboard() {
         </View>
       ) : // --- NORMAL DASHBOARD ---
       profile?.role === "landlord" ? (
-        <>
-          <LandlordDashboard session={session} profile={profile} />
-        </>
+        <LandlordDashboard session={session} profile={profile} />
+      ) : profile?.role === "visitor" || !session ? (
+        <VisitorDashboard session={session} profile={profile} />
       ) : (
         <TenantDashboard session={session} profile={profile} />
       )}

@@ -27,6 +27,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
+import GuestGuard from "../../components/auth/GuestGuard";
 
 const CHAT_MESSAGES_PAGE_SIZE = 20;
 const MESSAGES_LOADING_SKELETON_COUNT = 6;
@@ -216,6 +217,7 @@ export default function Messages() {
         setSession(null);
         setProfile(null);
         setConversations([]);
+        setLoading(false);
       }
     };
 
@@ -4039,6 +4041,15 @@ export default function Messages() {
   }
 
   // ===================== CONVERSATION LIST VIEW =====================
+  if (!loading && !session) {
+    return (
+      <GuestGuard
+        message="Please log in to view and send messages."
+        returnTo="/(tabs)/messages"
+      />
+    );
+  }
+
   return (
     <SafeAreaView
       style={[

@@ -99,6 +99,7 @@ export default function LandlordDashboard({ session, profile }: any) {
   const [pendingBookingsCount, setPendingBookingsCount] = useState(0);
   const [pendingMaintenanceCount, setPendingMaintenanceCount] = useState(0);
   const [pendingPaymentsCount, setPendingPaymentsCount] = useState(0);
+  const [pendingLeavesCount, setPendingLeavesCount] = useState(0);
   const [occupancies, setOccupancies] = useState<any[]>([]);
   const [scheduledViewings, setScheduledViewings] = useState<any[]>([]);
 
@@ -150,6 +151,7 @@ export default function LandlordDashboard({ session, profile }: any) {
     isOpen: false,
     occupancy: null as any,
   });
+  const [showAllTerminations, setShowAllTerminations] = useState(false);
   const [endContractModal, setEndContractModal] = useState({
     isOpen: false,
     occupancy: null as any,
@@ -251,7 +253,7 @@ export default function LandlordDashboard({ session, profile }: any) {
       badge: scheduledViewings.length,
     },
     {
-      label: "Bookings",
+      label: "Viewing Requests",
       icon: "people-outline",
       action: () => router.push("/(tabs)/bookings" as any),
       badge: pendingBookingsCount,
@@ -269,6 +271,27 @@ export default function LandlordDashboard({ session, profile }: any) {
       badge: pendingPaymentsCount,
     },
     {
+      label: "Leave Requests",
+      icon: "exit-outline",
+      action: () => {
+        // Find the first occupancy with a pending leave request and scroll to it or open modal
+        const pendingLeaf = occupancies.find(
+          (occ) =>
+            (occ.status === "active" || occ.status === "pending_end") &&
+            occ.end_request_status === "pending",
+        );
+        if (pendingLeaf) {
+          openEndContractModal(pendingLeaf);
+        } else {
+          Alert.alert(
+            "No Pending Requests",
+            "There are no new leave requests to approve.",
+          );
+        }
+      },
+      badge: pendingLeavesCount,
+    },
+    {
       label: "History",
       icon: "bar-chart-outline",
       action: () => router.push("/payment-history" as any),
@@ -284,7 +307,6 @@ export default function LandlordDashboard({ session, profile }: any) {
       }
     }, [profile, loading]),
   );
-
   useRealtime(
     [
       "properties",
@@ -292,10 +314,13 @@ export default function LandlordDashboard({ session, profile }: any) {
       "maintenance_requests",
       "payment_requests",
       "bookings",
+      "profiles",
+      "family_members",
+      "available_time_slots",
     ],
     () => {
       console.log("Realtime update triggered reload");
-      loadDashboard();
+      loadDashboard(true);
     },
     !!profile,
   );
@@ -311,9 +336,11 @@ export default function LandlordDashboard({ session, profile }: any) {
 
   // --- DATA LOADING ---
 
-  const loadDashboard = async () => {
-    setRefreshing(true);
-    setSectionsLoading(true);
+  const loadDashboard = async (silent = false) => {
+    if (!silent) {
+      setRefreshing(true);
+      setSectionsLoading(true);
+    }
     try {
       if (session?.user?.id) {
         await runDailyAutomatedTasks(session.user.id);
@@ -354,7 +381,7 @@ export default function LandlordDashboard({ session, profile }: any) {
         `*, tenant:profiles!tenant_occupancies_tenant_id_fkey(id, first_name, last_name, phone, email, avatar_url), property:properties(id, title, address, images, price)`,
       )
       .eq("landlord_id", session.user.id)
-      .in("status", ["active", "pending_end"]);
+      .in("status", ["active", "pending_end", "pending_start"]);
     const activeOccs = data || [];
     setOccupancies(activeOccs);
     return activeOccs;
@@ -489,6 +516,14 @@ export default function LandlordDashboard({ session, profile }: any) {
       .in("property_id", propIds)
       .in("status", ["pending", "pending_confirmation"]);
     setPendingPaymentsCount(payCount || 0);
+
+    const { count: leaveCount } = await supabase
+      .from("tenant_occupancies")
+      .select("*", { count: "exact", head: true })
+      .in("property_id", propIds)
+      .in("status", ["active", "pending_end"])
+      .eq("end_request_status", "pending");
+    setPendingLeavesCount(leaveCount || 0);
   }
 
   async function loadScheduledViewings() {
@@ -1157,7 +1192,11 @@ export default function LandlordDashboard({ session, profile }: any) {
         property_id: selectedProperty.id,
         tenant_id: candidate.tenant,
         landlord_id: session.user.id,
-        status: "active",
+        status:
+          new Date(startDate).toISOString().split("T")[0] <=
+          new Date().toISOString().split("T")[0]
+            ? "active"
+            : "pending_start",
         start_date: new Date(startDate).toISOString(),
         security_deposit: securityDeposit,
         security_deposit_used: 0,
@@ -1287,7 +1326,7 @@ export default function LandlordDashboard({ session, profile }: any) {
       const { error: occError } = await supabase
         .from("tenant_occupancies")
         .update({
-          status: shouldEndNow ? "ended" : "pending_end",
+          status: shouldEndNow ? "ended" : "active",
           end_requested_at: new Date().toISOString(),
           end_request_date: normalizedEndDate,
           end_request_status: "approved",
@@ -1359,7 +1398,79 @@ export default function LandlordDashboard({ session, profile }: any) {
     }
   };
 
+  const rejectEndContract = async () => {
+    const occupancy = endContractModal.occupancy;
+    if (!occupancy?.id) return;
+
+    setEndingContract(true);
+    try {
+      const { error } = await supabase
+        .from("tenant_occupancies")
+        .update({
+          status: "active",
+          end_request_status: "rejected",
+        })
+        .eq("id", occupancy.id);
+
+      if (error) throw error;
+
+      await createNotification(
+        occupancy.tenant_id,
+        "occupancy_update",
+        `Your move-out request for ${occupancy.property?.title || "your property"} was rejected by the landlord.`,
+        { actor: session.user.id },
+      );
+
+      Alert.alert("Success", "Move-out request rejected.");
+      setEndContractModal({ isOpen: false, occupancy: null });
+      loadDashboard();
+    } catch (e: any) {
+      Alert.alert("Error", e.message);
+    } finally {
+      setEndingContract(false);
+    }
+  };
+
+  const cancelMoveOut = async (occupancyId: string) => {
+    Alert.alert(
+      "Cancel Move-Out?",
+      "Are you sure you want to cancel this scheduled move-out? The tenant's contract will remain active.",
+      [
+        { text: "No", style: "cancel" },
+        {
+          text: "Yes, Cancel",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from("tenant_occupancies")
+                .update({
+                  status: "active",
+                  end_request_status: null,
+                  end_request_date: null,
+                  end_request_reason: null,
+                })
+                .eq("id", occupancyId);
+
+              if (error) throw error;
+              Alert.alert("Success", "Move-out cancelled.");
+              loadDashboard();
+            } catch (e: any) {
+              Alert.alert("Error", e.message);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const displayedActiveOccupancies = occupancies.slice(0, 3);
+  const pendingMoveOutRequests = occupancies.filter(
+    (occ) =>
+      (occ.status === "active" || occ.status === "pending_end") &&
+      (occ.end_request_status === "pending" ||
+        occ.end_request_status === "approved"),
+  );
 
   return (
     <ScrollView
@@ -1504,6 +1615,192 @@ export default function LandlordDashboard({ session, profile }: any) {
         )}
       </View>
 
+      {/* --- PROPERTY TERMINATIONS (PREMIUM DESIGN) --- */}
+      {pendingMoveOutRequests.length > 0 && (
+        <View style={styles.sectionContainer}>
+          <View
+            style={{
+              flexDirection: "row",
+              justifyContent: "space-between",
+              alignItems: "flex-end",
+              marginBottom: 15,
+            }}
+          >
+            <View>
+              <Text
+                style={[
+                  styles.sectionTitle,
+                  { color: isDark ? colors.text : "#111", marginBottom: 2 },
+                ]}
+              >
+                Property Terminations
+              </Text>
+              <Text
+                style={{
+                  fontSize: 13,
+                  color: isDark ? colors.textMuted : "#6b7280",
+                }}
+              >
+                Scheduled departures
+              </Text>
+            </View>
+            <View
+              style={{
+                backgroundColor: "#f1f5f9",
+                borderRadius: 8,
+                paddingHorizontal: 8,
+                paddingVertical: 4,
+              }}
+            >
+              <Text
+                style={{ fontSize: 10, fontWeight: "800", color: "#64748b" }}
+              >
+                {pendingMoveOutRequests.length} TOTAL
+              </Text>
+            </View>
+            {pendingMoveOutRequests.length > 2 && (
+              <TouchableOpacity
+                style={{ marginLeft: 10 }}
+                onPress={() => setShowAllTerminations(true)}
+              >
+                <Text
+                  style={{ fontSize: 12, fontWeight: "800", color: "#2563eb" }}
+                >
+                  See All
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {pendingMoveOutRequests.slice(0, 2).map((req) => {
+            const daysLeft = Math.ceil(
+              (new Date(req.end_request_date).getTime() -
+                new Date().getTime()) /
+                (1000 * 60 * 60 * 24),
+            );
+            const isUrgent = daysLeft <= 3;
+
+            return (
+              <View key={req.id} style={styles.enhancedEndCard}>
+                <View style={styles.endCardTop}>
+                  {req.property?.images?.[0] ? (
+                    <Image
+                      source={{ uri: req.property.images[0] }}
+                      style={styles.endPropThumb}
+                    />
+                  ) : (
+                    <View
+                      style={[
+                        styles.endPropThumb,
+                        {
+                          backgroundColor: "#f3f4f6",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        },
+                      ]}
+                    >
+                      <Ionicons name="home-outline" size={18} color="#9ca3af" />
+                    </View>
+                  )}
+
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 6,
+                        marginBottom: 4,
+                      }}
+                    >
+                      <View
+                        style={[
+                          styles.statusPill,
+                          {
+                            backgroundColor:
+                              req.end_request_status === "approved"
+                                ? "#ecfdf5"
+                                : "#fff7ed",
+                          },
+                        ]}
+                      >
+                        <View
+                          style={[
+                            styles.statusDot,
+                            {
+                              backgroundColor:
+                                req.end_request_status === "approved"
+                                  ? "#10b981"
+                                  : "#f59e0b",
+                            },
+                          ]}
+                        />
+                        <Text
+                          style={[
+                            styles.statusPillText,
+                            {
+                              color:
+                                req.end_request_status === "approved"
+                                  ? "#065f46"
+                                  : "#9a3412",
+                            },
+                          ]}
+                        >
+                          {req.end_request_status === "approved"
+                            ? "SCHEDULED"
+                            : "PENDING"}
+                        </Text>
+                      </View>
+                      {daysLeft >= 0 && (
+                        <Text
+                          style={{
+                            fontSize: 10,
+                            fontWeight: "700",
+                            color: isUrgent ? "#e11d48" : "#64748b",
+                          }}
+                        >
+                          {daysLeft === 0 ? "TODAY" : `${daysLeft}d left`}
+                        </Text>
+                      )}
+                    </View>
+                    <Text style={styles.endPropTitle} numberOfLines={1}>
+                      {req.property?.title}
+                    </Text>
+                    <Text style={styles.endTenantName}>
+                      {req.tenant?.first_name} {req.tenant?.last_name}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.endCardBottom}>
+                  <View style={styles.endDateInfo}>
+                    <Ionicons
+                      name="calendar-outline"
+                      size={14}
+                      color="#64748b"
+                    />
+                    <Text style={styles.endDateText}>
+                      Move-out:{" "}
+                      <Text style={{ color: "#1e293b", fontWeight: "800" }}>
+                        {new Date(req.end_request_date).toLocaleDateString()}
+                      </Text>
+                    </Text>
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.btnCancelTerm}
+                    onPress={() => cancelMoveOut(req.id)}
+                  >
+                    <Text style={styles.btnCancelTermText}>
+                      CANCEL MOVE-OUT
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
       {/* --- SCHEDULED TENANTS TODAY --- */}
       <View style={styles.sectionContainer}>
         <View
@@ -1521,7 +1818,7 @@ export default function LandlordDashboard({ session, profile }: any) {
               { color: isDark ? colors.text : "#111" },
             ]}
           >
-            Today's Viewings
+            Today's Viewings Scheduled
           </Text>
           {sectionsLoading ? (
             <SkeletonBlock
@@ -1710,7 +2007,7 @@ export default function LandlordDashboard({ session, profile }: any) {
             { color: isDark ? colors.text : "#111" },
           ]}
         >
-          Upcoming Bills
+          Upcoming Rent Bills
         </Text>
         <View
           style={[
@@ -1862,7 +2159,7 @@ export default function LandlordDashboard({ session, profile }: any) {
                       },
                     ]}
                   >
-                    {item.hasOpenBill ? "Billed" : "Bill"}
+                    {item.hasOpenBill ? "Billed" : "Send"}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -2259,10 +2556,18 @@ export default function LandlordDashboard({ session, profile }: any) {
                       fontSize: 10,
                       fontWeight: "bold",
                       color:
-                        occ.status === "pending_end" ? "#b45309" : "#059669",
+                        occ.status === "pending_end"
+                          ? occ.end_request_status === "pending"
+                            ? "#dc2626"
+                            : "#b45309"
+                          : "#059669",
                     }}
                   >
-                    {occ.status === "pending_end" ? "ENDING SOON" : "OCCUPIED"}
+                    {occ.status === "pending_end"
+                      ? occ.end_request_status === "pending"
+                        ? "LEAVE REQUEST"
+                        : "ENDING SOON"
+                      : "OCCUPIED"}
                   </Text>
                 </View>
               </View>
@@ -2337,7 +2642,8 @@ export default function LandlordDashboard({ session, profile }: any) {
                   </View>
                 </View>
 
-                {occ.status === "pending_end" && occ.end_request_date ? (
+                {(occ.status === "active" || occ.status === "pending_end") &&
+                occ.end_request_date ? (
                   <Text
                     style={{
                       marginTop: -2,
@@ -2360,11 +2666,20 @@ export default function LandlordDashboard({ session, profile }: any) {
                   </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => openEndContractModal(occ)}
-                    style={styles.btnEnd}
+                    style={[
+                      styles.btnEnd,
+                      occ.end_request_status === "pending" && {
+                        backgroundColor: "#dc2626",
+                      },
+                    ]}
                   >
                     <Text style={styles.btnEndText}>
-                      {occ.status === "pending_end"
-                        ? "Update End Date"
+                      {(occ.status === "active" ||
+                        occ.status === "pending_end") &&
+                      occ.end_request_status
+                        ? occ.end_request_status === "pending"
+                          ? "Review Request"
+                          : "End Contract"
                         : "End Contract"}
                     </Text>
                   </TouchableOpacity>
@@ -2377,7 +2692,176 @@ export default function LandlordDashboard({ session, profile }: any) {
 
       {/* --- MODALS --- */}
 
-      {/* 1. Assign Modal */}
+      {/* 14. All Terminations Modal */}
+      <Modal
+        visible={showAllTerminations}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowAllTerminations(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View
+            style={[styles.modalContent, { height: "80%", paddingBottom: 20 }]}
+          >
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Property Terminations</Text>
+                <Text style={styles.modalSubtitle}>
+                  Full schedule of departures
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowAllTerminations(false)}
+                style={styles.btnClose}
+              >
+                <Ionicons
+                  name="close"
+                  size={24}
+                  color={isDark ? colors.text : "#111"}
+                />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingVertical: 10 }}
+            >
+              {pendingMoveOutRequests.map((req) => {
+                const daysLeft = Math.ceil(
+                  (new Date(req.end_request_date).getTime() -
+                    new Date().getTime()) /
+                    (1000 * 60 * 60 * 24),
+                );
+                const isUrgent = daysLeft <= 3;
+
+                return (
+                  <View key={req.id} style={styles.enhancedEndCard}>
+                    <View style={styles.endCardTop}>
+                      {req.property?.images?.[0] ? (
+                        <Image
+                          source={{ uri: req.property.images[0] }}
+                          style={styles.endPropThumb}
+                        />
+                      ) : (
+                        <View
+                          style={[
+                            styles.endPropThumb,
+                            {
+                              backgroundColor: "#f3f4f6",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            },
+                          ]}
+                        >
+                          <Ionicons
+                            name="home-outline"
+                            size={18}
+                            color="#9ca3af"
+                          />
+                        </View>
+                      )}
+
+                      <View style={{ flex: 1, marginLeft: 12 }}>
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 6,
+                            marginBottom: 4,
+                          }}
+                        >
+                          <View
+                            style={[
+                              styles.statusPill,
+                              {
+                                backgroundColor:
+                                  req.end_request_status === "approved"
+                                    ? "#ecfdf5"
+                                    : "#fff7ed",
+                              },
+                            ]}
+                          >
+                            <View
+                              style={[
+                                styles.statusDot,
+                                {
+                                  backgroundColor:
+                                    req.end_request_status === "approved"
+                                      ? "#10b981"
+                                      : "#f59e0b",
+                                },
+                              ]}
+                            />
+                            <Text
+                              style={[
+                                styles.statusPillText,
+                                {
+                                  color:
+                                    req.end_request_status === "approved"
+                                      ? "#065f46"
+                                      : "#9a3412",
+                                },
+                              ]}
+                            >
+                              {req.end_request_status === "approved"
+                                ? "SCHEDULED"
+                                : "PENDING"}
+                            </Text>
+                          </View>
+                          {daysLeft >= 0 && (
+                            <Text
+                              style={{
+                                fontSize: 10,
+                                fontWeight: "700",
+                                color: isUrgent ? "#e11d48" : "#64748b",
+                              }}
+                            >
+                              {daysLeft === 0 ? "TODAY" : `${daysLeft}d left`}
+                            </Text>
+                          )}
+                        </View>
+                        <Text style={styles.endPropTitle} numberOfLines={1}>
+                          {req.property?.title}
+                        </Text>
+                        <Text style={styles.endTenantName}>
+                          {req.tenant?.first_name} {req.tenant?.last_name}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.endCardBottom}>
+                      <View style={styles.endDateInfo}>
+                        <Ionicons
+                          name="calendar-outline"
+                          size={14}
+                          color="#64748b"
+                        />
+                        <Text style={styles.endDateText}>
+                          Move-out:{" "}
+                          <Text style={{ color: "#1e293b", fontWeight: "800" }}>
+                            {new Date(
+                              req.end_request_date,
+                            ).toLocaleDateString()}
+                          </Text>
+                        </Text>
+                      </View>
+
+                      <TouchableOpacity
+                        style={styles.btnCancelTerm}
+                        onPress={() => cancelMoveOut(req.id)}
+                      >
+                        <Text style={styles.btnCancelTermText}>
+                          CANCEL MOVE-OUT
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
       <Modal visible={assignModalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View
@@ -3291,80 +3775,125 @@ export default function LandlordDashboard({ session, profile }: any) {
           <View
             style={[
               styles.modalContent,
-              { backgroundColor: isDark ? colors.surface : "white" },
+              {
+                backgroundColor: isDark ? colors.surface : "white",
+                padding: 24,
+              },
             ]}
           >
-            <Text
-              style={[
-                styles.modalTitle,
-                { color: isDark ? colors.text : "#000" },
-              ]}
+            <TouchableOpacity
+              style={{ position: "absolute", top: 16, right: 16, zIndex: 10 }}
+              onPress={() =>
+                setEndContractModal({ isOpen: false, occupancy: null })
+              }
             >
-              End Contract
-            </Text>
-            <Text
-              style={{
-                marginTop: 4,
-                marginBottom: 10,
-                color: isDark ? colors.textSecondary : "#4b5563",
-                fontSize: 12,
-              }}
-            >
-              Set an end date and reason before confirming.
-            </Text>
+              <Ionicons
+                name="close"
+                size={24}
+                color={isDark ? colors.textMuted : "#999"}
+              />
+            </TouchableOpacity>
 
-            <Text style={styles.label}>End Date</Text>
-            <CalendarPicker
-              selectedDate={endContractDate}
-              onDateSelect={setEndContractDate}
-            />
-
-            <Text style={styles.label}>Reason</Text>
-            <TextInput
-              style={[
-                styles.input,
-                { minHeight: 80, textAlignVertical: "top" },
-              ]}
-              value={endContractReason}
-              onChangeText={setEndContractReason}
-              placeholder="Enter reason"
-              multiline
-            />
-
-            <View style={{ flexDirection: "row", gap: 10, marginTop: 15 }}>
-              <TouchableOpacity
-                onPress={() => {
-                  setEndContractModal({ isOpen: false, occupancy: null });
-                  setEndContractDate(new Date().toISOString().split("T")[0]);
-                  setEndContractReason("");
-                }}
-                style={[
-                  styles.btnFull,
-                  { backgroundColor: isDark ? colors.card : "#eee" },
-                ]}
-              >
-                <Text style={{ color: isDark ? colors.text : "#000" }}>
-                  Cancel
+            {endContractModal.occupancy?.end_request_status === "pending" ? (
+              <View>
+                <View style={styles.approveModalIcon}>
+                  <Ionicons name="checkmark" size={32} color="#059669" />
+                </View>
+                <Text style={styles.approveModalTitle}>Approve Move-Out?</Text>
+                <Text style={styles.approveModalDesc}>
+                  Are you sure you want to approve this request? The contract
+                  will be ended and the property will be marked as available.
                 </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={submitEndContract}
-                disabled={endingContract}
-                style={[
-                  styles.btnFull,
-                  {
-                    backgroundColor: "#ef4444",
-                    opacity: endingContract ? 0.6 : 1,
-                  },
-                ]}
-              >
-                {endingContract ? (
-                  <ActivityIndicator color="white" size="small" />
-                ) : (
-                  <Text style={styles.btnTextWhite}>Save End Contract</Text>
-                )}
-              </TouchableOpacity>
-            </View>
+
+                <View style={styles.targetStayBox}>
+                  <Text style={styles.targetStayLabel}>Target Stay End</Text>
+                  <Text style={styles.targetStayValue}>
+                    {new Date(endContractDate).toLocaleDateString("en-US", {
+                      month: "long",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                  </Text>
+                </View>
+
+                <View style={{ flexDirection: "row", gap: 12 }}>
+                  <TouchableOpacity
+                    onPress={rejectEndContract}
+                    disabled={endingContract}
+                    style={styles.btnReject}
+                  >
+                    <Text style={styles.btnRejectText}>Reject Request</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={submitEndContract}
+                    disabled={endingContract}
+                    style={styles.btnApprove}
+                  >
+                    {endingContract ? (
+                      <ActivityIndicator color="white" size="small" />
+                    ) : (
+                      <Text style={styles.btnApproveText}>
+                        Approve Move-Out
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View>
+                <View style={styles.modalHeader}>
+                  <Text
+                    style={[
+                      styles.modalTitle,
+                      { color: isDark ? colors.text : "#000" },
+                    ]}
+                  >
+                    End Contract
+                  </Text>
+                </View>
+
+                <Text style={styles.label}>End Date</Text>
+                <CalendarPicker
+                  selectedDate={endContractDate}
+                  onDateSelect={setEndContractDate}
+                />
+
+                <Text style={styles.label}>Reason</Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    { minHeight: 80, textAlignVertical: "top" },
+                  ]}
+                  value={endContractReason}
+                  onChangeText={setEndContractReason}
+                  placeholder="Enter reason"
+                  multiline
+                />
+
+                <View style={{ flexDirection: "row", gap: 10, marginTop: 15 }}>
+                  <TouchableOpacity
+                    onPress={() =>
+                      setEndContractModal({ isOpen: false, occupancy: null })
+                    }
+                    style={[
+                      styles.btnFull,
+                      { backgroundColor: isDark ? colors.card : "#eee" },
+                    ]}
+                  >
+                    <Text style={{ color: isDark ? colors.text : "#000" }}>
+                      Cancel
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={submitEndContract}
+                    disabled={endingContract}
+                    style={[styles.btnFull, { backgroundColor: "#ef4444" }]}
+                  >
+                    <Text style={styles.btnTextWhite}>Save End Contract</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
           </View>
         </View>
       </Modal>
@@ -4040,43 +4569,267 @@ const styles = StyleSheet.create({
   quickBtnLabel: {
     fontSize: 11,
     fontWeight: "600",
-    color: "#4b5563",
     textAlign: "center",
   },
   quickBtnBadge: {
     position: "absolute",
-    top: -5,
-    right: -5,
+    top: -4,
+    right: -4,
     backgroundColor: "#ef4444",
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 4,
     borderWidth: 1.5,
-    borderColor: "white",
   },
   quickBtnBadgeText: {
     color: "white",
-    fontSize: 10,
-    fontWeight: "bold",
+    fontSize: 9,
+    fontWeight: "800",
   },
   quickActionsHintWrap: {
-    marginTop: 6,
     flexDirection: "row",
     alignItems: "center",
-    alignSelf: "flex-end",
-    gap: 2,
-    backgroundColor: "#fffbeb",
-    borderColor: "#fde68a",
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    gap: 4,
   },
   quickActionsHintText: {
     fontSize: 11,
+    fontWeight: "600",
+  },
+
+  // MOVE-OUT PREMIUM STYLES
+  moveOutCard: {
+    flexDirection: "row",
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 12,
+    alignItems: "center",
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#f1f5f9",
+  },
+  moveOutIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: "#fff7ed",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  moveOutBadge: {
+    backgroundColor: "#fff7ed",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    alignSelf: "flex-start",
+    marginBottom: 4,
+  },
+  moveOutBadgeText: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#c2410c",
+  },
+  moveOutTitle: {
+    fontSize: 14,
     fontWeight: "700",
+    color: "#111827",
+    marginBottom: 4,
+  },
+  moveOutMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  moveOutMetaText: {
+    fontSize: 11,
+    color: "#6b7280",
+  },
+  moveOutLeavesText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#c2410c",
+  },
+  moveOutStatusText: {
+    fontSize: 11,
+    color: "#9ca3af",
+    marginLeft: "auto",
+  },
+
+  // APPROVAL MODAL STYLES
+  approveModalIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#dcfce7",
+    alignItems: "center",
+    justifyContent: "center",
+    alignSelf: "center",
+    marginBottom: 16,
+  },
+  approveModalTitle: {
+    fontSize: 20,
+    fontWeight: "900",
+    color: "#111827",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  approveModalDesc: {
+    fontSize: 14,
+    color: "#6b7280",
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  targetStayBox: {
+    backgroundColor: "#f9fafb",
+    borderRadius: 12,
+    padding: 16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: "#f1f5f9",
+  },
+  targetStayLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#9ca3af",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  targetStayValue: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  btnReject: {
+    flex: 1,
+    height: 52,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#fee2e2",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  btnRejectText: {
+    color: "#be123c",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  btnApprove: {
+    flex: 1,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: "#000",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  btnApproveText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+
+  // ENHANCED PROPERTY ENDS STYLES
+  enhancedEndCard: {
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    marginBottom: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#f1f5f9",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  endCardTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  endPropThumb: {
+    width: 60,
+    height: 60,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#f1f5f9",
+  },
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 100,
+    gap: 5,
+  },
+  statusDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
+  statusPillText: {
+    fontSize: 9,
+    fontWeight: "900",
+    letterSpacing: 0.3,
+  },
+  endPropTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#1e293b",
+    marginBottom: 2,
+  },
+  endTenantName: {
+    fontSize: 12,
+    color: "#64748b",
+    fontWeight: "500",
+  },
+  endCardBottom: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#f8fafc",
+  },
+  endDateInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  endDateText: {
+    fontSize: 12,
+    color: "#64748b",
+  },
+  btnCancelTerm: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    backgroundColor: "#fff1f2",
+    borderWidth: 1,
+    borderColor: "#ffe4e6",
+  },
+  btnCancelTermText: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#e11d48",
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    color: "#64748b",
+    fontWeight: "500",
+  },
+  btnClose: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#f1f5f9",
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

@@ -93,7 +93,10 @@ async function sendBugReportViaBrevo({
 
 export default function AuthScreen() {
   const router = useRouter();
-  const { initialView } = useLocalSearchParams<{ initialView: string }>();
+  const { initialView, returnTo } = useLocalSearchParams<{
+    initialView: string;
+    returnTo: string;
+  }>();
   const [view, setView] = useState<AuthView>(
     initialView === "register" ||
       initialView === "otp" ||
@@ -130,8 +133,14 @@ export default function AuthScreen() {
           error,
         } = await supabase.auth.getUser();
         if (user && !error && isMounted) {
-          const destination = await getUserRouteById(user.id);
-          router.replace(destination as any);
+          if (returnTo) {
+            setTimeout(() => {
+              if (isMounted) router.replace(returnTo as any);
+            }, 100);
+          } else {
+            const destination = await getUserRouteById(user.id);
+            router.replace(destination as any);
+          }
         }
       }
     };
@@ -141,13 +150,21 @@ export default function AuthScreen() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_IN" && session && isMounted) {
-        getUserRouteById(session.user.id)
-          .then((destination) => {
-            if (isMounted) router.replace(destination as any);
-          })
-          .catch(() => {
-            if (isMounted) router.replace("/(tabs)");
-          });
+        if (returnTo) {
+          // Use a small delay to ensure the auth state has fully propagated 
+          // across all providers and local storage before redirecting
+          setTimeout(() => {
+            if (isMounted) router.replace(returnTo as any);
+          }, 100);
+        } else {
+          getUserRouteById(session.user.id)
+            .then((destination) => {
+              if (isMounted) router.replace(destination as any);
+            })
+            .catch(() => {
+              if (isMounted) router.replace("/(tabs)");
+            });
+        }
       }
     });
 
@@ -155,7 +172,7 @@ export default function AuthScreen() {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [router]);
+  }, [router, returnTo]);
 
   useEffect(() => {
     if (view !== "login") {

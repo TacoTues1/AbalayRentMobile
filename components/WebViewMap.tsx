@@ -19,6 +19,7 @@ interface WebViewMapProps {
     imageUrl?: string;
     color?: string;
   }>;
+  onMarkerPress?: (markerId: string) => void;
   routes?: Array<{
     id: string;
     coordinates: [number, number][]; // [[lng, lat], ...]
@@ -41,6 +42,7 @@ const WebViewMap = forwardRef(function WebViewMap(
     center,
     zoom = 14,
     markers = [],
+    onMarkerPress,
     routes = [],
     userLocation,
     interactive = true,
@@ -93,6 +95,12 @@ const WebViewMap = forwardRef(function WebViewMap(
   const escapedTitle = (title: string) =>
     title.replace(/'/g, "\\'").replace(/"/g, '\\"');
 
+  const escapedMarkerId = (markerId: string) =>
+    String(markerId || "")
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '\\"')
+      .trim();
+
   const escapedUrl = (url: string) =>
     String(url || "")
       .replace(/'/g, "\\'")
@@ -105,8 +113,8 @@ const WebViewMap = forwardRef(function WebViewMap(
     ${
       showMarkerLabels && m.title
         ? `
-    L.marker([${m.coordinate[1]}, ${m.coordinate[0]}], {
-      interactive: false,
+    (() => {
+      const labelMarker = L.marker([${m.coordinate[1]}, ${m.coordinate[0]}], {
       icon: L.divIcon({
         className: 'custom-marker-label',
         html: '<div style="display:flex; align-items:center; gap:6px; background: rgba(255,255,255,0.95); color:#111827; font-size: 10px; font-weight: 600; padding: 4px 6px; border-radius: 10px; border:1px solid #e5e7eb; box-shadow:0 2px 8px rgba(0,0,0,0.15); max-width: 190px;"><img src="${escapedUrl(m.imageUrl || "")}" style="width:28px; height:28px; object-fit:cover; border-radius:6px; background:#f3f4f6;" /><div style="display:flex; flex-direction:column; min-width:0;"><div style="font-size:10px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:140px;">${escapedTitle(m.title)}</div><div style="font-size:9px; color:#2563eb; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:140px;">${escapedTitle(m.subtitle || "")}</div></div></div>',
@@ -114,20 +122,72 @@ const WebViewMap = forwardRef(function WebViewMap(
         iconAnchor: [95, -6]
       })
     }).addTo(map);
+    ${
+      onMarkerPress
+        ? `
+    labelMarker.on('click', function () {
+      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'marker_press',
+          markerId: '${escapedMarkerId(m.id)}'
+        }));
+      }
+    });
     `
         : ""
     }
-    L.marker([${m.coordinate[1]}, ${m.coordinate[0]}], {
+    })();
+    `
+        : ""
+    }
+    (() => {
+      const marker = L.marker([${m.coordinate[1]}, ${m.coordinate[0]}], {
       icon: L.divIcon({
         className: 'custom-marker',
         html: '<div style="width:30px;height:30px;display:flex;align-items:center;justify-content:center;"><svg viewBox="0 0 24 24" width="30" height="30"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="${m.color || "#ef4444"}"/></svg></div>',
         iconSize: [30, 30],
         iconAnchor: [15, 30]
       })
-    }).addTo(map)${m.title ? `.bindPopup('${escapedTitle(m.title)}')` : ""};
+    }).addTo(map);
+    ${m.title ? `marker.bindPopup('${escapedTitle(m.title)}');` : ""}
+    ${
+      onMarkerPress
+        ? `
+    marker.on('click', function () {
+      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'marker_press',
+          markerId: '${escapedMarkerId(m.id)}'
+        }));
+      }
+    });
+    `
+        : ""
+    }
+    })();
   `,
     )
     .join("\n");
+
+  const handleMessage = (event: any) => {
+    if (!onMarkerPress) return;
+
+    try {
+      const rawData = event?.nativeEvent?.data;
+      if (!rawData) return;
+
+      const payload = JSON.parse(rawData);
+      if (
+        payload?.type === "marker_press" &&
+        typeof payload?.markerId === "string" &&
+        payload.markerId.trim().length > 0
+      ) {
+        onMarkerPress(payload.markerId);
+      }
+    } catch {
+      // Ignore messages that don't match our marker payload format.
+    }
+  };
 
   const userMarkerHtml = userLocation
     ? `
@@ -222,6 +282,7 @@ const WebViewMap = forwardRef(function WebViewMap(
         domStorageEnabled={true}
         originWhitelist={["*"]}
         mixedContentMode="always"
+        onMessage={handleMessage}
       />
     </View>
   );

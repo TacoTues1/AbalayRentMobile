@@ -104,7 +104,9 @@ const CARTO_RASTER_STYLE = JSON.stringify({
   sources: {
     carto: {
       type: "raster",
-      tiles: ["https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"],
+      tiles: [
+        "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+      ],
       tileSize: 256,
       attribution: "&copy; OpenStreetMap &copy; CARTO",
       maxzoom: 19,
@@ -709,6 +711,12 @@ export default function AllProperties() {
     setVisiblePropertyCount((prev) => prev + ALL_PROPERTIES_PAGE_SIZE);
   };
 
+  const handleMapMarkerPress = (propertyId: string) => {
+    if (!propertyId) return;
+    setSelectedPropertyId(propertyId);
+    router.push(`/properties/${propertyId}` as any);
+  };
+
   // Compute Top Rated & Most Favorite property IDs
   const statsArray = Object.values(propertyStats) as any[];
   const mostFavId =
@@ -764,15 +772,15 @@ export default function AllProperties() {
               <View
                 style={[
                   styles.badge,
-                  { backgroundColor: isDark ? 'rgba(217, 119, 6, 0.2)' : "#fffbeb", borderColor: isDark ? 'rgba(217, 119, 6, 0.5)' : "#fde68a" },
+                  {
+                    backgroundColor: isDark
+                      ? "rgba(217, 119, 6, 0.2)"
+                      : "#fffbeb",
+                    borderColor: isDark ? "rgba(217, 119, 6, 0.5)" : "#fde68a",
+                  },
                 ]}
               >
-                <Text
-                  style={[
-                    styles.badgeText,
-                    { color: "#d97706" },
-                  ]}
-                >
+                <Text style={[styles.badgeText, { color: "#d97706" }]}>
                   Top Rated
                 </Text>
               </View>
@@ -781,15 +789,15 @@ export default function AllProperties() {
               <View
                 style={[
                   styles.badge,
-                  { backgroundColor: isDark ? 'rgba(225, 29, 72, 0.2)' : "#fff1f2", borderColor: isDark ? 'rgba(225, 29, 72, 0.5)' : "#fecdd3" },
+                  {
+                    backgroundColor: isDark
+                      ? "rgba(225, 29, 72, 0.2)"
+                      : "#fff1f2",
+                    borderColor: isDark ? "rgba(225, 29, 72, 0.5)" : "#fecdd3",
+                  },
                 ]}
               >
-                <Text
-                  style={[
-                    styles.badgeText,
-                    { color: "#e11d48" },
-                  ]}
-                >
+                <Text style={[styles.badgeText, { color: "#e11d48" }]}>
                   Most Favorite
                 </Text>
               </View>
@@ -1172,7 +1180,7 @@ export default function AllProperties() {
             interactive={true}
             markers={
               mapPoints.map(({ item, lat, lng }) => ({
-                id: `marker-${item.id}`,
+                id: String(item.id),
                 coordinate: [lng, lat] as [number, number],
                 title: item.title || "Property",
                 subtitle:
@@ -1184,6 +1192,7 @@ export default function AllProperties() {
                   "https://via.placeholder.com/120x90.png?text=Property",
               })) as any[]
             }
+            onMarkerPress={handleMapMarkerPress}
             showMarkerLabels={true}
             userLocation={userLocation || undefined}
             circleOverlay={

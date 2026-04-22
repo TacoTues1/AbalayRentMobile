@@ -77,6 +77,8 @@ export default function EditProperty() {
     bedrooms: "1",
     bathrooms: "1",
     area_sqft: "",
+    max_occupancy: "1",
+    is_no_limit: false,
     status: "available",
     terms_conditions: "",
     amenities: [] as string[],
@@ -207,6 +209,8 @@ export default function EditProperty() {
       bedrooms: data.bedrooms?.toString() || "1",
       bathrooms: data.bathrooms?.toString() || "1",
       area_sqft: data.area_sqft?.toString() || "",
+      max_occupancy: data.max_occupancy?.toString() || "1",
+      is_no_limit: data.max_occupancy === 0,
       status: data.status || "available",
       terms_conditions: data.terms_conditions || "",
       amenities: data.amenities || [],
@@ -244,6 +248,7 @@ export default function EditProperty() {
       bedrooms: sanitize(form.bedrooms),
       bathrooms: sanitize(form.bathrooms),
       area_sqft: sanitize(form.area_sqft),
+      max_occupancy: form.is_no_limit ? 0 : sanitize(form.max_occupancy),
       images: form.images.length > 0 ? form.images : null,
     };
 
@@ -628,6 +633,49 @@ export default function EditProperty() {
                 value={form.area_sqft}
                 onChangeText={(t) => setForm({ ...form, area_sqft: t })}
               />
+            </View>
+          </View>
+
+          <View style={styles.row}>
+            <View style={styles.third}>
+              <Text style={styles.subLabel}>Good for (People)</Text>
+              <TextInput
+                style={styles.input}
+                keyboardType="numeric"
+                placeholderTextColor={placeholderTextColor}
+                value={form.is_no_limit ? "No Limits" : form.max_occupancy}
+                editable={!form.is_no_limit}
+                onChangeText={(t) => setForm({ ...form, max_occupancy: t })}
+              />
+              <TouchableOpacity
+                onPress={() =>
+                  setForm({
+                    ...form,
+                    is_no_limit: !form.is_no_limit,
+                    max_occupancy: !form.is_no_limit ? "0" : "1",
+                  })
+                }
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  marginTop: 5,
+                }}
+              >
+                <Ionicons
+                  name={form.is_no_limit ? "checkbox" : "square-outline"}
+                  size={18}
+                  color={isDark ? colors.text : "black"}
+                />
+                <Text
+                  style={{
+                    fontSize: 12,
+                    marginLeft: 5,
+                    color: isDark ? colors.textSecondary : "#4B5563",
+                  }}
+                >
+                  No Limits
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
 

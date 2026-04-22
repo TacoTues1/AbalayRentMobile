@@ -38,7 +38,7 @@ export const runDailyAutomatedTasks = async (landlordId: string) => {
                 property:properties(id, title)
             `)
             .eq('landlord_id', landlordId)
-            .eq('status', 'pending_end')
+            .in('status', ['active', 'pending_end'])
             .eq('end_request_status', 'approved')
             .not('end_request_date', 'is', null)
             .lte('end_request_date', todayDate);
@@ -106,7 +106,37 @@ export const runDailyAutomatedTasks = async (landlordId: string) => {
             }
         }
         
-        // 2. Fetch current occupancies for this landlord
+        // 2. Auto-start occupancies whose start date is today or earlier.
+        const { data: incomingStarts } = await supabase
+            .from('tenant_occupancies')
+            .select(`
+                id,
+                tenant_id,
+                property_id,
+                start_date,
+                property:properties(id, title)
+            `)
+            .eq('landlord_id', landlordId)
+            .eq('status', 'pending_start')
+            .lte('start_date', todayDate);
+
+        if (incomingStarts && incomingStarts.length > 0) {
+            for (const occ of incomingStarts) {
+                await supabase
+                    .from('tenant_occupancies')
+                    .update({ status: 'active' })
+                    .eq('id', occ.id);
+
+                await createNotification(
+                    occ.tenant_id,
+                    'occupancy_started',
+                    `Your occupancy for "${getPropTitle(occ.property)}" has officially started today. Welcome!`,
+                    { actor: landlordId, email: true, sms: true }
+                );
+            }
+        }
+        
+        // 3. Fetch current occupancies for this landlord
         const { data: occupancies } = await supabase
             .from('tenant_occupancies')
             .select(`

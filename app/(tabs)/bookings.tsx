@@ -26,6 +26,7 @@ import CalendarPicker from "../../components/ui/CalendarPicker";
 import { createNotification } from "../../lib/notifications";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
+import GuestGuard from "../../components/auth/GuestGuard";
 
 // Optional: Define your backend URL if you want to send actual emails like the Next.js app
 const API_URL = (process.env.EXPO_PUBLIC_API_URL || "").replace(/\/+$/, "");
@@ -222,7 +223,10 @@ export default function Bookings() {
     const {
       data: { session },
     } = await supabase.auth.getSession();
-    if (!session) return router.replace("/");
+    if (!session) {
+      setLoading(false);
+      return;
+    }
     setSession(session);
 
     const { data: profile } = await supabase
@@ -2498,6 +2502,15 @@ export default function Bookings() {
       </View>
     </View>
   );
+
+  if (!loading && !session) {
+    return (
+      <GuestGuard
+        message="Please log in to view and manage your bookings."
+        returnTo="/(tabs)/bookings"
+      />
+    );
+  }
 
   return (
     <SafeAreaView

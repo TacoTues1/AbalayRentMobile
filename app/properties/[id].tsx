@@ -603,8 +603,12 @@ export default function PropertyDetail() {
     }
 
     if (!session) {
-      Alert.alert("Login Required", "You need to login first.", [
-        { text: "OK", onPress: () => router.push("/") },
+      Alert.alert("Login Required", "You need to login first to book a viewing.", [
+        { 
+          text: "OK", 
+          onPress: () => router.push(`/login?returnTo=${encodeURIComponent(`/properties/${id}`)}` as any) 
+        },
+        { text: "Cancel", style: "cancel" }
       ]);
       return;
     }
@@ -1518,6 +1522,39 @@ export default function PropertyDetail() {
                   ]}
                 >
                   Sq. Ft.
+                </Text>
+              </View>
+            </View>
+            <View
+              style={[
+                styles.specDivider,
+                { backgroundColor: isDark ? colors.border : "#eee" },
+              ]}
+            />
+            <View style={styles.specItem}>
+              <Ionicons
+                name="people-outline"
+                size={20}
+                color={isDark ? colors.textSecondary : "#333"}
+              />
+              <View>
+                <Text
+                  style={[
+                    styles.specValue,
+                    { color: isDark ? colors.text : "#111" },
+                  ]}
+                >
+                  {property.max_occupancy === 0
+                    ? "No Limits"
+                    : property.max_occupancy}
+                </Text>
+                <Text
+                  style={[
+                    styles.specLabel,
+                    { color: isDark ? colors.textMuted : "#666" },
+                  ]}
+                >
+                  {property.max_occupancy === 0 ? "" : "Good for"}
                 </Text>
               </View>
             </View>

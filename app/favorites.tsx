@@ -34,7 +34,7 @@ export default function FavoritesScreen() {
       } = await supabase.auth.getSession();
 
       if (!session) {
-        router.replace("/");
+        setLoading(false);
         return;
       }
 
@@ -110,6 +110,75 @@ export default function FavoritesScreen() {
           color={isDark ? colors.text : "#111"}
         />
       </View>
+    );
+  }
+  if (!session && !loading) {
+    return (
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        edges={["top"]}
+      >
+        <View
+          style={[
+            styles.header,
+            {
+              backgroundColor: colors.surface,
+              borderBottomColor: colors.border,
+            },
+          ]}
+        >
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={[
+              styles.backButton,
+              { backgroundColor: isDark ? colors.card : "#f3f4f6" },
+            ]}
+          >
+            <Ionicons name="arrow-back" size={22} color={colors.text} />
+          </TouchableOpacity>
+          <Text style={[styles.title, { color: colors.text }]}>My Favorites</Text>
+          <View style={{ width: 34 }} />
+        </View>
+
+        <View style={styles.emptyWrap}>
+          <View
+            style={{
+              width: 80,
+              height: 80,
+              borderRadius: 40,
+              backgroundColor: isDark ? colors.card : "#f3f4f6",
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 20,
+            }}
+          >
+            <Ionicons name="lock-closed" size={32} color={colors.textMuted} />
+          </View>
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>
+            Login Required
+          </Text>
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+            Sign in to your account to view and manage your favorite properties.
+          </Text>
+
+          <TouchableOpacity
+            style={[
+              styles.loginBtn,
+              { backgroundColor: isDark ? colors.text : "#111" },
+            ]}
+            onPress={() => router.push("/login")}
+          >
+            <Text
+              style={[
+                styles.loginBtnText,
+                { color: isDark ? colors.background : "white" },
+              ]}
+            >
+              Log In
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -320,5 +389,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
+  },
+  loginBtn: {
+    marginTop: 24,
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 12,
+    width: "100%",
+    alignItems: "center",
+  },
+  loginBtnText: {
+    fontSize: 16,
+    fontWeight: "bold",
   },
 });

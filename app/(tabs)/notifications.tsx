@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
+import GuestGuard from "../../components/auth/GuestGuard";
 
 export default function NotificationsPage() {
   const NOTIFICATION_LIMIT = 15;
@@ -88,7 +89,7 @@ export default function NotificationsPage() {
         loadNotifications(session.user.id);
         cleanupRealtime = setupRealtimeSubscription(session.user.id);
       } else {
-        router.replace("/");
+        setLoading(false);
       }
     });
 
@@ -366,6 +367,15 @@ export default function NotificationsPage() {
 
   const hasUnread = notifications.some((n) => !n.read);
   const hasRead = notifications.some((n) => n.read);
+
+  if (!loading && !session) {
+    return (
+      <GuestGuard
+        message="Please log in to view your notifications."
+        returnTo="/(tabs)/notifications"
+      />
+    );
+  }
 
   return (
     <SafeAreaView

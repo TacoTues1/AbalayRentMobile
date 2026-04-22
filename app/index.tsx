@@ -13,13 +13,11 @@ export default function EntryScreen() {
       new Promise((resolve) => setTimeout(resolve, ms));
 
     const getRestoredSession = async () => {
-      for (let attempt = 0; attempt < 3; attempt += 1) {
+      for (let attempt = 0; attempt < 1; attempt += 1) {
         const {
           data: { session },
         } = await supabase.auth.getSession();
-
         if (session) return session;
-        if (attempt < 2) await wait(250);
       }
 
       return null;
@@ -34,8 +32,8 @@ export default function EntryScreen() {
           const destination = await getUserRouteById(session.user.id);
           router.replace(destination as any);
         } else {
-          // No session at all -> show welcome screen
-          router.replace("/welcome");
+          // No session -> show visitor dashboard by default
+          router.replace("/(tabs)");
         }
       } catch (error) {
         console.log("Session check error:", error);

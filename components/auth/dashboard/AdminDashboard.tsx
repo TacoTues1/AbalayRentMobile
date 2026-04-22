@@ -19,6 +19,7 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import CalendarPicker from "../../../components/ui/CalendarPicker";
+import { useRealtime } from "../../../hooks/useRealtime";
 import { supabase } from "../../../lib/supabase";
 
 type AdminTab =
@@ -27,7 +28,10 @@ type AdminTab =
   | "properties"
   | "bookings"
   | "payments"
-  | "occupancies";
+  | "occupancies"
+  | "schedules"
+  | "maintenance"
+  | "leaves";
 
 const NON_EDITABLE_FIELDS = new Set(["id", "created_at", "updated_at"]);
 const USER_EDIT_FIELDS = [
@@ -314,6 +318,24 @@ export default function AdminDashboard() {
   const [showGenderPicker, setShowGenderPicker] = useState(false);
 
   const [propertyForm, setPropertyForm] = useState<Record<string, string>>({});
+  const [editingBooking, setEditingBooking] = useState<any | null>(null);
+  const [bookingForm, setBookingForm] = useState<Record<string, string>>({});
+  const [editingPayment, setEditingPayment] = useState<any | null>(null);
+  const [paymentForm, setPaymentForm] = useState<Record<string, string>>({});
+  const [editingSchedule, setEditingSchedule] = useState<any | null>(null);
+  const [scheduleForm, setScheduleForm] = useState<Record<string, string>>({});
+  const [editingMaintenance, setEditingMaintenance] = useState<any | null>(null);
+  const [maintenanceForm, setMaintenanceForm] = useState<Record<string, string>>({});
+  const [editingLeave, setEditingLeave] = useState<any | null>(null);
+  const [leaveForm, setLeaveForm] = useState<Record<string, string>>({});
+  const [showCreateModal, setShowCreateModal] = useState<AdminTab | null>(null);
+
+  const [schedules, setSchedules] = useState<any[]>([]);
+  const [scheduleSearch, setScheduleSearch] = useState("");
+  const [maintenanceRequests, setMaintenanceRequests] = useState<any[]>([]);
+  const [maintenanceSearch, setMaintenanceSearch] = useState("");
+  const [leaveRequests, setLeaveRequests] = useState<any[]>([]);
+  const [leaveSearch, setLeaveSearch] = useState("");
 
   const [remindersActive, setRemindersActive] = useState(true);
   const [sendingMonthly, setSendingMonthly] = useState(false);
@@ -415,8 +437,48 @@ export default function AdminDashboard() {
       properties: properties.length,
       bookings: bookings.length,
       payments: payments.length,
+      schedules: schedules.length,
+      maintenance: maintenanceRequests.length,
+      leaves: leaveRequests.length,
     };
-  }, [users, properties, bookings, payments]);
+  }, [users, properties, bookings, payments, schedules, maintenanceRequests, leaveRequests]);
+
+  const filteredMaintenance = useMemo(() => {
+    const query = maintenanceSearch.trim().toLowerCase();
+    if (!query) return maintenanceRequests;
+    return maintenanceRequests.filter((r) =>
+      includesQuery(r.title, query) ||
+      includesQuery(r.description, query) ||
+      includesQuery(userMap[r.tenant]?.first_name, query)
+    );
+  }, [maintenanceRequests, maintenanceSearch, userMap]);
+
+  const filteredLeaves = useMemo(() => {
+    const query = leaveSearch.trim().toLowerCase();
+    if (!query) return leaveRequests;
+    return leaveRequests.filter((r) =>
+      includesQuery(userMap[r.tenant_id]?.first_name, query) ||
+      includesQuery(propertyMap[r.property_id]?.title, query) ||
+      includesQuery(r.end_request_reason, query)
+    );
+  }, [leaveRequests, leaveSearch, userMap, propertyMap]);
+
+
+
+
+  const filteredSchedules = useMemo(() => {
+    const query = scheduleSearch.trim().toLowerCase();
+    if (!query) return schedules;
+
+    return schedules.filter((s) => {
+      const landlord = userMap[s.landlord_id];
+      return (
+        includesQuery(fullName(landlord), query) ||
+        includesQuery(s.start_time, query) ||
+        includesQuery(s.end_time, query)
+      );
+    });
+  }, [schedules, scheduleSearch, userMap]);
 
   const filteredUsers = useMemo(() => {
     const query = userSearch.trim().toLowerCase();
@@ -528,8 +590,8 @@ export default function AdminDashboard() {
     fetchFamilyMembers(occ.id);
   };
 
-  const loadAllData = async () => {
-    setLoading(true);
+  const loadAllData = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [
         usersRes,
@@ -538,6 +600,9 @@ export default function AdminDashboard() {
         paymentsRes,
         occupanciesRes,
         subscriptionsRes,
+        schedulesRes,
+        maintenanceRes,
+        leavesRes,
       ] = await Promise.all([
         supabase
           .from("profiles")
@@ -549,26 +614,36 @@ export default function AdminDashboard() {
           .order("created_at", { ascending: false }),
         supabase
           .from("bookings")
-          .select("id, property_id, tenant, status, booking_date, created_at")
+          .select("*")
           .order("created_at", { ascending: false }),
         supabase
           .from("payment_requests")
-          .select(
-            "id, property_id, tenant, landlord, status, due_date, amount_paid, rent_amount, water_bill, electrical_bill, other_bills, wifi_bill, security_deposit_amount, advance_amount, created_at",
-          )
+          .select("*")
           .order("created_at", { ascending: false }),
-
         supabase
           .from("tenant_occupancies")
           .select(
             "id, property_id, tenant_id, landlord_id, status, start_date, property:properties(id, title, address, price, max_occupancy), tenant:profiles!tenant_occupancies_tenant_id_fkey(id, first_name, last_name, phone, email)",
           )
-          .eq("status", "active")
+          .in("status", ["active", "pending_end"])
           .order("start_date", { ascending: false }),
         supabase
           .from("subscriptions")
           .select("tenant_id, total_slots")
           .eq("plan_type", "family_slot_plan"),
+        supabase
+          .from("available_time_slots")
+          .select("*")
+          .order("start_time", { ascending: false }),
+        supabase
+          .from("maintenance_requests")
+          .select("*")
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("tenant_occupancies")
+          .select("*, property:properties(title), tenant:profiles!tenant_occupancies_tenant_id_fkey(first_name, last_name)")
+          .eq("status", "pending_end")
+          .order("created_at", { ascending: false }),
       ]);
 
       if (usersRes.error) throw usersRes.error;
@@ -576,6 +651,9 @@ export default function AdminDashboard() {
       if (bookingsRes.error) throw bookingsRes.error;
       if (paymentsRes.error) throw paymentsRes.error;
       if (occupanciesRes.error) throw occupanciesRes.error;
+      if (schedulesRes.error) throw schedulesRes.error;
+      if (maintenanceRes.error) throw maintenanceRes.error;
+      if (leavesRes.error) throw leavesRes.error;
 
       const subsMap: any = {};
       (subscriptionsRes?.data || []).forEach((sub: any) => {
@@ -592,6 +670,9 @@ export default function AdminDashboard() {
       setBookings(bookingsRes.data || []);
       setPayments(paymentsRes.data || []);
       setOccupancies(occupanciesRes.data || []);
+      setSchedules(schedulesRes.data || []);
+      setMaintenanceRequests(maintenanceRes.data || []);
+      setLeaveRequests(leavesRes.data || []);
     } catch (error: any) {
       console.error(error);
       Alert.alert(
@@ -602,6 +683,25 @@ export default function AdminDashboard() {
       setLoading(false);
     }
   };
+
+  useRealtime(
+    [
+      "profiles",
+      "properties",
+      "bookings",
+      "payment_requests",
+      "tenant_occupancies",
+      "available_time_slots",
+      "maintenance_requests",
+      "subscriptions",
+      "family_members",
+    ],
+    () => {
+      console.log("Admin Realtime update triggered");
+      loadAllData(true);
+    },
+    true,
+  );
 
   const openUserEditor = (user: any) => {
     setEditingUser(user);
@@ -786,9 +886,410 @@ export default function AdminDashboard() {
     }
   };
 
+  const cancelBooking = async (id: string) => {
+    Alert.alert("Confirm", "Cancel this booking?", [
+      { text: "No", style: "cancel" },
+      {
+        text: "Yes",
+        onPress: async () => {
+          const { error } = await supabase
+            .from("bookings")
+            .update({ status: "cancelled" })
+            .eq("id", id);
+          if (error) Alert.alert("Error", error.message);
+          else loadAllData();
+        },
+      },
+    ]);
+  };
+
+  const deleteBooking = async (id: string) => {
+    Alert.alert("Confirm", "Permanently delete this booking?", [
+      { text: "No", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          const { error } = await supabase
+            .from("bookings")
+            .delete()
+            .eq("id", id);
+          if (error) Alert.alert("Error", error.message);
+          else loadAllData();
+        },
+      },
+    ]);
+  };
+
+  const cancelPayment = async (id: string) => {
+    Alert.alert("Confirm", "Cancel this payment request?", [
+      { text: "No", style: "cancel" },
+      {
+        text: "Yes",
+        onPress: async () => {
+          const { error } = await supabase
+            .from("payment_requests")
+            .update({ status: "cancelled" })
+            .eq("id", id);
+          if (error) Alert.alert("Error", error.message);
+          else loadAllData();
+        },
+      },
+    ]);
+  };
+
+  const deletePayment = async (id: string) => {
+    Alert.alert("Confirm", "Permanently delete this payment?", [
+      { text: "No", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          const { error } = await supabase
+            .from("payment_requests")
+            .delete()
+            .eq("id", id);
+          if (error) Alert.alert("Error", error.message);
+          else loadAllData();
+        },
+      },
+    ]);
+  };
+
+  const deleteSchedule = async (id: string) => {
+    Alert.alert("Confirm", "Delete this time slot?", [
+      { text: "No", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          const { error } = await supabase
+            .from("available_time_slots")
+            .delete()
+            .eq("id", id);
+          if (error) Alert.alert("Error", error.message);
+          else loadAllData();
+        },
+      },
+    ]);
+  };
+
+  const endOccupancy = async (occ: any) => {
+    Alert.alert("Confirm", "End this occupancy and make property available?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "End Occupancy",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const { error: occErr } = await supabase
+              .from("tenant_occupancies")
+              .update({ status: "ended", end_date: new Date().toISOString() })
+              .eq("id", occ.id);
+            if (occErr) throw occErr;
+
+            const { error: propErr } = await supabase
+              .from("properties")
+              .update({ status: "available" })
+              .eq("id", occ.property_id);
+            if (propErr) throw propErr;
+
+            Alert.alert("Success", "Occupancy ended.");
+            loadAllData();
+          } catch (err: any) {
+            Alert.alert("Error", err.message);
+          }
+        },
+      },
+    ]);
+  };
+
+  const saveBooking = async () => {
+    if (!editingBooking) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from("bookings")
+        .update(bookingForm)
+        .eq("id", editingBooking.id);
+      if (error) throw error;
+      setEditingBooking(null);
+      loadAllData();
+    } catch (e: any) {
+      Alert.alert("Error", e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const savePayment = async () => {
+    if (!editingPayment) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from("payment_requests")
+        .update(paymentForm)
+        .eq("id", editingPayment.id);
+      if (error) throw error;
+      setEditingPayment(null);
+      loadAllData();
+    } catch (e: any) {
+      Alert.alert("Error", e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveSchedule = async () => {
+    if (!editingSchedule) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from("available_time_slots")
+        .update(scheduleForm)
+        .eq("id", editingSchedule.id);
+      if (error) throw error;
+      setEditingSchedule(null);
+      loadAllData();
+    } catch (e: any) {
+      Alert.alert("Error", e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const createBooking = async () => {
+    setSaving(true);
+    try {
+      const { error } = await supabase.from("bookings").insert([bookingForm]);
+      if (error) throw error;
+      setShowCreateModal(null);
+      loadAllData();
+    } catch (e: any) {
+      Alert.alert("Error", e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const createPayment = async () => {
+    setSaving(true);
+    try {
+      const { error } = await supabase.from("payment_requests").insert([paymentForm]);
+      if (error) throw error;
+      setShowCreateModal(null);
+      loadAllData();
+    } catch (e: any) {
+      Alert.alert("Error", e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const createSchedule = async () => {
+    setSaving(true);
+    try {
+      const { error } = await supabase.from("available_time_slots").insert([scheduleForm]);
+      if (error) throw error;
+      setShowCreateModal(null);
+      loadAllData();
+    } catch (e: any) {
+      Alert.alert("Error", e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openBookingEditor = (booking: any) => {
+    setEditingBooking(booking);
+    setBookingForm({
+      status: booking.status,
+      booking_date: booking.booking_date,
+      notes: booking.notes || "",
+    });
+  };
+
+  const openPaymentEditor = (payment: any) => {
+    setEditingPayment(payment);
+    setPaymentForm({
+      status: payment.status,
+      due_date: payment.due_date,
+      rent_amount: String(payment.rent_amount || "0"),
+      water_bill: String(payment.water_bill || "0"),
+      electrical_bill: String(payment.electrical_bill || "0"),
+    });
+  };
+
+  const openScheduleEditor = (slot: any) => {
+    setEditingSchedule(slot);
+    setScheduleForm({
+      landlord_id: slot.landlord_id,
+      start_time: slot.start_time,
+      end_time: slot.end_time,
+      is_booked: String(slot.is_booked),
+    });
+  };
+
+  const openPaymentCreator = () => {
+    setShowCreateModal("payments");
+    setPaymentForm({
+      status: "pending",
+      due_date: new Date().toISOString().split("T")[0],
+      rent_amount: "0",
+      water_bill: "0",
+      electrical_bill: "0",
+      property_id: "",
+      tenant: "",
+      landlord: "",
+    });
+  };
+
+  const openBookingCreator = () => {
+    setShowCreateModal("bookings");
+    setBookingForm({
+      status: "pending",
+      booking_date: new Date().toISOString().split("T")[0],
+      property_id: "",
+      tenant: "",
+      landlord: "",
+    });
+  };
+
+  const openScheduleCreator = () => {
+    setShowCreateModal("schedules");
+    setScheduleForm({
+      landlord_id: "",
+      start_time: new Date().toISOString(),
+      end_time: new Date().toISOString(),
+      is_booked: "false",
+    });
+  };
+
+  const deleteMaintenance = (id: string) => {
+    Alert.alert("Confirm", "Delete this maintenance request?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          const { error } = await supabase.from("maintenance_requests").delete().eq("id", id);
+          if (error) Alert.alert("Error", error.message);
+          else loadAllData();
+        },
+      },
+    ]);
+  };
+
+  const saveMaintenance = async () => {
+    if (!editingMaintenance) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from("maintenance_requests")
+        .update(maintenanceForm)
+        .eq("id", editingMaintenance.id);
+      if (error) throw error;
+      setEditingMaintenance(null);
+      loadAllData();
+    } catch (e: any) {
+      Alert.alert("Error", e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openMaintenanceEditor = (req: any) => {
+    setEditingMaintenance(req);
+    setMaintenanceForm({
+      title: req.title,
+      description: req.description,
+      status: req.status,
+      priority: req.priority,
+    });
+  };
+
+  const deleteLeave = (id: string) => {
+    Alert.alert("Confirm", "Delete this leave request record?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          const { error } = await supabase.from("tenant_occupancies").delete().eq("id", id);
+          if (error) Alert.alert("Error", error.message);
+          else loadAllData();
+        },
+      },
+    ]);
+  };
+
+  const saveLeave = async () => {
+    if (!editingLeave) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from("tenant_occupancies")
+        .update(leaveForm)
+        .eq("id", editingLeave.id);
+      if (error) throw error;
+      setEditingLeave(null);
+      loadAllData();
+    } catch (e: any) {
+      Alert.alert("Error", e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openLeaveEditor = (req: any) => {
+    setEditingLeave(req);
+    setLeaveForm({
+      status: req.status,
+      end_request_date: req.end_request_date,
+      end_request_reason: req.end_request_reason,
+      end_request_status: req.end_request_status || "pending",
+    });
+  };
+
   const renderOverview = () => (
     <View style={styles.sectionWrap}>
       <Text style={styles.sectionTitle}>Admin Overview</Text>
+      
+      {/* Monitoring Section */}
+      <View style={{ marginBottom: 16, flexDirection: 'row', gap: 12 }}>
+        <TouchableOpacity 
+          style={{ flex: 1, backgroundColor: '#fff', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#e5e7eb' }}
+          onPress={() => setActiveTab('maintenance')}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+            <View style={{ backgroundColor: '#fef3c7', padding: 6, borderRadius: 8, marginRight: 10 }}>
+              <Ionicons name="construct" size={18} color="#d97706" />
+            </View>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: '#374151' }}>Maintenance</Text>
+          </View>
+          <Text style={{ fontSize: 24, fontWeight: '900', color: '#111827' }}>
+            {maintenanceRequests.filter(r => ['pending', 'in_progress', 'scheduled'].includes(r.status)).length}
+          </Text>
+          <Text style={{ fontSize: 12, color: '#6b7280' }}>Open Requests</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={{ flex: 1, backgroundColor: '#fff', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#e5e7eb' }}
+          onPress={() => setActiveTab('leaves')}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+            <View style={{ backgroundColor: '#fee2e2', padding: 6, borderRadius: 8, marginRight: 10 }}>
+              <Ionicons name="exit" size={18} color="#dc2626" />
+            </View>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: '#374151' }}>Leave Pending</Text>
+          </View>
+          <Text style={{ fontSize: 24, fontWeight: '900', color: '#111827' }}>
+            {leaveRequests.length}
+          </Text>
+          <Text style={{ fontSize: 12, color: '#6b7280' }}>Pending Approval</Text>
+        </TouchableOpacity>
+      </View>
+
       <View style={styles.statsGrid}>
         <StatCard label="Users" value={stats.users} icon="people-outline" />
         <StatCard
@@ -1181,7 +1682,7 @@ export default function AdminDashboard() {
             justifyContent: "center",
           },
         ]}
-        onPress={loadAllData}
+        onPress={() => loadAllData()}
       >
         <Ionicons name="refresh" size={16} color="#fff" />
         <Text style={styles.refreshButtonText}>Reload Dashboard Data</Text>
@@ -1287,7 +1788,13 @@ export default function AdminDashboard() {
 
   const renderBookings = () => (
     <View style={styles.sectionWrap}>
-      <Text style={styles.sectionTitle}>All Bookings</Text>
+      <View style={styles.sectionHeaderRow}>
+        <Text style={styles.sectionTitle}>All Bookings</Text>
+        <TouchableOpacity style={styles.createBtn} onPress={openBookingCreator}>
+          <Ionicons name="add" size={18} color="#fff" />
+          <Text style={styles.createBtnText}>New Booking</Text>
+        </TouchableOpacity>
+      </View>
       <TextInput
         style={styles.searchInput}
         value={bookingSearch}
@@ -1320,6 +1827,17 @@ export default function AdminDashboard() {
                   {booking.booking_date || "N/A"}
                 </Text>
               </View>
+              <View style={styles.itemActions}>
+                <TouchableOpacity onPress={() => openBookingEditor(booking)}>
+                  <Ionicons name="create-outline" size={20} color="#4b5563" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => cancelBooking(booking.id)}>
+                  <Ionicons name="close-circle-outline" size={20} color="#f59e0b" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => deleteBooking(booking.id)}>
+                  <Ionicons name="trash-outline" size={20} color="#ef4444" />
+                </TouchableOpacity>
+              </View>
             </View>
           );
         })}
@@ -1327,9 +1845,165 @@ export default function AdminDashboard() {
     </View>
   );
 
+  const renderSchedules = () => (
+    <View style={styles.sectionWrap}>
+      <View style={styles.sectionHeaderRow}>
+        <Text style={styles.sectionTitle}>Landlord Schedules</Text>
+        <TouchableOpacity style={styles.createBtn} onPress={openScheduleCreator}>
+          <Ionicons name="add" size={18} color="#fff" />
+          <Text style={styles.createBtnText}>New Schedule</Text>
+        </TouchableOpacity>
+      </View>
+      <TextInput
+        style={styles.searchInput}
+        value={scheduleSearch}
+        onChangeText={(text) => {
+          setScheduleSearch(text);
+          setCurrentPage(1);
+        }}
+        placeholder="Search schedules (landlord name...)"
+        placeholderTextColor="#9ca3af"
+      />
+      {filteredSchedules.length === 0 && (
+        <Text style={styles.emptyText}>Empty</Text>
+      )}
+      {filteredSchedules
+        .slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE)
+        .map((slot) => {
+          const landlord = userMap[slot.landlord_id];
+          return (
+            <View key={slot.id} style={styles.listItem}>
+              <View style={styles.itemMain}>
+                <Text style={styles.itemTitle}>
+                  Landlord: {landlord ? fullName(landlord) : "Unknown"}
+                </Text>
+                <Text style={styles.itemSubtitle}>
+                  {new Date(slot.start_time).toLocaleString()} - {new Date(slot.end_time).toLocaleTimeString()}
+                </Text>
+                <Text style={styles.itemMeta}>
+                  Booked: {slot.is_booked ? "Yes" : "No"}
+                </Text>
+              </View>
+              <View style={styles.itemActions}>
+                <TouchableOpacity onPress={() => openScheduleEditor(slot)}>
+                  <Ionicons name="create-outline" size={20} color="#4b5563" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => deleteSchedule(slot.id)}>
+                  <Ionicons name="trash-outline" size={20} color="#ef4444" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        })}
+    </View>
+  );
+
+  const renderMaintenance = () => (
+    <View style={styles.sectionWrap}>
+      <Text style={styles.sectionTitle}>Maintenance Monitoring</Text>
+      <TextInput
+        style={styles.searchInput}
+        value={maintenanceSearch}
+        onChangeText={(text) => {
+          setMaintenanceSearch(text);
+          setCurrentPage(1);
+        }}
+        placeholder="Search maintenance (title, description...)"
+        placeholderTextColor="#9ca3af"
+      />
+      {filteredMaintenance.length === 0 && (
+        <Text style={styles.emptyText}>Empty</Text>
+      )}
+      {filteredMaintenance
+        .slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE)
+        .map((req) => {
+          const tenant = userMap[req.tenant];
+          const property = propertyMap[req.property_id];
+          return (
+            <View key={req.id} style={styles.listItem}>
+              <View style={styles.itemMain}>
+                <Text style={styles.itemTitle}>{req.title}</Text>
+                <Text style={styles.itemSubtitle}>
+                  {property?.title || "Unknown Property"} • {tenant ? fullName(tenant) : "Unknown Tenant"}
+                </Text>
+                <Text style={styles.itemMeta}>Status: {req.status} • Priority: {req.priority}</Text>
+              </View>
+              <View style={styles.itemActions}>
+                <TouchableOpacity onPress={() => openMaintenanceEditor(req)}>
+                  <Ionicons name="create-outline" size={20} color="#4b5563" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => deleteMaintenance(req.id)}>
+                  <Ionicons name="trash-outline" size={20} color="#ef4444" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        })}
+      {renderPagination(filteredMaintenance.length)}
+    </View>
+  );
+
+  const renderLeaves = () => (
+    <View style={styles.sectionWrap}>
+      <Text style={styles.sectionTitle}>Pending Leave Requests</Text>
+      <TextInput
+        style={styles.searchInput}
+        value={leaveSearch}
+        onChangeText={(text) => {
+          setLeaveSearch(text);
+          setCurrentPage(1);
+        }}
+        placeholder="Search leaves (tenant, property...)"
+        placeholderTextColor="#9ca3af"
+      />
+      {filteredLeaves.length === 0 && (
+        <Text style={styles.emptyText}>Empty</Text>
+      )}
+      {filteredLeaves
+        .slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE)
+        .map((req) => {
+          const tenant = userMap[req.tenant_id];
+          const property = propertyMap[req.property_id];
+          return (
+            <View key={req.id} style={styles.listItem}>
+              <View style={styles.itemMain}>
+                <Text style={styles.itemTitle}>
+                  {tenant ? fullName(tenant) : "Unknown Tenant"}
+                </Text>
+                <Text style={styles.itemSubtitle}>
+                  {property?.title || req.property?.title || "Unknown Property"}
+                </Text>
+                <Text style={styles.itemMeta}>
+                  Status: {req.end_request_status?.toUpperCase() || "PENDING"} • Date: {req.end_request_date}
+                </Text>
+                <Text style={[styles.itemMeta, { marginTop: 2 }]}>
+                  Reason: {req.end_request_reason}
+                </Text>
+              </View>
+              <View style={styles.itemActions}>
+                <TouchableOpacity onPress={() => openLeaveEditor(req)}>
+                  <Ionicons name="create-outline" size={20} color="#4b5563" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => deleteLeave(req.id)}>
+                  <Ionicons name="trash-outline" size={20} color="#ef4444" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        })}
+      {renderPagination(filteredLeaves.length)}
+    </View>
+  );
+
   const renderPayments = () => (
     <View style={styles.sectionWrap}>
-      <Text style={styles.sectionTitle}>All Payment Requests</Text>
+      <View style={styles.sectionHeaderRow}>
+        <Text style={styles.sectionTitle}>All Payment Requests</Text>
+        <TouchableOpacity style={styles.createBtn} onPress={openPaymentCreator}>
+          <Ionicons name="add" size={18} color="#fff" />
+          <Text style={styles.createBtnText}>New Payment</Text>
+        </TouchableOpacity>
+      </View>
       <TextInput
         style={styles.searchInput}
         value={paymentSearch}
@@ -1361,6 +2035,17 @@ export default function AdminDashboard() {
                   {formatCurrency(paymentTotal(payment))} •{" "}
                   {payment.status || "unknown"}
                 </Text>
+              </View>
+              <View style={styles.itemActions}>
+                <TouchableOpacity onPress={() => openPaymentEditor(payment)}>
+                  <Ionicons name="create-outline" size={20} color="#4b5563" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => cancelPayment(payment.id)}>
+                  <Ionicons name="close-circle-outline" size={20} color="#f59e0b" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => deletePayment(payment.id)}>
+                  <Ionicons name="trash-outline" size={20} color="#ef4444" />
+                </TouchableOpacity>
               </View>
             </View>
           );
@@ -1429,13 +2114,13 @@ export default function AdminDashboard() {
       <View style={styles.headerRow}>
         <Text style={styles.headerTitle}>Admin Dashboard</Text>
         <View style={styles.headerActions}>
-          <TouchableOpacity
+          {/* <TouchableOpacity
             style={styles.addPropertyButton}
             onPress={() => router.push("/properties/new" as any)}
           >
             <Ionicons name="add-circle-outline" size={16} color="#fff" />
             <Text style={styles.addPropertyButtonText}>Add Property</Text>
-          </TouchableOpacity>
+          </TouchableOpacity> */}
           <TouchableOpacity
             style={styles.logoutButton}
             onPress={() => router.replace("/logout")}
@@ -1453,6 +2138,9 @@ export default function AdminDashboard() {
         {activeTab === "bookings" && renderBookings()}
         {activeTab === "payments" && renderPayments()}
         {activeTab === "occupancies" && renderOccupancies()}
+        {activeTab === "schedules" && renderSchedules()}
+        {activeTab === "maintenance" && renderMaintenance()}
+        {activeTab === "leaves" && renderLeaves()}
       </ScrollView>
 
       <View
@@ -1474,6 +2162,9 @@ export default function AdminDashboard() {
               "bookings",
               "payments",
               "occupancies",
+              "schedules",
+              "maintenance",
+              "leaves",
             ] as AdminTab[]
           ).map((tab) => (
             <TouchableOpacity
@@ -1567,10 +2258,23 @@ export default function AdminDashboard() {
 
             <View style={styles.modalActions}>
               <TouchableOpacity
-                style={[styles.primaryButton, { width: "100%" }]}
+                style={[
+                  styles.primaryButton,
+                  { backgroundColor: "#ef4444", flex: 1 },
+                ]}
+                onPress={() => {
+                  const occ = selectedOccupancyDetails;
+                  setSelectedOccupancyDetails(null);
+                  endOccupancy(occ);
+                }}
+              >
+                <Text style={styles.primaryButtonText}>End Occupancy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.secondaryButton, { flex: 1 }]}
                 onPress={() => setSelectedOccupancyDetails(null)}
               >
-                <Text style={styles.primaryButtonText}>Close</Text>
+                <Text style={styles.secondaryButtonText}>Close</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2957,6 +3661,211 @@ export default function AdminDashboard() {
           </View>
         </View>
       </Modal>
+      {/* Booking Edit/Create Modal */}
+      <Modal visible={!!editingBooking || showCreateModal === "bookings"} transparent animationType="slide">
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{editingBooking ? "Edit Booking" : "New Booking"}</Text>
+            <ScrollView style={styles.modalFormScroll}>
+              {!editingBooking && (
+                <>
+                  <View style={styles.fieldWrap}>
+                    <Text style={styles.fieldLabel}>Property ID</Text>
+                    <TextInput style={styles.input} value={bookingForm.property_id} onChangeText={(v) => setBookingForm({ ...bookingForm, property_id: v })} />
+                  </View>
+                  <View style={styles.fieldWrap}>
+                    <Text style={styles.fieldLabel}>Tenant ID</Text>
+                    <TextInput style={styles.input} value={bookingForm.tenant} onChangeText={(v) => setBookingForm({ ...bookingForm, tenant: v })} />
+                  </View>
+                  <View style={styles.fieldWrap}>
+                    <Text style={styles.fieldLabel}>Landlord ID</Text>
+                    <TextInput style={styles.input} value={bookingForm.landlord} onChangeText={(v) => setBookingForm({ ...bookingForm, landlord: v })} />
+                  </View>
+                </>
+              )}
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Date (YYYY-MM-DD)</Text>
+                <TextInput style={styles.input} value={bookingForm.booking_date} onChangeText={(v) => setBookingForm({ ...bookingForm, booking_date: v })} />
+              </View>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Status</Text>
+                <TextInput style={styles.input} value={bookingForm.status} onChangeText={(v) => setBookingForm({ ...bookingForm, status: v })} />
+              </View>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Notes</Text>
+                <TextInput style={[styles.input, { height: 80 }]} multiline value={bookingForm.notes} onChangeText={(v) => setBookingForm({ ...bookingForm, notes: v })} />
+              </View>
+            </ScrollView>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.secondaryButton} onPress={() => { setEditingBooking(null); setShowCreateModal(null); }}>
+                <Text style={styles.secondaryButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.primaryButton} onPress={editingBooking ? saveBooking : createBooking}>
+                <Text style={styles.primaryButtonText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Payment Edit/Create Modal */}
+      <Modal visible={!!editingPayment || showCreateModal === "payments"} transparent animationType="slide">
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{editingPayment ? "Edit Payment" : "New Payment Request"}</Text>
+            <ScrollView style={styles.modalFormScroll}>
+              {!editingPayment && (
+                <>
+                  <View style={styles.fieldWrap}>
+                    <Text style={styles.fieldLabel}>Property ID</Text>
+                    <TextInput style={styles.input} value={paymentForm.property_id} onChangeText={(v) => setPaymentForm({ ...paymentForm, property_id: v })} />
+                  </View>
+                  <View style={styles.fieldWrap}>
+                    <Text style={styles.fieldLabel}>Tenant ID</Text>
+                    <TextInput style={styles.input} value={paymentForm.tenant} onChangeText={(v) => setPaymentForm({ ...paymentForm, tenant: v })} />
+                  </View>
+                  <View style={styles.fieldWrap}>
+                    <Text style={styles.fieldLabel}>Landlord ID</Text>
+                    <TextInput style={styles.input} value={paymentForm.landlord} onChangeText={(v) => setPaymentForm({ ...paymentForm, landlord: v })} />
+                  </View>
+                </>
+              )}
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Due Date (YYYY-MM-DD)</Text>
+                <TextInput style={styles.input} value={paymentForm.due_date} onChangeText={(v) => setPaymentForm({ ...paymentForm, due_date: v })} />
+              </View>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Rent Amount</Text>
+                <TextInput style={styles.input} value={paymentForm.rent_amount} keyboardType="numeric" onChangeText={(v) => setPaymentForm({ ...paymentForm, rent_amount: v })} />
+              </View>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Water Bill</Text>
+                <TextInput style={styles.input} value={paymentForm.water_bill} keyboardType="numeric" onChangeText={(v) => setPaymentForm({ ...paymentForm, water_bill: v })} />
+              </View>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Electrical Bill</Text>
+                <TextInput style={styles.input} value={paymentForm.electrical_bill} keyboardType="numeric" onChangeText={(v) => setPaymentForm({ ...paymentForm, electrical_bill: v })} />
+              </View>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Status</Text>
+                <TextInput style={styles.input} value={paymentForm.status} onChangeText={(v) => setPaymentForm({ ...paymentForm, status: v })} />
+              </View>
+            </ScrollView>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.secondaryButton} onPress={() => { setEditingPayment(null); setShowCreateModal(null); }}>
+                <Text style={styles.secondaryButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.primaryButton} onPress={editingPayment ? savePayment : createPayment}>
+                <Text style={styles.primaryButtonText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Schedule Edit/Create Modal */}
+      <Modal visible={!!editingSchedule || showCreateModal === "schedules"} transparent animationType="slide">
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{editingSchedule ? "Edit Schedule Slot" : "New Schedule Slot"}</Text>
+            <ScrollView style={styles.modalFormScroll}>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Landlord ID</Text>
+                <TextInput style={styles.input} value={scheduleForm.landlord_id} onChangeText={(v) => setScheduleForm({ ...scheduleForm, landlord_id: v })} />
+              </View>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Start Time (ISO)</Text>
+                <TextInput style={styles.input} value={scheduleForm.start_time} onChangeText={(v) => setScheduleForm({ ...scheduleForm, start_time: v })} />
+              </View>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>End Time (ISO)</Text>
+                <TextInput style={styles.input} value={scheduleForm.end_time} onChangeText={(v) => setScheduleForm({ ...scheduleForm, end_time: v })} />
+              </View>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Is Booked (true/false)</Text>
+                <TextInput style={styles.input} value={scheduleForm.is_booked} onChangeText={(v) => setScheduleForm({ ...scheduleForm, is_booked: v })} />
+              </View>
+            </ScrollView>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.secondaryButton} onPress={() => { setEditingSchedule(null); setShowCreateModal(null); }}>
+                <Text style={styles.secondaryButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.primaryButton} onPress={editingSchedule ? saveSchedule : createSchedule}>
+                <Text style={styles.primaryButtonText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      {/* Maintenance Editor Modal */}
+      <Modal visible={!!editingMaintenance} transparent animationType="slide">
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Edit Maintenance Request</Text>
+            <ScrollView style={styles.modalFormScroll}>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Title</Text>
+                <TextInput style={styles.input} value={maintenanceForm.title} onChangeText={(v) => setMaintenanceForm({ ...maintenanceForm, title: v })} />
+              </View>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Description</Text>
+                <TextInput style={[styles.input, { height: 80 }]} multiline value={maintenanceForm.description} onChangeText={(v) => setMaintenanceForm({ ...maintenanceForm, description: v })} />
+              </View>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Status</Text>
+                <TextInput style={styles.input} value={maintenanceForm.status} onChangeText={(v) => setMaintenanceForm({ ...maintenanceForm, status: v })} />
+              </View>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Priority</Text>
+                <TextInput style={styles.input} value={maintenanceForm.priority} onChangeText={(v) => setMaintenanceForm({ ...maintenanceForm, priority: v })} />
+              </View>
+            </ScrollView>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.secondaryButton} onPress={() => setEditingMaintenance(null)}>
+                <Text style={styles.secondaryButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.primaryButton} onPress={saveMaintenance}>
+                <Text style={styles.primaryButtonText}>Save Changes</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Leave Editor Modal */}
+      <Modal visible={!!editingLeave} transparent animationType="slide">
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Edit Leave Request</Text>
+            <ScrollView style={styles.modalFormScroll}>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Overall Status (pending_end/active/ended)</Text>
+                <TextInput style={styles.input} value={leaveForm.status} onChangeText={(v) => setLeaveForm({ ...leaveForm, status: v })} />
+              </View>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Request Status (pending/approved/rejected)</Text>
+                <TextInput style={styles.input} value={leaveForm.end_request_status} onChangeText={(v) => setLeaveForm({ ...leaveForm, end_request_status: v })} />
+              </View>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Requested End Date</Text>
+                <TextInput style={styles.input} value={leaveForm.end_request_date} onChangeText={(v) => setLeaveForm({ ...leaveForm, end_request_date: v })} />
+              </View>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Reason</Text>
+                <TextInput style={[styles.input, { height: 80 }]} multiline value={leaveForm.end_request_reason} onChangeText={(v) => setLeaveForm({ ...leaveForm, end_request_reason: v })} />
+              </View>
+            </ScrollView>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.secondaryButton} onPress={() => setEditingLeave(null)}>
+                <Text style={styles.secondaryButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.primaryButton} onPress={saveLeave}>
+                <Text style={styles.primaryButtonText}>Save Changes</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -3263,5 +4172,30 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: "#fff",
     fontWeight: "800",
+  },
+  sectionHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  createBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#111827",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    gap: 4,
+  },
+  createBtnText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  itemActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
   },
 });

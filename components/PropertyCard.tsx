@@ -210,6 +210,14 @@ export default function PropertyCard({
             <Text style={{ fontWeight: "bold" }}>{property.area_sqft}</Text>{" "}
             sqft
           </Text>
+          <View style={styles.dot} />
+          <Text style={styles.featText}>
+            <Text style={{ fontWeight: "bold" }}>
+              {property.max_occupancy === 0
+                ? "No Limits"
+                : `Good for (${property.max_occupancy})`}
+            </Text>
+          </Text>
         </View>
       </View>
     </TouchableOpacity>
