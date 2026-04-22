@@ -2509,184 +2509,221 @@ export default function LandlordDashboard({ session, profile }: any) {
             </Text>
           </View>
         ) : (
-          displayedActiveOccupancies.map((occ: any) => (
-            <View
-              key={occ.id}
-              style={[
-                styles.propCard,
-                {
-                  backgroundColor: isDark ? colors.card : "white",
-                  shadowOpacity: isDark ? 0 : 0.08,
-                  elevation: isDark ? 0 : 3,
-                },
-              ]}
-            >
+          displayedActiveOccupancies.map((occ: any) => {
+            const occStartDate = occ.start_date ? new Date(occ.start_date) : null;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            if (occStartDate) occStartDate.setHours(0, 0, 0, 0);
+            const hasStarted = !occStartDate || today >= occStartDate;
+
+            return (
               <View
-                style={{
-                  height: 150,
-                  backgroundColor: isDark ? colors.surface : "#eee",
-                  position: "relative",
-                }}
-              >
-                <Image
-                  source={{
-                    uri:
-                      occ.property?.images?.[0] ||
-                      "https://via.placeholder.com/400",
-                  }}
-                  style={{ width: "100%", height: "100%" }}
-                  resizeMode="cover"
-                />
-                <View
-                  style={{
-                    position: "absolute",
-                    top: 12,
-                    right: 12,
+                key={occ.id}
+                style={[
+                  styles.propCard,
+                  {
                     backgroundColor: isDark ? colors.card : "white",
-                    paddingHorizontal: 8,
-                    paddingVertical: 4,
-                    borderRadius: 6,
-                    shadowColor: "#000",
-                    shadowOpacity: 0.1,
-                    shadowRadius: 4,
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      fontWeight: "bold",
-                      color:
-                        occ.status === "pending_end"
-                          ? occ.end_request_status === "pending"
-                            ? "#dc2626"
-                            : "#b45309"
-                          : "#059669",
-                    }}
-                  >
-                    {occ.status === "pending_end"
-                      ? occ.end_request_status === "pending"
-                        ? "LEAVE REQUEST"
-                        : "ENDING SOON"
-                      : "OCCUPIED"}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.propContent}>
-                <Text
-                  style={[
-                    styles.propTitle,
-                    { color: isDark ? colors.text : "#111" },
-                  ]}
-                >
-                  {occ.property?.title}
-                </Text>
+                    shadowOpacity: isDark ? 0 : 0.08,
+                    elevation: isDark ? 0 : 3,
+                  },
+                ]}
+              >
                 <View
                   style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 4,
-                    marginBottom: 12,
+                    height: 150,
+                    backgroundColor: isDark ? colors.surface : "#eee",
+                    position: "relative",
                   }}
                 >
-                  <Ionicons
-                    name="location-outline"
-                    size={12}
-                    color={isDark ? colors.textMuted : "#9ca3af"}
+                  <Image
+                    source={{
+                      uri:
+                        occ.property?.images?.[0] ||
+                        "https://via.placeholder.com/400",
+                    }}
+                    style={{ width: "100%", height: "100%" }}
+                    resizeMode="cover"
                   />
-                  <Text
+                  <View
                     style={{
-                      fontSize: 12,
-                      color: isDark ? colors.textMuted : "#9ca3af",
+                      position: "absolute",
+                      top: 12,
+                      right: 12,
+                      backgroundColor: isDark ? colors.card : "white",
+                      paddingHorizontal: 8,
+                      paddingVertical: 4,
+                      borderRadius: 6,
+                      shadowColor: "#000",
+                      shadowOpacity: 0.1,
+                      shadowRadius: 4,
                     }}
                   >
-                    {occ.property?.address || "No address"}
-                  </Text>
+                    <Text
+                      style={{
+                        fontSize: 10,
+                        fontWeight: "bold",
+                        color:
+                          occ.status === "pending_end"
+                            ? occ.end_request_status === "pending"
+                              ? "#dc2626"
+                              : "#b45309"
+                            : "#059669",
+                      }}
+                    >
+                      {occ.status === "pending_end"
+                        ? occ.end_request_status === "pending"
+                          ? "LEAVE REQUEST"
+                          : "ENDING SOON"
+                        : "OCCUPIED"}
+                    </Text>
+                  </View>
                 </View>
 
-                <View style={styles.occupantRow}>
+                <View style={styles.propContent}>
+                  <Text
+                    style={[
+                      styles.propTitle,
+                      { color: isDark ? colors.text : "#111" },
+                    ]}
+                  >
+                    {occ.property?.title}
+                  </Text>
                   <View
                     style={{
                       flexDirection: "row",
                       alignItems: "center",
-                      gap: 10,
+                      gap: 4,
+                      marginBottom: 12,
                     }}
                   >
-                    <View
+                    <Ionicons
+                      name="location-outline"
+                      size={12}
+                      color={isDark ? colors.textMuted : "#9ca3af"}
+                    />
+                    <Text
                       style={{
-                        width: 32,
-                        height: 32,
-                        borderRadius: 16,
-                        backgroundColor: "white",
-                        alignItems: "center",
-                        justifyContent: "center",
+                        fontSize: 12,
+                        color: isDark ? colors.textMuted : "#9ca3af",
                       }}
                     >
-                      <Ionicons name="person" size={16} color="#166534" />
-                    </View>
-                    <View>
-                      <Text
+                      {occ.property?.address || "No address"}
+                    </Text>
+                  </View>
+
+                  <View style={styles.occupantRow}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 10,
+                      }}
+                    >
+                      <View
                         style={{
-                          fontSize: 9,
-                          color: "#166534",
-                          fontWeight: "bold",
-                          opacity: 0.8,
+                          width: 32,
+                          height: 32,
+                          borderRadius: 16,
+                          backgroundColor: "white",
+                          alignItems: "center",
+                          justifyContent: "center",
                         }}
                       >
-                        TENANT
-                      </Text>
-                      <Text style={styles.occupantName}>
-                        {occ.tenant?.first_name} {occ.tenant?.last_name}
-                      </Text>
+                        <Ionicons name="person" size={16} color="#166534" />
+                      </View>
+                      <View>
+                        <Text
+                          style={{
+                            fontSize: 9,
+                            color: "#166534",
+                            fontWeight: "bold",
+                            opacity: 0.8,
+                          }}
+                        >
+                          TENANT
+                        </Text>
+                        <Text style={styles.occupantName}>
+                          {occ.tenant?.first_name} {occ.tenant?.last_name}
+                        </Text>
+                      </View>
                     </View>
                   </View>
-                </View>
 
-                {(occ.status === "active" || occ.status === "pending_end") &&
-                occ.end_request_date ? (
-                  <Text
-                    style={{
-                      marginTop: -2,
-                      marginBottom: 10,
-                      fontSize: 12,
-                      fontWeight: "600",
-                      color: "#b45309",
-                    }}
-                  >
-                    Scheduled end: {String(occ.end_request_date).slice(0, 10)}
-                  </Text>
-                ) : null}
-
-                <View style={styles.activeActionsRow}>
-                  <TouchableOpacity
-                    onPress={() => openPropertyDetailsModal(occ)}
-                    style={styles.btnDetails}
-                  >
-                    <Text style={styles.btnDetailsText}>Show Details</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => openEndContractModal(occ)}
-                    style={[
-                      styles.btnEnd,
-                      occ.end_request_status === "pending" && {
-                        backgroundColor: "#dc2626",
-                      },
-                    ]}
-                  >
-                    <Text style={styles.btnEndText}>
-                      {(occ.status === "active" ||
-                        occ.status === "pending_end") &&
-                      occ.end_request_status
-                        ? occ.end_request_status === "pending"
-                          ? "Review Request"
-                          : "End Contract"
-                        : "End Contract"}
+                  {(occ.status === "active" || occ.status === "pending_end") &&
+                  occ.end_request_date ? (
+                    <Text
+                      style={{
+                        marginTop: -2,
+                        marginBottom: 10,
+                        fontSize: 12,
+                        fontWeight: "600",
+                        color: "#b45309",
+                      }}
+                    >
+                      Scheduled end: {String(occ.end_request_date).slice(0, 10)}
                     </Text>
-                  </TouchableOpacity>
+                  ) : null}
+
+                  {hasStarted ? (
+                    <View style={styles.activeActionsRow}>
+                      <TouchableOpacity
+                        onPress={() => openPropertyDetailsModal(occ)}
+                        style={styles.btnDetails}
+                      >
+                        <Text style={styles.btnDetailsText}>Show Details</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => openEndContractModal(occ)}
+                        style={[
+                          styles.btnEnd,
+                          occ.end_request_status === "pending" && {
+                            backgroundColor: "#dc2626",
+                          },
+                        ]}
+                      >
+                        <Text style={styles.btnEndText}>
+                          {(occ.status === "active" ||
+                            occ.status === "pending_end") &&
+                          occ.end_request_status
+                            ? occ.end_request_status === "pending"
+                              ? "Review Request"
+                              : "End Contract"
+                            : "End Contract"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <View
+                      style={{
+                        backgroundColor: "#eff6ff",
+                        padding: 10,
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: "#dbeafe",
+                        alignItems: "center",
+                        marginTop: 4,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontWeight: "800",
+                          color: "#2563eb",
+                        }}
+                      >
+                        Start on{" "}
+                        {new Date(occ.start_date).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}
+                      </Text>
+                    </View>
+                  )}
                 </View>
               </View>
-            </View>
-          ))
+            );
+          })
         )}
       </View>
 

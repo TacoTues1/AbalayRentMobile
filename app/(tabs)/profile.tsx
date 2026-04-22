@@ -23,12 +23,12 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import GuestGuard from "../../components/auth/GuestGuard";
 import PrivacyView from "../../components/profile/PrivacyView";
 import TermsView from "../../components/profile/TermsView";
 import CalendarPicker from "../../components/ui/CalendarPicker";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
-import GuestGuard from "../../components/auth/GuestGuard";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || "";
 const BREVO_API_KEY = process.env.EXPO_PUBLIC_BREVO_API_KEY || "";
@@ -277,8 +277,6 @@ export default function Profile() {
   const [avatarUrl, setAvatarUrl] = useState("");
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [profileRole, setProfileRole] = useState("");
-
-  // --- BUG REPORT STATE ---
   const [bugReportName, setBugReportName] = useState("");
   const [bugReportDescription, setBugReportDescription] = useState("");
   const [bugReportAttachment, setBugReportAttachment] =
@@ -1112,7 +1110,7 @@ export default function Profile() {
                 { color: isDark ? colors.text : "#111" },
               ]}
             >
-              Profile
+              Settings
             </Text>
             <View style={styles.profileCard}>
               <View
@@ -1143,10 +1141,10 @@ export default function Profile() {
                   { color: isDark ? colors.text : "#111" },
                 ]}
               >
-                {session ? `${firstName} ${lastName}` : "Guest User"}
+                {firstName} {lastName}
               </Text>
               {/* Landlord Rating Stars */}
-              {session && profileRole === "landlord" && (
+              {profileRole === "landlord" && (
                 <View style={styles.ratingContainer}>
                   <View style={{ flexDirection: "row", gap: 2 }}>
                     {[1, 2, 3, 4, 5].map((star) => {
@@ -1187,221 +1185,196 @@ export default function Profile() {
                   </Text>
                 </View>
               )}
-              {session ? (
-                <TouchableOpacity
-                  style={styles.editProfileBtn}
-                  onPress={() => setCurrentView("personal")}
-                >
-                  <Text style={styles.editProfileText}>Edit Profile</Text>
-                  <Ionicons name="chevron-forward" size={12} color="white" />
-                </TouchableOpacity>
-              ) : (
-                <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-                  <TouchableOpacity
-                    style={[styles.authSmallBtn, { backgroundColor: '#111' }]}
-                    onPress={() => router.push("/login")}
-                  >
-                    <Text style={styles.authSmallBtnText}>Log In</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.authSmallBtn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#eee' }]}
-                    onPress={() => router.push("/login?tab=signup")}
-                  >
-                    <Text style={[styles.authSmallBtnText, { color: '#111' }]}>Join</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
+              <TouchableOpacity
+                style={styles.editProfileBtn}
+                onPress={() => setCurrentView("personal")}
+              >
+                <Text style={styles.editProfileText}>Edit Profile</Text>
+                <Ionicons name="chevron-forward" size={12} color="white" />
+              </TouchableOpacity>
             </View>
           </View>
 
           {/* Management Section */}
-          {session && (
-            <>
-              <Text
-                style={[
-                  styles.sectionHeader,
-                  { color: isDark ? colors.text : "#111" },
-                ]}
-              >
-                Management
-              </Text>
-              <View
-                style={[
-                  styles.menuSection,
-                  { backgroundColor: isDark ? colors.card : "white" },
-                ]}
-              >
+          <Text
+            style={[
+              styles.sectionHeader,
+              { color: isDark ? colors.text : "#111" },
+            ]}
+          >
+            Management
+          </Text>
+          <View
+            style={[
+              styles.menuSection,
+              { backgroundColor: isDark ? colors.card : "white" },
+            ]}
+          >
+            <MenuRow
+              icon="business-outline"
+              label="All Properties"
+              onPress={() => router.push("/(tabs)/allproperties")}
+            />
+            <MenuRow
+              icon="search-outline"
+              label="Search Landlords"
+              onPress={() => router.push("/(tabs)/landlords")}
+            />
+            {profileRole === "landlord" && (
+              <>
                 <MenuRow
-                  icon="business-outline"
-                  label="All Properties"
-                  onPress={() => router.push("/(tabs)/allproperties")}
+                  icon="home-outline"
+                  label="My Properties"
+                  onPress={() => router.push("/(tabs)/landlordproperties")}
                 />
                 <MenuRow
-                  icon="search-outline"
-                  label="Search Landlords"
-                  onPress={() => router.push("/(tabs)/landlords")}
+                  icon="calendar-outline"
+                  label="Schedule"
+                  onPress={() => router.push("/(tabs)/schedule")}
                 />
-                {profileRole === "landlord" && (
-                  <>
-                    <MenuRow
-                      icon="home-outline"
-                      label="My Properties"
-                      onPress={() => router.push("/(tabs)/landlordproperties")}
-                    />
-                    <MenuRow
-                      icon="calendar-outline"
-                      label="Schedule"
-                      onPress={() => router.push("/(tabs)/schedule")}
-                    />
-                  </>
-                )}
-                <MenuRow
-                  icon="people-outline"
-                  label="Bookings"
-                  onPress={() => router.push("/(tabs)/bookings")}
-                />
-                <MenuRow
-                  icon="hammer-outline"
-                  label="Maintenance"
-                  onPress={() => router.push("/(tabs)/maintenance")}
-                />
-                <MenuRow
-                  icon="card-outline"
-                  label="Payments"
-                  onPress={() => router.push("/(tabs)/payments")}
-                />
-              </View>
-            </>
-          )}
+              </>
+            )}
+            <MenuRow
+              icon="people-outline"
+              label="Bookings"
+              onPress={() => router.push("/(tabs)/bookings")}
+            />
+            <MenuRow
+              icon="hammer-outline"
+              label="Maintenance"
+              onPress={() => router.push("/(tabs)/maintenance")}
+            />
+            <MenuRow
+              icon="card-outline"
+              label="Payments"
+              onPress={() => router.push("/(tabs)/payments")}
+            />
+          </View>
 
           {/* General Section */}
-          {session && (
-            <>
-              <Text
-                style={[
-                  styles.sectionHeader,
-                  { color: isDark ? colors.text : "#111" },
-                ]}
-              >
-                Account
-              </Text>
+          <Text
+            style={[
+              styles.sectionHeader,
+              { color: isDark ? colors.text : "#111" },
+            ]}
+          >
+            Account
+          </Text>
+          <View
+            style={[
+              styles.menuSection,
+              { backgroundColor: isDark ? colors.card : "white" },
+            ]}
+          >
+            <MenuRow
+              icon="person-outline"
+              label="Personal Details"
+              onPress={() => setCurrentView("personal")}
+            />
+            <MenuRow
+              icon="lock-closed-outline"
+              label="Password"
+              onPress={() => setCurrentView("Password")}
+            />
+            <MenuRow
+              icon="notifications-outline"
+              label="Notifications"
+              onPress={() => setCurrentView("notifications")}
+            />
+            {/* Dark Mode Toggle */}
+            <View
+              style={[
+                styles.menuRow,
+                {
+                  borderBottomColor: isDark ? colors.border : "#f3f4f6",
+                  flexDirection: "column",
+                  alignItems: "stretch",
+                  gap: 10,
+                },
+              ]}
+            >
               <View
-                style={[
-                  styles.menuSection,
-                  { backgroundColor: isDark ? colors.card : "white" },
-                ]}
+                style={{ flexDirection: "row", alignItems: "center", gap: 12 }}
               >
-                <MenuRow
-                  icon="person-outline"
-                  label="Personal Details"
-                  onPress={() => setCurrentView("personal")}
-                />
-                <MenuRow
-                  icon="lock-closed-outline"
-                  label="Password"
-                  onPress={() => setCurrentView("Password")}
-                />
-                <MenuRow
-                  icon="notifications-outline"
-                  label="Notifications"
-                  onPress={() => setCurrentView("notifications")}
-                />
-                {/* Dark Mode Toggle */}
                 <View
                   style={[
-                    styles.menuRow,
-                    {
-                      borderBottomColor: isDark ? colors.border : "#f3f4f6",
-                      flexDirection: "column",
-                      alignItems: "stretch",
-                      gap: 10,
-                    },
+                    styles.menuIconBox,
+                    { backgroundColor: isDark ? "#2b2b2b" : "#f3f4f6" },
                   ]}
                 >
-                  <View
-                    style={{ flexDirection: "row", alignItems: "center", gap: 12 }}
-                  >
-                    <View
-                      style={[
-                        styles.menuIconBox,
-                        { backgroundColor: isDark ? "#2b2b2b" : "#f3f4f6" },
-                      ]}
-                    >
-                      <Ionicons
-                        name="moon-outline"
-                        size={20}
-                        color={isDark ? "#a78bfa" : "#333"}
-                      />
-                    </View>
-                    <Text
-                      style={[
-                        styles.menuLabel,
-                        { color: isDark ? colors.text : "#333" },
-                      ]}
-                    >
-                      Dark Mode
-                    </Text>
-                  </View>
-                  <View
+                  <Ionicons
+                    name="moon-outline"
+                    size={20}
+                    color={isDark ? "#a78bfa" : "#333"}
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.menuLabel,
+                    { color: isDark ? colors.text : "#333" },
+                  ]}
+                >
+                  Dark Mode
+                </Text>
+              </View>
+              <View
+                style={{
+                  flexDirection: "row",
+                  backgroundColor: isDark ? "#2b2b2b" : "#f3f4f6",
+                  borderRadius: 10,
+                  padding: 3,
+                }}
+              >
+                {(["light", "auto", "dark"] as const).map((mode) => (
+                  <TouchableOpacity
+                    key={mode}
+                    onPress={() => setThemeMode(mode)}
                     style={{
-                      flexDirection: "row",
-                      backgroundColor: isDark ? "#2b2b2b" : "#f3f4f6",
-                      borderRadius: 10,
-                      padding: 3,
+                      flex: 1,
+                      paddingVertical: 7,
+                      borderRadius: 8,
+                      alignItems: "center",
+                      backgroundColor:
+                        themeMode === mode
+                          ? isDark
+                            ? "#555"
+                            : "white"
+                          : "transparent",
+                      ...(themeMode === mode
+                        ? {
+                            shadowColor: "#000",
+                            shadowOpacity: 0.1,
+                            shadowRadius: 2,
+                            elevation: 2,
+                          }
+                        : {}),
                     }}
                   >
-                    {(["light", "auto", "dark"] as const).map((mode) => (
-                      <TouchableOpacity
-                        key={mode}
-                        onPress={() => setThemeMode(mode)}
-                        style={{
-                          flex: 1,
-                          paddingVertical: 7,
-                          borderRadius: 8,
-                          alignItems: "center",
-                          backgroundColor:
-                            themeMode === mode
-                              ? isDark
-                                ? "#555"
-                                : "white"
-                              : "transparent",
-                          ...(themeMode === mode
-                            ? {
-                                shadowColor: "#000",
-                                shadowOpacity: 0.1,
-                                shadowRadius: 2,
-                                elevation: 2,
-                              }
-                            : {}),
-                        }}
-                      >
-                        <Text
-                          style={{
-                            fontSize: 12,
-                            fontWeight: themeMode === mode ? "700" : "500",
-                            color:
-                              themeMode === mode
-                                ? isDark
-                                  ? "#fff"
-                                  : "#111"
-                                : isDark
-                                  ? "#888"
-                                  : "#666",
-                          }}
-                        >
-                          {mode === "light"
-                            ? "Off"
-                            : mode === "dark"
-                              ? "On"
-                              : "Auto"}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        fontWeight: themeMode === mode ? "700" : "500",
+                        color:
+                          themeMode === mode
+                            ? isDark
+                              ? "#fff"
+                              : "#111"
+                            : isDark
+                              ? "#888"
+                              : "#666",
+                      }}
+                    >
+                      {mode === "light"
+                        ? "Off"
+                        : mode === "dark"
+                          ? "On"
+                          : "Auto"}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
-            </>
-          )}
+            </View>
+          </View>
 
           {/* Legal Section */}
           <Text
@@ -3378,18 +3351,5 @@ const styles = StyleSheet.create({
   emergencySourceText: {
     fontSize: 11,
     fontWeight: "600",
-  },
-  authSmallBtn: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: 90,
-  },
-  authSmallBtnText: {
-    color: "white",
-    fontSize: 14,
-    fontWeight: "700",
   },
 });

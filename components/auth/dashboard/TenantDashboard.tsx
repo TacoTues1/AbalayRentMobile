@@ -313,6 +313,15 @@ export default function TenantDashboard({ session, profile }: any) {
     number | null
   >(null);
 
+  const hasOccupancyStarted = (() => {
+    if (!occupancy?.start_date) return true;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const startDate = new Date(occupancy.start_date);
+    startDate.setHours(0, 0, 0, 0);
+    return startDate <= today;
+  })();
+
   // Reviews & End Request
   const [reviewModalVisible, setReviewModalVisible] = useState(false);
   const [reviewTarget, setReviewTarget] = useState<any>(null);
@@ -2501,6 +2510,32 @@ export default function TenantDashboard({ session, profile }: any) {
     setSubmittingEndRequest(false);
   };
 
+  const cancelEndOccupancy = async () => {
+    if (!occupancy) return;
+    setSubmittingEndRequest(true);
+    try {
+      const { error } = await supabase
+        .from("tenant_occupancies")
+        .update({
+          status: "active",
+          end_requested_at: null,
+          end_request_status: null,
+          end_request_date: null,
+          end_request_reason: null,
+        })
+        .eq("id", occupancy.id);
+
+      if (error) throw error;
+
+      Alert.alert("Success", "Move-out request cancelled.");
+      loadOccupancyData();
+    } catch (err: any) {
+      console.error("cancelEndOccupancy error:", err);
+      Alert.alert("Error", err.message || "Failed to cancel request.");
+    }
+    setSubmittingEndRequest(false);
+  };
+
   const toggleFavorite = async (id: string) => {
     if (!session) return;
     if (favorites.includes(id)) {
@@ -3520,78 +3555,170 @@ export default function TenantDashboard({ session, profile }: any) {
                   </View>
                 </View> */}
 
-                  <View style={styles.gridActions}>
-                    <TouchableOpacity
-                      style={[
-                        styles.gridBtn,
-                        {
-                          backgroundColor: isDark ? colors.surface : "#f3f4f6",
-                        },
-                      ]}
-                      onPress={() =>
-                        router.push(
-                          `/properties/${occupancy.property?.id}` as any,
-                        )
-                      }
+                  {!hasOccupancyStarted ? (
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                        backgroundColor: isDark
+                          ? "rgba(59, 130, 246, 0.15)"
+                          : "#eff6ff",
+                        paddingHorizontal: 16,
+                        paddingVertical: 12,
+                        borderRadius: 14,
+                        borderWidth: 1,
+                        borderColor: isDark
+                          ? "rgba(59, 130, 246, 0.3)"
+                          : "#dbeafe",
+                        marginTop: 10,
+                        width: "100%",
+                        justifyContent: "center",
+                      }}
                     >
+                      <Ionicons
+                        name="calendar"
+                        size={18}
+                        color={isDark ? "#60a5fa" : "#2563eb"}
+                      />
                       <Text
-                        style={[
-                          styles.btnTextGray,
-                          { color: isDark ? colors.text : "#374151" },
-                        ]}
+                        style={{
+                          fontSize: 14,
+                          fontWeight: "800",
+                          color: isDark ? "#60a5fa" : "#2563eb",
+                        }}
                       >
-                        View Details
+                        Starts on{" "}
+                        {new Date(occupancy.start_date).toLocaleDateString()}
                       </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[
-                        styles.gridBtn,
-                        occupancy.contract_url
-                          ? styles.btnBlack
-                          : {
+                    </View>
+                  ) : (
+                    <>
+                      <View style={styles.gridActions}>
+                        <TouchableOpacity
+                          style={[
+                            styles.gridBtn,
+                            {
                               backgroundColor: isDark
                                 ? colors.surface
                                 : "#f3f4f6",
                             },
-                      ]}
-                      disabled={!occupancy.contract_url}
-                      onPress={() =>
-                        occupancy.contract_url &&
-                        Linking.openURL(occupancy.contract_url)
-                      }
-                    >
-                      <Ionicons
-                        name="document-text-outline"
-                        size={16}
-                        color={
-                          occupancy.contract_url
-                            ? "white"
-                            : isDark
-                              ? colors.textMuted
-                              : "#999"
-                        }
-                        style={{ marginRight: 4 }}
-                      />
-                      <Text
-                        style={
-                          occupancy.contract_url
-                            ? styles.btnTextWhite
-                            : [
-                                styles.btnTextDisabled,
-                                {
-                                  color: isDark ? colors.textMuted : "#9ca3af",
+                          ]}
+                          onPress={() =>
+                            router.push(
+                              `/properties/${occupancy.property?.id}` as any,
+                            )
+                          }
+                        >
+                          <Text
+                            style={[
+                              styles.btnTextGray,
+                              { color: isDark ? colors.text : "#374151" },
+                            ]}
+                          >
+                            View Details
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[
+                            styles.gridBtn,
+                            occupancy.contract_url
+                              ? styles.btnBlack
+                              : {
+                                  backgroundColor: isDark
+                                    ? colors.surface
+                                    : "#f3f4f6",
                                 },
-                              ]
-                        }
-                      >
-                        {occupancy.contract_url
-                          ? "View Contract"
-                          : "Contract Pending"}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                  {!isFamilyMember && (
-                    <View style={[styles.gridActions, { marginTop: 8 }]}></View>
+                          ]}
+                          disabled={!occupancy.contract_url}
+                          onPress={() =>
+                            occupancy.contract_url &&
+                            Linking.openURL(occupancy.contract_url)
+                          }
+                        >
+                          <Ionicons
+                            name="document-text-outline"
+                            size={16}
+                            color={
+                              occupancy.contract_url
+                                ? "white"
+                                : isDark
+                                  ? colors.textMuted
+                                  : "#999"
+                            }
+                            style={{ marginRight: 4 }}
+                          />
+                          <Text
+                            style={
+                              occupancy.contract_url
+                                ? styles.btnTextWhite
+                                : [
+                                    styles.btnTextDisabled,
+                                    {
+                                      color: isDark
+                                        ? colors.textMuted
+                                        : "#9ca3af",
+                                    },
+                                  ]
+                            }
+                          >
+                            {occupancy.contract_url
+                              ? "View Contract"
+                              : "Contract Pending"}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {!isFamilyMember && (
+                        <View style={[styles.gridActions, { marginTop: 8 }]}>
+                          {occupancy.end_request_status === "pending" ? (
+                            <TouchableOpacity
+                              style={[
+                                styles.gridBtn,
+                                styles.btnOutlineRed,
+                                { width: "100%" },
+                              ]}
+                              onPress={() => {
+                                Alert.alert(
+                                  "Cancel Request",
+                                  "Are you sure you want to cancel your move-out request?",
+                                  [
+                                    { text: "No", style: "cancel" },
+                                    {
+                                      text: "Yes, Cancel",
+                                      style: "destructive",
+                                      onPress: cancelEndOccupancy,
+                                    },
+                                  ],
+                                );
+                              }}
+                            >
+                              <Text style={styles.btnTextRed}>
+                                Cancel Move-Out
+                              </Text>
+                            </TouchableOpacity>
+                          ) : (
+                            <TouchableOpacity
+                              style={[
+                                styles.gridBtn,
+                                styles.btnOutline,
+                                { width: "100%" },
+                              ]}
+                              onPress={() => setEndRequestModalVisible(true)}
+                            >
+                              <Text
+                                style={[
+                                  styles.btnTextBlack,
+                                  { color: isDark ? colors.text : "#111" },
+                                ]}
+                              >
+                                Request to Leave
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      )}
+                    </>
                   )}
                   {occupancy.property?.terms_conditions ? (
                     <TouchableOpacity
