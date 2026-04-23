@@ -766,44 +766,6 @@ export default function AllProperties() {
             style={styles.gradient}
           />
 
-          {/* Badges */}
-          <View style={styles.badgeContainer}>
-            {topRatedId === item.id && (
-              <View
-                style={[
-                  styles.badge,
-                  {
-                    backgroundColor: isDark
-                      ? "rgba(217, 119, 6, 0.2)"
-                      : "#fffbeb",
-                    borderColor: isDark ? "rgba(217, 119, 6, 0.5)" : "#fde68a",
-                  },
-                ]}
-              >
-                <Text style={[styles.badgeText, { color: "#d97706" }]}>
-                  Top Rated
-                </Text>
-              </View>
-            )}
-            {mostFavId === item.id && (
-              <View
-                style={[
-                  styles.badge,
-                  {
-                    backgroundColor: isDark
-                      ? "rgba(225, 29, 72, 0.2)"
-                      : "#fff1f2",
-                    borderColor: isDark ? "rgba(225, 29, 72, 0.5)" : "#fecdd3",
-                  },
-                ]}
-              >
-                <Text style={[styles.badgeText, { color: "#e11d48" }]}>
-                  Most Favorite
-                </Text>
-              </View>
-            )}
-          </View>
-
           {/* Actions */}
           <View style={styles.actionsContainer}>
             <TouchableOpacity
@@ -882,6 +844,48 @@ export default function AllProperties() {
                 "Location not set"}
             </Text>
           </View>
+          {(topRatedId === item.id || mostFavId === item.id) && (
+            <View style={styles.metaBadgeRow}>
+              {topRatedId === item.id && (
+                <View
+                  style={[
+                    styles.metaBadge,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(217, 119, 6, 0.2)"
+                        : "#fffbeb",
+                      borderColor: isDark
+                        ? "rgba(217, 119, 6, 0.5)"
+                        : "#fde68a",
+                    },
+                  ]}
+                >
+                  <Text style={[styles.badgeText, { color: "#d97706" }]}>
+                    Top Rated
+                  </Text>
+                </View>
+              )}
+              {mostFavId === item.id && (
+                <View
+                  style={[
+                    styles.metaBadge,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(225, 29, 72, 0.2)"
+                        : "#fff1f2",
+                      borderColor: isDark
+                        ? "rgba(225, 29, 72, 0.5)"
+                        : "#fecdd3",
+                    },
+                  ]}
+                >
+                  <Text style={[styles.badgeText, { color: "#e11d48" }]}>
+                    Most Favorite
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
           {/* Rating */}
           {stats.review_count > 0 && (
             <View style={[styles.ratingBox, { marginTop: 6 }]}>
@@ -1696,7 +1700,13 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   listFooterText: { fontSize: 12, color: "#9ca3af" },
-  imageContainer: { height: 140, position: "relative" },
+  imageContainer: {
+    height: 140,
+    position: "relative",
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
+    overflow: "hidden",
+  },
   cardImage: { width: "100%", height: "100%" },
   gradient: { position: "absolute", bottom: 0, left: 0, right: 0, height: 80 },
 
@@ -1764,6 +1774,21 @@ const styles = StyleSheet.create({
   cardContent: { padding: 10 },
   cardTitle: { fontSize: 13, fontWeight: "700", color: "#111" },
   cardAddress: { fontSize: 10, color: "#9ca3af" },
+  metaBadgeRow: {
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 4,
+  },
+  metaBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 999,
+    alignItems: "center",
+    borderWidth: 1,
+    alignSelf: "flex-start",
+  },
   ratingBox: {
     flexDirection: "row",
     alignItems: "center",

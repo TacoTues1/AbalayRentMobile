@@ -72,6 +72,18 @@ export default function LoginForm({
     if (data?.session) {
       try {
         const userId = data.session.user.id;
+
+        // Record sign-in event for history tracking
+        try {
+          await supabase.from("login_records").insert({
+            user_id: userId,
+            method: "PASSWORD",
+            created_at: new Date().toISOString(),
+          });
+        } catch (recordErr) {
+          console.warn("Sign-in recording skipped:", recordErr);
+        }
+
         const { data: existingProfile } = await supabase
           .from("profiles")
           .select("id")

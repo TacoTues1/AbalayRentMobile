@@ -192,7 +192,8 @@ export default function TenantDashboard({ session, profile }: any) {
   } | null>(null);
   const [nearbyProperties, setNearbyProperties] = useState<any[]>([]);
   const [cityProperties, setCityProperties] = useState<any[]>([]);
-  const [locationPermission, setLocationPermission] = useState<string>("prompt");
+  const [locationPermission, setLocationPermission] =
+    useState<string>("prompt");
 
   // Auto-sliding image index (matches web)
   const [currentImageIndex, setCurrentImageIndex] = useState<{
@@ -223,6 +224,22 @@ export default function TenantDashboard({ session, profile }: any) {
     useState(false);
   const [noOccupancySelectedAmenities, setNoOccupancySelectedAmenities] =
     useState<string[]>([]);
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const searchRef = useRef<View>(null);
+
+  useEffect(() => {
+    if (noOccupancySearch.trim()) {
+      const filtered = properties.filter(
+        (p: any) =>
+          p.title?.toLowerCase().includes(noOccupancySearch.toLowerCase()) ||
+          p.city?.toLowerCase().includes(noOccupancySearch.toLowerCase()),
+      );
+      setSearchResults(filtered);
+    } else {
+      setSearchResults([]);
+    }
+  }, [noOccupancySearch, properties]);
 
   const browseAvailableAmenities = [
     "Kitchen",
@@ -369,8 +386,7 @@ export default function TenantDashboard({ session, profile }: any) {
             property.images.length > 1
           ) {
             const currentIdx = prev[property.id] || 0;
-            newIndex[property.id] =
-              (currentIdx + 1) % property.images.length;
+            newIndex[property.id] = (currentIdx + 1) % property.images.length;
           }
         });
         return newIndex;
@@ -530,9 +546,7 @@ export default function TenantDashboard({ session, profile }: any) {
               const cityLower = city.toLowerCase();
               const inCity = availableProps.filter((p: any) => {
                 const pCity = (p.city || "").toLowerCase();
-                return (
-                  pCity.includes(cityLower) || cityLower.includes(pCity)
-                );
+                return pCity.includes(cityLower) || cityLower.includes(pCity);
               });
               setCityProperties(inCity);
             } else {
@@ -547,9 +561,7 @@ export default function TenantDashboard({ session, profile }: any) {
           // Nearby Properties (within 1km)
           const nearby = availableProps
             .map((property: any) => {
-              const propCoords = extractCoordinates(
-                property.location_link,
-              );
+              const propCoords = extractCoordinates(property.location_link);
               if (!propCoords) return null;
               const distanceKm = getDistanceFromLatLonInKm(
                 coords.lat,
@@ -561,9 +573,7 @@ export default function TenantDashboard({ session, profile }: any) {
               return { property, distanceKm };
             })
             .filter(Boolean)
-            .sort(
-              (a: any, b: any) => a.distanceKm - b.distanceKm,
-            )
+            .sort((a: any, b: any) => a.distanceKm - b.distanceKm)
             .map(({ property }: any) => property);
           setNearbyProperties(nearby);
         } else {
@@ -1280,7 +1290,6 @@ export default function TenantDashboard({ session, profile }: any) {
         )
         .eq("tenant_id", session.user.id)
         .in("status", ["active", "pending_end", "approved", "signed"])
-        .lte("start_date", new Date().toISOString())
         .order("start_date", { ascending: false });
 
       if (error) {
@@ -2397,19 +2406,22 @@ export default function TenantDashboard({ session, profile }: any) {
         "Only the primary tenant can end the contract.",
       );
     if (!occupancy || !endRequestDate || !endRequestReason)
-      return Alert.alert("Error", "Please fill in all fields (date and reason).");
+      return Alert.alert(
+        "Error",
+        "Please fill in all fields (date and reason).",
+      );
 
     Alert.alert(
       "Confirm Move-Out Request",
       `Are you sure you want to request to leave on ${new Date(endRequestDate).toLocaleDateString()}? Once submitted, this request cannot be undone or changed without landlord approval.`,
       [
         { text: "Cancel", style: "cancel" },
-        { 
-          text: "Confirm", 
-          style: "destructive", 
-          onPress: () => requestEndOccupancy() 
-        }
-      ]
+        {
+          text: "Confirm",
+          style: "destructive",
+          onPress: () => requestEndOccupancy(),
+        },
+      ],
     );
   };
 
@@ -2791,9 +2803,8 @@ export default function TenantDashboard({ session, profile }: any) {
           <Image
             source={{
               uri:
-                item.images?.[
-                  currentImageIndex[item.id] || 0
-                ] || "https://via.placeholder.com/400",
+                item.images?.[currentImageIndex[item.id] || 0] ||
+                "https://via.placeholder.com/400",
             }}
             style={styles.cardImage}
           />
@@ -2832,50 +2843,6 @@ export default function TenantDashboard({ session, profile }: any) {
                   ]}
                 >
                   {stats.favorite_count}
-                </Text>
-              </View>
-            )}
-            {topRatedId === item.id && (
-              <View
-                style={[
-                  styles.badge,
-                  {
-                    backgroundColor: "#fffbeb",
-                    borderWidth: 1,
-                    borderColor: "#fde68a",
-                  },
-                ]}
-              >
-                <Ionicons name="trophy" size={10} color="#d97706" />
-                <Text
-                  style={[
-                    styles.badgeText,
-                    { color: "#d97706", marginLeft: 3 },
-                  ]}
-                >
-                  Top Rated
-                </Text>
-              </View>
-            )}
-            {mostFavId === item.id && (
-              <View
-                style={[
-                  styles.badge,
-                  {
-                    backgroundColor: "#fff1f2",
-                    borderWidth: 1,
-                    borderColor: "#fecdd3",
-                  },
-                ]}
-              >
-                <Ionicons name="heart" size={10} color="#e11d48" />
-                <Text
-                  style={[
-                    styles.badgeText,
-                    { color: "#e11d48", marginLeft: 3 },
-                  ]}
-                >
-                  Most Favorite
                 </Text>
               </View>
             )}
@@ -2929,22 +2896,20 @@ export default function TenantDashboard({ session, profile }: any) {
                 gap: 4,
               }}
             >
-              {item.images
-                .slice(0, 5)
-                .map((_: any, idx: number) => (
-                  <View
-                    key={idx}
-                    style={{
-                      width: 5,
-                      height: 5,
-                      borderRadius: 3,
-                      backgroundColor:
-                        (currentImageIndex[item.id] || 0) === idx
-                          ? "white"
-                          : "rgba(255,255,255,0.4)",
-                    }}
-                  />
-                ))}
+              {item.images.slice(0, 5).map((_: any, idx: number) => (
+                <View
+                  key={idx}
+                  style={{
+                    width: 5,
+                    height: 5,
+                    borderRadius: 3,
+                    backgroundColor:
+                      (currentImageIndex[item.id] || 0) === idx
+                        ? "white"
+                        : "rgba(255,255,255,0.4)",
+                  }}
+                />
+              ))}
               {item.images.length > 5 && (
                 <View
                   style={{
@@ -2975,6 +2940,42 @@ export default function TenantDashboard({ session, profile }: any) {
             {[item.city, item.state_province].filter(Boolean).join(", ") ||
               "Location not set"}
           </Text>
+          {(topRatedId === item.id || mostFavId === item.id) && (
+            <View style={styles.cardBadgeRow}>
+              {topRatedId === item.id && (
+                <View
+                  style={[
+                    styles.cardMetaBadge,
+                    {
+                      backgroundColor: "#fffbeb",
+                      borderWidth: 1,
+                      borderColor: "#fde68a",
+                    },
+                  ]}
+                >
+                  <Text style={[styles.badgeText, { color: "#d97706" }]}>
+                    Top Rated
+                  </Text>
+                </View>
+              )}
+              {mostFavId === item.id && (
+                <View
+                  style={[
+                    styles.cardMetaBadge,
+                    {
+                      backgroundColor: "#fff1f2",
+                      borderWidth: 1,
+                      borderColor: "#fecdd3",
+                    },
+                  ]}
+                >
+                  <Text style={[styles.badgeText, { color: "#e11d48" }]}>
+                    Most Favorite
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
           <View
             style={[
               styles.featureRow,
@@ -3096,14 +3097,6 @@ export default function TenantDashboard({ session, profile }: any) {
   // --- COMPUTED: Filtered properties for no-occupancy discovery sections ---
   const filteredProperties = properties
     .filter((p: any) => {
-      if (noOccupancySearch) {
-        const q = noOccupancySearch.toLowerCase();
-        if (
-          !p.title?.toLowerCase().includes(q) &&
-          !p.city?.toLowerCase().includes(q)
-        )
-          return false;
-      }
       if (noOccupancyCityFilter && p.city !== noOccupancyCityFilter)
         return false;
       if (noOccupancyBedrooms !== null) {
@@ -3368,7 +3361,7 @@ export default function TenantDashboard({ session, profile }: any) {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {occupancy ? (
+        {occupancy && hasOccupancyStarted ? (
           <View style={styles.dashboardContent}>
             {/* Header */}
             <View style={styles.headerRow}>
@@ -3395,15 +3388,7 @@ export default function TenantDashboard({ session, profile }: any) {
                       { color: isDark ? colors.text : "#111" },
                     ]}
                   >
-                    Your Active Property
-                  </Text>
-                  <Text
-                    style={[
-                      styles.headerSubtitle,
-                      { color: isDark ? colors.textSecondary : "#666" },
-                    ]}
-                  >
-                    Manage your stay and payments.
+                  Active Property
                   </Text>
                 </View>
               )}
@@ -3588,7 +3573,7 @@ export default function TenantDashboard({ session, profile }: any) {
                           color: isDark ? "#60a5fa" : "#2563eb",
                         }}
                       >
-                        Starts on{" "}
+                        Notification: Your occupancy will start on{" "}
                         {new Date(occupancy.start_date).toLocaleDateString()}
                       </Text>
                     </View>
@@ -3619,54 +3604,27 @@ export default function TenantDashboard({ session, profile }: any) {
                             View Details
                           </Text>
                         </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[
-                            styles.gridBtn,
-                            occupancy.contract_url
-                              ? styles.btnBlack
-                              : {
-                                  backgroundColor: isDark
-                                    ? colors.surface
-                                    : "#f3f4f6",
-                                },
-                          ]}
-                          disabled={!occupancy.contract_url}
-                          onPress={() =>
-                            occupancy.contract_url &&
-                            Linking.openURL(occupancy.contract_url)
-                          }
-                        >
-                          <Ionicons
-                            name="document-text-outline"
-                            size={16}
-                            color={
-                              occupancy.contract_url
-                                ? "white"
-                                : isDark
-                                  ? colors.textMuted
-                                  : "#999"
-                            }
-                            style={{ marginRight: 4 }}
-                          />
-                          <Text
-                            style={
-                              occupancy.contract_url
-                                ? styles.btnTextWhite
-                                : [
-                                    styles.btnTextDisabled,
-                                    {
-                                      color: isDark
-                                        ? colors.textMuted
-                                        : "#9ca3af",
-                                    },
-                                  ]
+                        {occupancy.contract_url ? (
+                          <TouchableOpacity
+                            style={[
+                              styles.gridBtn,
+                              styles.btnBlack,
+                            ]}
+                            onPress={() =>
+                              Linking.openURL(occupancy.contract_url)
                             }
                           >
-                            {occupancy.contract_url
-                              ? "View Contract"
-                              : "Contract Pending"}
-                          </Text>
-                        </TouchableOpacity>
+                            <Ionicons
+                              name="document-text-outline"
+                              size={16}
+                              color="white"
+                              style={{ marginRight: 4 }}
+                            />
+                            <Text style={styles.btnTextWhite}>
+                              View Contract
+                            </Text>
+                          </TouchableOpacity>
+                        ) : null}
                       </View>
 
                       {!isFamilyMember && (
@@ -3756,7 +3714,7 @@ export default function TenantDashboard({ session, profile }: any) {
                           { color: isDark ? colors.text : "#111" },
                         ]}
                       >
-                        View Property Terms
+                        Terms
                       </Text>
                     </TouchableOpacity>
                   ) : null}
@@ -3866,7 +3824,7 @@ export default function TenantDashboard({ session, profile }: any) {
                       </Text>
                     </View>
                     <View style={styles.rowBetween}>
-                      <Text style={styles.textLabel}>Used</Text>
+                      <Text style={styles.textLabel}>Used for Maintenance</Text>
                       <Text style={styles.textValueGray}>
                         ₱
                         {Number(
@@ -4559,7 +4517,7 @@ export default function TenantDashboard({ session, profile }: any) {
                   <TouchableOpacity
                     onPress={() => router.push("/payments" as any)}
                   >
-                    <Text style={styles.seeAllText}>See All</Text>
+                    <Text style={styles.seeAllText}>See All Payments</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -4710,7 +4668,7 @@ export default function TenantDashboard({ session, profile }: any) {
                   </View>
                 )}
                 <Text style={styles.noteText}>
-                  Note: Landlord is not liable for late utility payments.
+                  Note: Please ensure all electricity, water and wifi bills are paid before the due date. The landlord is not liable for late payments.
                 </Text>
               </View>
             )}
@@ -4875,7 +4833,7 @@ export default function TenantDashboard({ session, profile }: any) {
                         { color: isDark ? colors.textMuted : "#9ca3af" },
                       ]}
                     >
-                      UTILITY DUE DATES
+                      Utility Next Due Date
                     </Text>
 
                     <View style={{ marginTop: 8, gap: 8 }}>
@@ -4976,7 +4934,7 @@ export default function TenantDashboard({ session, profile }: any) {
                       },
                     ]}
                   >
-                    Rent Payment History ({new Date().getFullYear()})
+                    Track your payments ({new Date().getFullYear()})
                   </Text>
                   <View style={styles.historyGrid}>
                     {(() => {
@@ -5084,7 +5042,7 @@ export default function TenantDashboard({ session, profile }: any) {
         ) : (
           // --- DISCOVERY VIEW (Section-based carousels - matches Web) ---
           <View>
-            {/* <View
+            <View
               style={{
                 flexDirection: "row",
                 paddingHorizontal: 16,
@@ -5093,8 +5051,8 @@ export default function TenantDashboard({ session, profile }: any) {
                 gap: 10,
                 alignItems: "center",
               }}
-            > */}
-              {/* <View
+            >
+              <View
                 style={[
                   styles.browseSearchBar,
                   {
@@ -5105,13 +5063,13 @@ export default function TenantDashboard({ session, profile }: any) {
                   },
                   { backgroundColor: isDark ? colors.card : "#f3f4f6" },
                 ]}
-              > */}
-                {/* <Ionicons
+              >
+                <Ionicons
                   name="search"
                   size={18}
                   color={isDark ? colors.textMuted : "#9ca3af"}
-                /> */}
-                {/* <TextInput
+                />
+                <TextInput
                   placeholder="Search by city or title..."
                   placeholderTextColor={isDark ? colors.textMuted : "#c4c4c4"}
                   style={[
@@ -5119,147 +5077,238 @@ export default function TenantDashboard({ session, profile }: any) {
                     { color: isDark ? colors.text : "#111" },
                   ]}
                   value={noOccupancySearch}
-                  onChangeText={setNoOccupancySearch}
-                /> */}
-                {/* {noOccupancySearch.length > 0 && (
-                  <TouchableOpacity onPress={() => setNoOccupancySearch("")}>
+                  onChangeText={(text) => {
+                    setNoOccupancySearch(text);
+                    setShowSearchDropdown(true);
+                  }}
+                  onFocus={() => setShowSearchDropdown(true)}
+                />
+                {noOccupancySearch.length > 0 && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setNoOccupancySearch("");
+                      setShowSearchDropdown(false);
+                    }}
+                  >
                     <Ionicons
                       name="close-circle"
                       size={18}
                       color={isDark ? colors.textMuted : "#ccc"}
                     />
                   </TouchableOpacity>
-                )} */}
-              {/* </View> */}
-              {/* <TouchableOpacity
-                onPress={() => setShowBrowseFilterModal(true)}
+                )}
+              </View>
+
+              {/* Search Dropdown */}
+              {showSearchDropdown && noOccupancySearch.trim() && (
+                <View
+                  style={[
+                    styles.searchDropdown,
+                    { backgroundColor: isDark ? colors.card : "white" },
+                  ]}
+                >
+                  <ScrollView
+                    keyboardShouldPersistTaps="handled"
+                    style={{ maxHeight: 300 }}
+                  >
+                    {searchResults.length > 0 ? (
+                      searchResults.map((p: any) => (
+                        <TouchableOpacity
+                          key={p.id}
+                          style={[
+                            styles.searchDropdownItem,
+                            { borderBottomColor: isDark ? colors.border : "#f1f5f9" },
+                          ]}
+                          onPress={() => {
+                            setShowSearchDropdown(false);
+                            setNoOccupancySearch("");
+                            router.push(`/properties/${p.id}` as any);
+                          }}
+                        >
+                          <Ionicons
+                            name="business-outline"
+                            size={16}
+                            color={isDark ? colors.textMuted : "#64748b"}
+                          />
+                          <View style={{ flex: 1 }}>
+                            <Text
+                              style={[
+                                styles.searchDropdownTitle,
+                                { color: isDark ? colors.text : "#1e293b" },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {p.title}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.searchDropdownCity,
+                                { color: isDark ? colors.textMuted : "#94a3b8" },
+                              ]}
+                            >
+                              {p.city}
+                            </Text>
+                          </View>
+                          <Ionicons
+                            name="chevron-forward"
+                            size={14}
+                            color="#cbd5e1"
+                          />
+                        </TouchableOpacity>
+                      ))
+                    ) : (
+                      <View style={{ padding: 20, alignItems: "center" }}>
+                        <Text
+                          style={{
+                            fontSize: 13,
+                            color: isDark ? colors.textMuted : "#94a3b8",
+                            fontWeight: "500",
+                          }}
+                        >
+                          No properties found for "{noOccupancySearch}"
+                        </Text>
+                      </View>
+                    )}
+                  </ScrollView>
+                </View>
+              )}
+            </View>
+            {occupancy && (
+              <View
                 style={[
+                  styles.occupancyBanner,
                   {
-                    width: 46,
-                    height: 46,
-                    borderRadius: 14,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    borderWidth: 1.5,
-                  },
-                  {
+                    marginHorizontal: 16,
+                    marginTop: 10,
+                    marginBottom: 10,
                     backgroundColor: isDark ? colors.card : "white",
-                    borderColor: isDark ? colors.border : "#e5e7eb",
-                  },
-                  (noOccupancyBedrooms !== null ||
-                    noOccupancyMaxPrice !== null ||
-                    noOccupancySortBy !== "newest") && {
-                    backgroundColor: isDark ? "white" : "#111",
-                    borderColor: isDark ? "white" : "#111",
+                    borderColor: isDark ? colors.border : "#e2e8f0",
                   },
                 ]}
-              > */}
-                {/* <Ionicons
-                  name="options-outline"
-                  size={22}
-                  color={
-                    noOccupancyBedrooms !== null ||
-                    noOccupancyMaxPrice !== null ||
-                    noOccupancySortBy !== "newest"
-                      ? isDark
-                        ? "#111"
-                        : "white"
-                      : isDark
-                        ? colors.text
-                        : "#111"
-                  }
-                />
-              </TouchableOpacity> */}
-            {/* </View> */}
-
-            {/* {(() => {
-              const cities = Array.from(
-                new Set(properties.map((p: any) => p.city).filter(Boolean)),
-              ) as string[];
-              if (cities.length === 0) return null;
-              const chipBase = {
-                paddingHorizontal: 14,
-                paddingVertical: 7,
-                borderRadius: 20,
-                borderWidth: 1.5,
-              };
-              const activeStyle = {
-                backgroundColor: isDark ? "#fff" : "#111",
-                borderColor: isDark ? "#fff" : "#111",
-              };
-              const inactiveStyle = {
-                backgroundColor: isDark ? colors.card : "#f3f4f6",
-                borderColor: isDark ? colors.border : "#e5e7eb",
-              };
-              const activeText = {
-                color: isDark ? "#111" : "#fff",
-                fontWeight: "700" as const,
-                fontSize: 12,
-              };
-              const inactiveText = {
-                color: isDark ? colors.textMuted : "#555",
-                fontWeight: "600" as const,
-                fontSize: 12,
-              };
-              return (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{
-                    paddingHorizontal: 16,
-                    paddingVertical: 10,
-                    gap: 8,
-                    alignItems: "center",
-                  }}
-                >
-                  <TouchableOpacity
-                    onPress={() => setNoOccupancyCityFilter(null)}
+              >
+                <View style={styles.occupancyBannerContent}>
+                  <View
                     style={[
-                      chipBase,
-                      noOccupancyCityFilter === null
-                        ? activeStyle
-                        : inactiveStyle,
+                      styles.occupancyIconBox,
+                      {
+                        backgroundColor: isDark ? colors.background : "#f8fafc",
+                        borderColor: isDark ? colors.border : "#e2e8f0",
+                      },
                     ]}
                   >
-                    <Text
-                      style={
-                        noOccupancyCityFilter === null
-                          ? activeText
-                          : inactiveText
-                      }
-                    >
-                      All
-                    </Text>
-                  </TouchableOpacity>
-                  {cities.map((city) => (
-                    <TouchableOpacity
-                      key={city}
-                      onPress={() =>
-                        setNoOccupancyCityFilter(
-                          noOccupancyCityFilter === city ? null : city,
-                        )
-                      }
-                      style={[
-                        chipBase,
-                        noOccupancyCityFilter === city
-                          ? activeStyle
-                          : inactiveStyle,
-                      ]}
+                    <Ionicons
+                      name="calendar-outline"
+                      size={24}
+                      color={isDark ? "#fbbf24" : "#64748b"}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                        marginBottom: 4,
+                      }}
                     >
                       <Text
-                        style={
-                          noOccupancyCityFilter === city
-                            ? activeText
-                            : inactiveText
-                        }
+                        style={[
+                          styles.occupancyBannerTitle,
+                          { color: isDark ? colors.text : "#0f172a" },
+                        ]}
                       >
-                        {city}
+                        {hasOccupancyStarted
+                          ? "Your Occupancy"
+                          : "Upcoming Occupancy"}
                       </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              );
-            })()} */}
+                      {!hasOccupancyStarted && (
+                        <View
+                          style={[
+                            styles.scheduledBadge,
+                            {
+                              backgroundColor: isDark
+                                ? colors.border
+                                : "#f1f5f9",
+                              borderColor: isDark ? colors.border : "#e2e8f0",
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.scheduledBadgeText,
+                              { color: isDark ? colors.textMuted : "#64748b" },
+                            ]}
+                          >
+                            SCHEDULED
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text
+                      style={[
+                        styles.occupancyBannerDesc,
+                        { color: isDark ? colors.textSecondary : "#64748b" },
+                      ]}
+                    >
+                      {hasOccupancyStarted ? "at " : "Your stay at "}
+                      <Text
+                        style={{
+                          fontWeight: "700",
+                          color: isDark ? colors.text : "#1e293b",
+                        }}
+                      >
+                        {occupancy.property?.title}
+                      </Text>
+                      {hasOccupancyStarted ? " is active." : " Starts on "}
+                      {!hasOccupancyStarted && (
+                        <Text
+                          style={{
+                            fontWeight: "700",
+                            color: isDark ? colors.text : "#1e293b",
+                          }}
+                        >
+                          {new Date(occupancy.start_date).toLocaleDateString(
+                            "en-US",
+                            { month: "long", day: "numeric", year: "numeric" },
+                          )}
+                        </Text>
+                      )}
+                    </Text>
+
+                    {!hasOccupancyStarted && (
+                      <View style={{ marginTop: 16, gap: 10 }}>
+                        <TouchableOpacity
+                          style={[
+                            styles.payEarlierBtn,
+                            { backgroundColor: isDark ? colors.text : "#000" },
+                          ]}
+                          onPress={() => router.push("/payments" as any)}
+                        >
+                          <Text
+                            style={[
+                              styles.payEarlierBtnText,
+                              { color: isDark ? colors.background : "#fff" },
+                            ]}
+                          >
+                            PAY EARLIER
+                          </Text>
+                        </TouchableOpacity>
+                        <View style={styles.ignoreTextContainer}>
+                          <Ionicons
+                            name="information-circle-outline"
+                            size={14}
+                            color="#94a3b8"
+                          />
+                          <Text style={styles.ignoreText}>
+                            Ignore this button if you have already paid in full
+                          </Text>
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              </View>
+            )}
 
             {/* --- SECTION: Recommended Properties (matches web) --- */}
             <View style={{ marginTop: 4 }}>
@@ -6239,8 +6288,8 @@ export default function TenantDashboard({ session, profile }: any) {
                               s <= cleanlinessRating
                                 ? "#eab308"
                                 : isDark
-                                ? colors.textMuted
-                                : "#d1d5db"
+                                  ? colors.textMuted
+                                  : "#d1d5db"
                             }
                           />
                         </TouchableOpacity>
@@ -6271,8 +6320,8 @@ export default function TenantDashboard({ session, profile }: any) {
                               s <= communicationRating
                                 ? "#eab308"
                                 : isDark
-                                ? colors.textMuted
-                                : "#d1d5db"
+                                  ? colors.textMuted
+                                  : "#d1d5db"
                             }
                           />
                         </TouchableOpacity>
@@ -6301,8 +6350,8 @@ export default function TenantDashboard({ session, profile }: any) {
                               s <= locationRating
                                 ? "#eab308"
                                 : isDark
-                                ? colors.textMuted
-                                : "#d1d5db"
+                                  ? colors.textMuted
+                                  : "#d1d5db"
                             }
                           />
                         </TouchableOpacity>
@@ -6377,8 +6426,8 @@ export default function TenantDashboard({ session, profile }: any) {
                               s <= reviewRating
                                 ? "#eab308"
                                 : isDark
-                                ? colors.textMuted
-                                : "#d1d5db"
+                                  ? colors.textMuted
+                                  : "#d1d5db"
                             }
                           />
                         </TouchableOpacity>
@@ -6447,9 +6496,7 @@ export default function TenantDashboard({ session, profile }: any) {
                 disabled={submittingReview}
               >
                 {submittingReview ? (
-                  <ActivityIndicator
-                    color={isDark ? "#000" : "white"}
-                  />
+                  <ActivityIndicator color={isDark ? "#000" : "white"} />
                 ) : (
                   <Text
                     style={[
@@ -6560,6 +6607,100 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 26, fontWeight: "bold", color: "#111" },
   headerSubtitle: { fontSize: 13, color: "#666", marginTop: 4 },
   seeMoreLink: { fontSize: 12, fontWeight: "bold", color: "#666" },
+
+  topNotificationBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 14,
+    borderRadius: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    gap: 12,
+  },
+  topNotificationText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "800",
+    lineHeight: 18,
+  },
+
+  // Occupancy Banner (Upcoming)
+  occupancyBanner: {
+    padding: 20,
+    borderRadius: 24,
+    backgroundColor: "white",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  occupancyBannerContent: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 16,
+  },
+  occupancyIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  occupancyBannerTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    letterSpacing: -0.3,
+  },
+  scheduledBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  scheduledBadgeText: {
+    fontSize: 9,
+    fontWeight: "900",
+    letterSpacing: 0.5,
+  },
+  occupancyBannerDesc: {
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "500",
+  },
+  payEarlierBtn: {
+    width: "100%",
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  payEarlierBtnText: {
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 1.2,
+  },
+  ignoreTextContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 4,
+  },
+  ignoreText: {
+    fontSize: 11,
+    color: "#94a3b8",
+    fontWeight: "600",
+    lineHeight: 14,
+  },
 
   // Active Card
   activeCard: {
@@ -6916,7 +7057,14 @@ const styles = StyleSheet.create({
     borderColor: "#e5e7eb",
     overflow: "hidden",
   },
-  cardImageContainer: { height: 120, width: "100%", position: "relative" },
+  cardImageContainer: {
+    height: 120,
+    width: "100%",
+    position: "relative",
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
+    overflow: "hidden",
+  },
   cardImage: { width: "100%", height: "100%" },
   cardGradient: {
     position: "absolute",
@@ -6970,7 +7118,20 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   cardContent: { padding: 8 },
-  cardLocation: { fontSize: 10, color: "#6b7280", marginBottom: 6 },
+  cardLocation: { fontSize: 10, color: "#6b7280", marginBottom: 4 },
+  cardBadgeRow: {
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    alignItems: "center",
+    gap: 4,
+    marginBottom: 6,
+  },
+  cardMetaBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 999,
+    alignItems: "center",
+  },
   cardTitle: {
     fontSize: 12,
     fontWeight: "bold",
@@ -7112,4 +7273,36 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
   checkboxContainer: { marginBottom: 20 },
+  searchDropdown: {
+    position: "absolute",
+    top: 65,
+    left: 0,
+    right: 0,
+    borderRadius: 16,
+    zIndex: 2000,
+    elevation: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 15,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  searchDropdownItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    gap: 12,
+    borderBottomWidth: 1,
+  },
+  searchDropdownTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  searchDropdownCity: {
+    fontSize: 11,
+    fontWeight: "500",
+    marginTop: 2,
+  },
 });

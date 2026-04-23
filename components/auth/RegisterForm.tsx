@@ -1,7 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import DateTimePicker, {
-    DateTimePickerAndroid,
-} from "@react-native-community/datetimepicker";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -15,6 +12,7 @@ import {
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import AuthInput from "./AuthInput";
+import CalendarPicker from "../ui/CalendarPicker";
 
 const BREVO_API_KEY = process.env.EXPO_PUBLIC_BREVO_API_KEY || "";
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -74,37 +72,12 @@ export default function RegisterForm({
   const [gender, setGender] = useState("");
 
   // UI State
-  const [showIOSPicker, setShowIOSPicker] = useState(false);
+  const [showBirthdayPicker, setShowBirthdayPicker] = useState(false);
   const [showGenderModal, setShowGenderModal] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
 
   const openDatePicker = () => {
-    if (Platform.OS === "android") {
-      DateTimePickerAndroid.open({
-        value: birthday || new Date(),
-        onChange: (event, selectedDate) => {
-          if (event.type === "set" && selectedDate) {
-            setBirthday(selectedDate);
-          }
-        },
-        mode: "date",
-        maximumDate: new Date(),
-      });
-      return;
-    }
-
-    setShowIOSPicker(true);
-  };
-
-  const onIOSDateChange = (_event: any, selectedDate?: Date) => {
-    if (selectedDate) {
-      setBirthday(selectedDate);
-    }
-  };
-
-  const confirmIOSDate = () => {
-    setShowIOSPicker(false);
-    if (!birthday) setBirthday(new Date());
+    setShowBirthdayPicker(true);
   };
 
   const handleEmailChange = (text: string) => {
@@ -298,31 +271,23 @@ export default function RegisterForm({
             <Ionicons name="calendar-outline" size={18} color="#666" />
           </TouchableOpacity>
 
-          {showIOSPicker && (
-            <Modal transparent animationType="fade" visible={true}>
+          {showBirthdayPicker && (
+            <Modal transparent animationType="fade" visible={true} onRequestClose={() => setShowBirthdayPicker(false)}>
               <View style={styles.modalOverlay}>
                 <View style={styles.modalContent}>
                   <View style={styles.modalHeader}>
                     <Text style={styles.modalTitle}>Select Birthday</Text>
-                    <TouchableOpacity onPress={confirmIOSDate}>
-                      <Text
-                        style={{
-                          color: "#2563eb",
-                          fontWeight: "bold",
-                          fontSize: 16,
-                        }}
-                      >
-                        Done
-                      </Text>
+                    <TouchableOpacity onPress={() => setShowBirthdayPicker(false)}>
+                      <Ionicons name="close" size={24} color="#666" />
                     </TouchableOpacity>
                   </View>
-                  <DateTimePicker
-                    value={birthday || new Date()}
-                    mode="date"
-                    display="spinner"
-                    onChange={onIOSDateChange}
-                    maximumDate={new Date()}
-                    textColor="black"
+                  <CalendarPicker
+                    selectedDate={birthday ? birthday.toISOString().split("T")[0] : ""}
+                    onDateSelect={(date) => {
+                      setBirthday(new Date(date));
+                      setShowBirthdayPicker(false);
+                    }}
+                    allowPastDates={true}
                   />
                 </View>
               </View>

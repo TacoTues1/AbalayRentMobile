@@ -529,7 +529,7 @@ export default function NewProperty() {
                 { color: isDark ? colors.text : "#111827" },
               ]}
             >
-              Add Rent
+              Add Property
             </Text>
             <Text
               style={{

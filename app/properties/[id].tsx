@@ -3253,7 +3253,7 @@ export default function PropertyDetail() {
                   <Text style={styles.btnTextWhite}>
                     {bookingMode === "preferred"
                       ? "Submit Preferred Schedule"
-                      : "Confirm Booking"}
+                      : "Confirm Viewing schedule"}
                   </Text>
                 )}
               </TouchableOpacity>

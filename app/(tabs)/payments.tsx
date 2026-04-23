@@ -27,6 +27,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { createNotification } from "../../lib/notifications";
 import { supabase } from "../../lib/supabase";
+import { downloadExcel } from "../../lib/exportExcel";
 import { useTheme } from "../../lib/theme";
 import GuestGuard from "../../components/auth/GuestGuard";
 
@@ -664,6 +665,7 @@ export default function Payments() {
       }
 
       // 4. Record Payment
+      const now = new Date().toISOString();
       const { data: payment, error: paymentError } = await supabase
         .from("payments")
         .insert({
@@ -679,6 +681,7 @@ export default function Payments() {
           method: request.payment_method || "cash",
           status: "recorded",
           due_date: request.due_date,
+          paid_at: now,
           currency: "PHP",
         })
         .select()
@@ -730,7 +733,11 @@ export default function Payments() {
       }
 
       // 6. Update Status
-      const updateData: any = { status: "paid", payment_id: payment.id };
+      const updateData: any = {
+        status: "paid",
+        payment_id: payment.id,
+        paid_at: now,
+      };
       if (
         request.is_renewal_payment &&
         actualNextDueDate !== request.due_date
@@ -2641,24 +2648,75 @@ export default function Payments() {
             Manage bills and income
           </Text>
         </View>
-        {profile?.role === "landlord" && (
-          <TouchableOpacity
-            onPress={() => setShowCreateModal(true)}
-            style={styles.navCreateBtn}
-          >
-            <Ionicons name="add" size={20} color="white" />
-            <Text
-              style={{
-                color: "white",
-                fontWeight: "bold",
-                fontSize: 12,
-                marginLeft: 4,
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          {profile?.role === "landlord" && filteredBills.length > 0 && (
+            <TouchableOpacity
+              onPress={() => {
+                const rows = filteredBills.map((r) => ({
+                  Property: r.properties?.title || "-",
+                  Tenant: r.tenant_profile
+                    ? `${r.tenant_profile.first_name || ""} ${r.tenant_profile.last_name || ""}`.trim()
+                    : "-",
+                  Rent: r.rent_amount || 0,
+                  Water: r.water_bill || 0,
+                  Electricity: r.electrical_bill || 0,
+                  Internet: r.wifi_bill || 0,
+                  Other: r.other_bills || 0,
+                  Total: (
+                    parseFloat(r.rent_amount || 0) +
+                    parseFloat(r.water_bill || 0) +
+                    parseFloat(r.electrical_bill || 0) +
+                    parseFloat(r.wifi_bill || 0) +
+                    parseFloat(r.other_bills || 0)
+                  ).toFixed(2),
+                  Status: (r.status || "").replace(/_/g, " "),
+                  "Due Date": r.due_date
+                    ? new Date(r.due_date).toLocaleDateString()
+                    : "-",
+                  Created: r.created_at
+                    ? new Date(r.created_at).toLocaleDateString()
+                    : "-",
+                }));
+                downloadExcel(
+                  rows,
+                  "Payments",
+                  `payments_${new Date().toISOString().slice(0, 10)}`,
+                );
               }}
+              style={[
+                styles.exportBtn,
+                {
+                  borderColor: isDark ? colors.border : "#d1d5db",
+                  backgroundColor: isDark ? colors.card : "white",
+                },
+              ]}
             >
-              New Bill
-            </Text>
-          </TouchableOpacity>
-        )}
+              <Ionicons
+                name="download-outline"
+                size={18}
+                color={isDark ? colors.text : "#374151"}
+              />
+            </TouchableOpacity>
+          )}
+          {profile?.role === "landlord" && (
+            <TouchableOpacity
+              onPress={() => setShowCreateModal(true)}
+              style={styles.navCreateBtn}
+            >
+              <Ionicons name="add" size={20} color="white" />
+              <Text
+                style={{
+                  color: "white",
+                  fontWeight: "bold",
+                  fontSize: 12,
+                  marginLeft: 4,
+                }}
+              >
+                New Bill
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {/* Landlord Stats */}
@@ -4148,7 +4206,6 @@ export default function Payments() {
 }
 
 const styles = StyleSheet.create({
-  // ... existing styles ...
   billCard: {
     backgroundColor: "white",
     padding: 16,
@@ -4178,8 +4235,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
-  // NEW PAYMENT STYLES
   methodCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -4231,8 +4286,6 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     backgroundColor: "#048818",
   },
-
-  // Legacy kept for other modals
   iconBtn: {
     padding: 8,
     borderRadius: 20,
@@ -4246,6 +4299,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: "transparent",
+  },
+  exportBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
   },
   badgeGreen: { backgroundColor: "#dcfce7", borderColor: "#dcfce7" },
   badgeOrange: { backgroundColor: "#ffedd5", borderColor: "#ffedd5" },
@@ -4347,8 +4408,6 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 20,
   },
-
-  // Unused but kept to prevent breakages if referenced elsewhere
   paymentCard: {
     flex: 1,
     padding: 15,

@@ -23,15 +23,15 @@ import { useRealtime } from "../../../hooks/useRealtime";
 import { supabase } from "../../../lib/supabase";
 
 type AdminTab =
-  | "overview"
-  | "users"
-  | "properties"
-  | "bookings"
-  | "payments"
-  | "occupancies"
-  | "schedules"
-  | "maintenance"
-  | "leaves";
+  | "Overview"
+  | "User"
+  | "Properties"
+  | "Bookings"
+  | "Payments"
+  | "Occupancies"
+  | "Schedules"
+  | "Maintenance"
+  | "Leave Monitoring";
 
 const NON_EDITABLE_FIELDS = new Set(["id", "created_at", "updated_at"]);
 const USER_EDIT_FIELDS = [
@@ -227,7 +227,7 @@ const isMultilineField = (field: string, value: string) => {
 export default function AdminDashboard() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
+  const [activeTab, setActiveTab] = useState<AdminTab>("Overview");
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 10;
 
@@ -324,8 +324,12 @@ export default function AdminDashboard() {
   const [paymentForm, setPaymentForm] = useState<Record<string, string>>({});
   const [editingSchedule, setEditingSchedule] = useState<any | null>(null);
   const [scheduleForm, setScheduleForm] = useState<Record<string, string>>({});
-  const [editingMaintenance, setEditingMaintenance] = useState<any | null>(null);
-  const [maintenanceForm, setMaintenanceForm] = useState<Record<string, string>>({});
+  const [editingMaintenance, setEditingMaintenance] = useState<any | null>(
+    null,
+  );
+  const [maintenanceForm, setMaintenanceForm] = useState<
+    Record<string, string>
+  >({});
   const [editingLeave, setEditingLeave] = useState<any | null>(null);
   const [leaveForm, setLeaveForm] = useState<Record<string, string>>({});
   const [showCreateModal, setShowCreateModal] = useState<AdminTab | null>(null);
@@ -441,30 +445,37 @@ export default function AdminDashboard() {
       maintenance: maintenanceRequests.length,
       leaves: leaveRequests.length,
     };
-  }, [users, properties, bookings, payments, schedules, maintenanceRequests, leaveRequests]);
+  }, [
+    users,
+    properties,
+    bookings,
+    payments,
+    schedules,
+    maintenanceRequests,
+    leaveRequests,
+  ]);
 
   const filteredMaintenance = useMemo(() => {
     const query = maintenanceSearch.trim().toLowerCase();
     if (!query) return maintenanceRequests;
-    return maintenanceRequests.filter((r) =>
-      includesQuery(r.title, query) ||
-      includesQuery(r.description, query) ||
-      includesQuery(userMap[r.tenant]?.first_name, query)
+    return maintenanceRequests.filter(
+      (r) =>
+        includesQuery(r.title, query) ||
+        includesQuery(r.description, query) ||
+        includesQuery(userMap[r.tenant]?.first_name, query),
     );
   }, [maintenanceRequests, maintenanceSearch, userMap]);
 
   const filteredLeaves = useMemo(() => {
     const query = leaveSearch.trim().toLowerCase();
     if (!query) return leaveRequests;
-    return leaveRequests.filter((r) =>
-      includesQuery(userMap[r.tenant_id]?.first_name, query) ||
-      includesQuery(propertyMap[r.property_id]?.title, query) ||
-      includesQuery(r.end_request_reason, query)
+    return leaveRequests.filter(
+      (r) =>
+        includesQuery(userMap[r.tenant_id]?.first_name, query) ||
+        includesQuery(propertyMap[r.property_id]?.title, query) ||
+        includesQuery(r.end_request_reason, query),
     );
   }, [leaveRequests, leaveSearch, userMap, propertyMap]);
-
-
-
 
   const filteredSchedules = useMemo(() => {
     const query = scheduleSearch.trim().toLowerCase();
@@ -641,8 +652,10 @@ export default function AdminDashboard() {
           .order("created_at", { ascending: false }),
         supabase
           .from("tenant_occupancies")
-          .select("*, property:properties(title), tenant:profiles!tenant_occupancies_tenant_id_fkey(first_name, last_name)")
-          .eq("status", "pending_end")
+          .select(
+            "*, property:properties(title), tenant:profiles!tenant_occupancies_tenant_id_fkey(first_name, last_name)",
+          )
+          .not("end_request_status", "is", null)
           .order("created_at", { ascending: false }),
       ]);
 
@@ -1075,7 +1088,9 @@ export default function AdminDashboard() {
   const createPayment = async () => {
     setSaving(true);
     try {
-      const { error } = await supabase.from("payment_requests").insert([paymentForm]);
+      const { error } = await supabase
+        .from("payment_requests")
+        .insert([paymentForm]);
       if (error) throw error;
       setShowCreateModal(null);
       loadAllData();
@@ -1089,7 +1104,9 @@ export default function AdminDashboard() {
   const createSchedule = async () => {
     setSaving(true);
     try {
-      const { error } = await supabase.from("available_time_slots").insert([scheduleForm]);
+      const { error } = await supabase
+        .from("available_time_slots")
+        .insert([scheduleForm]);
       if (error) throw error;
       setShowCreateModal(null);
       loadAllData();
@@ -1131,7 +1148,7 @@ export default function AdminDashboard() {
   };
 
   const openPaymentCreator = () => {
-    setShowCreateModal("payments");
+    setShowCreateModal("Payments");
     setPaymentForm({
       status: "pending",
       due_date: new Date().toISOString().split("T")[0],
@@ -1145,7 +1162,7 @@ export default function AdminDashboard() {
   };
 
   const openBookingCreator = () => {
-    setShowCreateModal("bookings");
+    setShowCreateModal("Bookings");
     setBookingForm({
       status: "pending",
       booking_date: new Date().toISOString().split("T")[0],
@@ -1156,7 +1173,7 @@ export default function AdminDashboard() {
   };
 
   const openScheduleCreator = () => {
-    setShowCreateModal("schedules");
+    setShowCreateModal("Schedules");
     setScheduleForm({
       landlord_id: "",
       start_time: new Date().toISOString(),
@@ -1172,7 +1189,10 @@ export default function AdminDashboard() {
         text: "Delete",
         style: "destructive",
         onPress: async () => {
-          const { error } = await supabase.from("maintenance_requests").delete().eq("id", id);
+          const { error } = await supabase
+            .from("maintenance_requests")
+            .delete()
+            .eq("id", id);
           if (error) Alert.alert("Error", error.message);
           else loadAllData();
         },
@@ -1205,6 +1225,7 @@ export default function AdminDashboard() {
       description: req.description,
       status: req.status,
       priority: req.priority,
+      category: req.category || "Others",
     });
   };
 
@@ -1215,7 +1236,10 @@ export default function AdminDashboard() {
         text: "Delete",
         style: "destructive",
         onPress: async () => {
-          const { error } = await supabase.from("tenant_occupancies").delete().eq("id", id);
+          const { error } = await supabase
+            .from("tenant_occupancies")
+            .delete()
+            .eq("id", id);
           if (error) Alert.alert("Error", error.message);
           else loadAllData();
         },
@@ -1254,41 +1278,8 @@ export default function AdminDashboard() {
   const renderOverview = () => (
     <View style={styles.sectionWrap}>
       <Text style={styles.sectionTitle}>Admin Overview</Text>
-      
-      {/* Monitoring Section */}
-      <View style={{ marginBottom: 16, flexDirection: 'row', gap: 12 }}>
-        <TouchableOpacity 
-          style={{ flex: 1, backgroundColor: '#fff', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#e5e7eb' }}
-          onPress={() => setActiveTab('maintenance')}
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-            <View style={{ backgroundColor: '#fef3c7', padding: 6, borderRadius: 8, marginRight: 10 }}>
-              <Ionicons name="construct" size={18} color="#d97706" />
-            </View>
-            <Text style={{ fontSize: 14, fontWeight: '700', color: '#374151' }}>Maintenance</Text>
-          </View>
-          <Text style={{ fontSize: 24, fontWeight: '900', color: '#111827' }}>
-            {maintenanceRequests.filter(r => ['pending', 'in_progress', 'scheduled'].includes(r.status)).length}
-          </Text>
-          <Text style={{ fontSize: 12, color: '#6b7280' }}>Open Requests</Text>
-        </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={{ flex: 1, backgroundColor: '#fff', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#e5e7eb' }}
-          onPress={() => setActiveTab('leaves')}
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-            <View style={{ backgroundColor: '#fee2e2', padding: 6, borderRadius: 8, marginRight: 10 }}>
-              <Ionicons name="exit" size={18} color="#dc2626" />
-            </View>
-            <Text style={{ fontSize: 14, fontWeight: '700', color: '#374151' }}>Leave Pending</Text>
-          </View>
-          <Text style={{ fontSize: 24, fontWeight: '900', color: '#111827' }}>
-            {leaveRequests.length}
-          </Text>
-          <Text style={{ fontSize: 12, color: '#6b7280' }}>Pending Approval</Text>
-        </TouchableOpacity>
-      </View>
+      {/* Monitoring Section */}
 
       <View style={styles.statsGrid}>
         <StatCard label="Users" value={stats.users} icon="people-outline" />
@@ -1832,7 +1823,11 @@ export default function AdminDashboard() {
                   <Ionicons name="create-outline" size={20} color="#4b5563" />
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => cancelBooking(booking.id)}>
-                  <Ionicons name="close-circle-outline" size={20} color="#f59e0b" />
+                  <Ionicons
+                    name="close-circle-outline"
+                    size={20}
+                    color="#f59e0b"
+                  />
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => deleteBooking(booking.id)}>
                   <Ionicons name="trash-outline" size={20} color="#ef4444" />
@@ -1849,7 +1844,10 @@ export default function AdminDashboard() {
     <View style={styles.sectionWrap}>
       <View style={styles.sectionHeaderRow}>
         <Text style={styles.sectionTitle}>Landlord Schedules</Text>
-        <TouchableOpacity style={styles.createBtn} onPress={openScheduleCreator}>
+        <TouchableOpacity
+          style={styles.createBtn}
+          onPress={openScheduleCreator}
+        >
           <Ionicons name="add" size={18} color="#fff" />
           <Text style={styles.createBtnText}>New Schedule</Text>
         </TouchableOpacity>
@@ -1878,7 +1876,8 @@ export default function AdminDashboard() {
                   Landlord: {landlord ? fullName(landlord) : "Unknown"}
                 </Text>
                 <Text style={styles.itemSubtitle}>
-                  {new Date(slot.start_time).toLocaleString()} - {new Date(slot.end_time).toLocaleTimeString()}
+                  {new Date(slot.start_time).toLocaleString()} -{" "}
+                  {new Date(slot.end_time).toLocaleTimeString()}
                 </Text>
                 <Text style={styles.itemMeta}>
                   Booked: {slot.is_booked ? "Yes" : "No"}
@@ -1924,9 +1923,12 @@ export default function AdminDashboard() {
               <View style={styles.itemMain}>
                 <Text style={styles.itemTitle}>{req.title}</Text>
                 <Text style={styles.itemSubtitle}>
-                  {property?.title || "Unknown Property"} • {tenant ? fullName(tenant) : "Unknown Tenant"}
+                  {property?.title || "Unknown Property"} •{" "}
+                  {tenant ? fullName(tenant) : "Unknown Tenant"}
                 </Text>
-                <Text style={styles.itemMeta}>Status: {req.status} • Priority: {req.priority}</Text>
+                <Text style={styles.itemMeta}>
+                  Status: {req.status} • Priority: {req.priority}
+                </Text>
               </View>
               <View style={styles.itemActions}>
                 <TouchableOpacity onPress={() => openMaintenanceEditor(req)}>
@@ -1945,7 +1947,7 @@ export default function AdminDashboard() {
 
   const renderLeaves = () => (
     <View style={styles.sectionWrap}>
-      <Text style={styles.sectionTitle}>Pending Leave Requests</Text>
+      <Text style={styles.sectionTitle}>Leave Monitoring</Text>
       <TextInput
         style={styles.searchInput}
         value={leaveSearch}
@@ -1974,7 +1976,8 @@ export default function AdminDashboard() {
                   {property?.title || req.property?.title || "Unknown Property"}
                 </Text>
                 <Text style={styles.itemMeta}>
-                  Status: {req.end_request_status?.toUpperCase() || "PENDING"} • Date: {req.end_request_date}
+                  Status: {req.end_request_status?.toUpperCase() || "PENDING"} •
+                  Date: {req.end_request_date}
                 </Text>
                 <Text style={[styles.itemMeta, { marginTop: 2 }]}>
                   Reason: {req.end_request_reason}
@@ -2041,7 +2044,11 @@ export default function AdminDashboard() {
                   <Ionicons name="create-outline" size={20} color="#4b5563" />
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => cancelPayment(payment.id)}>
-                  <Ionicons name="close-circle-outline" size={20} color="#f59e0b" />
+                  <Ionicons
+                    name="close-circle-outline"
+                    size={20}
+                    color="#f59e0b"
+                  />
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => deletePayment(payment.id)}>
                   <Ionicons name="trash-outline" size={20} color="#ef4444" />
@@ -2132,15 +2139,15 @@ export default function AdminDashboard() {
       </View>
 
       <ScrollView contentContainerStyle={styles.contentWrap}>
-        {activeTab === "overview" && renderOverview()}
-        {activeTab === "users" && renderUsers()}
-        {activeTab === "properties" && renderProperties()}
-        {activeTab === "bookings" && renderBookings()}
-        {activeTab === "payments" && renderPayments()}
-        {activeTab === "occupancies" && renderOccupancies()}
-        {activeTab === "schedules" && renderSchedules()}
-        {activeTab === "maintenance" && renderMaintenance()}
-        {activeTab === "leaves" && renderLeaves()}
+        {activeTab === "Overview" && renderOverview()}
+        {activeTab === "User" && renderUsers()}
+        {activeTab === "Properties" && renderProperties()}
+        {activeTab === "Bookings" && renderBookings()}
+        {activeTab === "Payments" && renderPayments()}
+        {activeTab === "Occupancies" && renderOccupancies()}
+        {activeTab === "Schedules" && renderSchedules()}
+        {activeTab === "Maintenance" && renderMaintenance()}
+        {activeTab === "Leave Monitoring" && renderLeaves()}
       </ScrollView>
 
       <View
@@ -2156,15 +2163,15 @@ export default function AdminDashboard() {
         >
           {(
             [
-              "overview",
-              "users",
-              "properties",
-              "bookings",
-              "payments",
-              "occupancies",
-              "schedules",
-              "maintenance",
-              "leaves",
+              "Overview",
+              "User",
+              "Properties",
+              "Bookings",
+              "Payments",
+              "Occupancies",
+              "Schedules",
+              "Maintenance",
+              "Leave Monitoring",
             ] as AdminTab[]
           ).map((tab) => (
             <TouchableOpacity
@@ -3662,45 +3669,97 @@ export default function AdminDashboard() {
         </View>
       </Modal>
       {/* Booking Edit/Create Modal */}
-      <Modal visible={!!editingBooking || showCreateModal === "bookings"} transparent animationType="slide">
+      <Modal
+        visible={!!editingBooking || showCreateModal === "Bookings"}
+        transparent
+        animationType="slide"
+      >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{editingBooking ? "Edit Booking" : "New Booking"}</Text>
+            <Text style={styles.modalTitle}>
+              {editingBooking ? "Edit Booking" : "New Booking"}
+            </Text>
             <ScrollView style={styles.modalFormScroll}>
               {!editingBooking && (
                 <>
                   <View style={styles.fieldWrap}>
                     <Text style={styles.fieldLabel}>Property ID</Text>
-                    <TextInput style={styles.input} value={bookingForm.property_id} onChangeText={(v) => setBookingForm({ ...bookingForm, property_id: v })} />
+                    <TextInput
+                      style={styles.input}
+                      value={bookingForm.property_id}
+                      onChangeText={(v) =>
+                        setBookingForm({ ...bookingForm, property_id: v })
+                      }
+                    />
                   </View>
                   <View style={styles.fieldWrap}>
                     <Text style={styles.fieldLabel}>Tenant ID</Text>
-                    <TextInput style={styles.input} value={bookingForm.tenant} onChangeText={(v) => setBookingForm({ ...bookingForm, tenant: v })} />
+                    <TextInput
+                      style={styles.input}
+                      value={bookingForm.tenant}
+                      onChangeText={(v) =>
+                        setBookingForm({ ...bookingForm, tenant: v })
+                      }
+                    />
                   </View>
                   <View style={styles.fieldWrap}>
                     <Text style={styles.fieldLabel}>Landlord ID</Text>
-                    <TextInput style={styles.input} value={bookingForm.landlord} onChangeText={(v) => setBookingForm({ ...bookingForm, landlord: v })} />
+                    <TextInput
+                      style={styles.input}
+                      value={bookingForm.landlord}
+                      onChangeText={(v) =>
+                        setBookingForm({ ...bookingForm, landlord: v })
+                      }
+                    />
                   </View>
                 </>
               )}
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>Date (YYYY-MM-DD)</Text>
-                <TextInput style={styles.input} value={bookingForm.booking_date} onChangeText={(v) => setBookingForm({ ...bookingForm, booking_date: v })} />
+                <TextInput
+                  style={styles.input}
+                  value={bookingForm.booking_date}
+                  onChangeText={(v) =>
+                    setBookingForm({ ...bookingForm, booking_date: v })
+                  }
+                />
               </View>
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>Status</Text>
-                <TextInput style={styles.input} value={bookingForm.status} onChangeText={(v) => setBookingForm({ ...bookingForm, status: v })} />
+                <TextInput
+                  style={styles.input}
+                  value={bookingForm.status}
+                  onChangeText={(v) =>
+                    setBookingForm({ ...bookingForm, status: v })
+                  }
+                />
               </View>
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>Notes</Text>
-                <TextInput style={[styles.input, { height: 80 }]} multiline value={bookingForm.notes} onChangeText={(v) => setBookingForm({ ...bookingForm, notes: v })} />
+                <TextInput
+                  style={[styles.input, { height: 80 }]}
+                  multiline
+                  value={bookingForm.notes}
+                  onChangeText={(v) =>
+                    setBookingForm({ ...bookingForm, notes: v })
+                  }
+                />
               </View>
             </ScrollView>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.secondaryButton} onPress={() => { setEditingBooking(null); setShowCreateModal(null); }}>
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() => {
+                  setEditingBooking(null);
+                  setShowCreateModal(null);
+                }}
+              >
                 <Text style={styles.secondaryButtonText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.primaryButton} onPress={editingBooking ? saveBooking : createBooking}>
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={editingBooking ? saveBooking : createBooking}
+              >
                 <Text style={styles.primaryButtonText}>Save</Text>
               </TouchableOpacity>
             </View>
@@ -3709,53 +3768,119 @@ export default function AdminDashboard() {
       </Modal>
 
       {/* Payment Edit/Create Modal */}
-      <Modal visible={!!editingPayment || showCreateModal === "payments"} transparent animationType="slide">
+      <Modal
+        visible={!!editingPayment || showCreateModal === "Payments"}
+        transparent
+        animationType="slide"
+      >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{editingPayment ? "Edit Payment" : "New Payment Request"}</Text>
+            <Text style={styles.modalTitle}>
+              {editingPayment ? "Edit Payment" : "New Payment Request"}
+            </Text>
             <ScrollView style={styles.modalFormScroll}>
               {!editingPayment && (
                 <>
                   <View style={styles.fieldWrap}>
                     <Text style={styles.fieldLabel}>Property ID</Text>
-                    <TextInput style={styles.input} value={paymentForm.property_id} onChangeText={(v) => setPaymentForm({ ...paymentForm, property_id: v })} />
+                    <TextInput
+                      style={styles.input}
+                      value={paymentForm.property_id}
+                      onChangeText={(v) =>
+                        setPaymentForm({ ...paymentForm, property_id: v })
+                      }
+                    />
                   </View>
                   <View style={styles.fieldWrap}>
                     <Text style={styles.fieldLabel}>Tenant ID</Text>
-                    <TextInput style={styles.input} value={paymentForm.tenant} onChangeText={(v) => setPaymentForm({ ...paymentForm, tenant: v })} />
+                    <TextInput
+                      style={styles.input}
+                      value={paymentForm.tenant}
+                      onChangeText={(v) =>
+                        setPaymentForm({ ...paymentForm, tenant: v })
+                      }
+                    />
                   </View>
                   <View style={styles.fieldWrap}>
                     <Text style={styles.fieldLabel}>Landlord ID</Text>
-                    <TextInput style={styles.input} value={paymentForm.landlord} onChangeText={(v) => setPaymentForm({ ...paymentForm, landlord: v })} />
+                    <TextInput
+                      style={styles.input}
+                      value={paymentForm.landlord}
+                      onChangeText={(v) =>
+                        setPaymentForm({ ...paymentForm, landlord: v })
+                      }
+                    />
                   </View>
                 </>
               )}
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>Due Date (YYYY-MM-DD)</Text>
-                <TextInput style={styles.input} value={paymentForm.due_date} onChangeText={(v) => setPaymentForm({ ...paymentForm, due_date: v })} />
+                <TextInput
+                  style={styles.input}
+                  value={paymentForm.due_date}
+                  onChangeText={(v) =>
+                    setPaymentForm({ ...paymentForm, due_date: v })
+                  }
+                />
               </View>
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>Rent Amount</Text>
-                <TextInput style={styles.input} value={paymentForm.rent_amount} keyboardType="numeric" onChangeText={(v) => setPaymentForm({ ...paymentForm, rent_amount: v })} />
+                <TextInput
+                  style={styles.input}
+                  value={paymentForm.rent_amount}
+                  keyboardType="numeric"
+                  onChangeText={(v) =>
+                    setPaymentForm({ ...paymentForm, rent_amount: v })
+                  }
+                />
               </View>
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>Water Bill</Text>
-                <TextInput style={styles.input} value={paymentForm.water_bill} keyboardType="numeric" onChangeText={(v) => setPaymentForm({ ...paymentForm, water_bill: v })} />
+                <TextInput
+                  style={styles.input}
+                  value={paymentForm.water_bill}
+                  keyboardType="numeric"
+                  onChangeText={(v) =>
+                    setPaymentForm({ ...paymentForm, water_bill: v })
+                  }
+                />
               </View>
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>Electrical Bill</Text>
-                <TextInput style={styles.input} value={paymentForm.electrical_bill} keyboardType="numeric" onChangeText={(v) => setPaymentForm({ ...paymentForm, electrical_bill: v })} />
+                <TextInput
+                  style={styles.input}
+                  value={paymentForm.electrical_bill}
+                  keyboardType="numeric"
+                  onChangeText={(v) =>
+                    setPaymentForm({ ...paymentForm, electrical_bill: v })
+                  }
+                />
               </View>
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>Status</Text>
-                <TextInput style={styles.input} value={paymentForm.status} onChangeText={(v) => setPaymentForm({ ...paymentForm, status: v })} />
+                <TextInput
+                  style={styles.input}
+                  value={paymentForm.status}
+                  onChangeText={(v) =>
+                    setPaymentForm({ ...paymentForm, status: v })
+                  }
+                />
               </View>
             </ScrollView>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.secondaryButton} onPress={() => { setEditingPayment(null); setShowCreateModal(null); }}>
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() => {
+                  setEditingPayment(null);
+                  setShowCreateModal(null);
+                }}
+              >
                 <Text style={styles.secondaryButtonText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.primaryButton} onPress={editingPayment ? savePayment : createPayment}>
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={editingPayment ? savePayment : createPayment}
+              >
                 <Text style={styles.primaryButtonText}>Save</Text>
               </TouchableOpacity>
             </View>
@@ -3764,33 +3889,72 @@ export default function AdminDashboard() {
       </Modal>
 
       {/* Schedule Edit/Create Modal */}
-      <Modal visible={!!editingSchedule || showCreateModal === "schedules"} transparent animationType="slide">
+      <Modal
+        visible={!!editingSchedule || showCreateModal === "Schedules"}
+        transparent
+        animationType="slide"
+      >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{editingSchedule ? "Edit Schedule Slot" : "New Schedule Slot"}</Text>
+            <Text style={styles.modalTitle}>
+              {editingSchedule ? "Edit Schedule Slot" : "New Schedule Slot"}
+            </Text>
             <ScrollView style={styles.modalFormScroll}>
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>Landlord ID</Text>
-                <TextInput style={styles.input} value={scheduleForm.landlord_id} onChangeText={(v) => setScheduleForm({ ...scheduleForm, landlord_id: v })} />
+                <TextInput
+                  style={styles.input}
+                  value={scheduleForm.landlord_id}
+                  onChangeText={(v) =>
+                    setScheduleForm({ ...scheduleForm, landlord_id: v })
+                  }
+                />
               </View>
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>Start Time (ISO)</Text>
-                <TextInput style={styles.input} value={scheduleForm.start_time} onChangeText={(v) => setScheduleForm({ ...scheduleForm, start_time: v })} />
+                <TextInput
+                  style={styles.input}
+                  value={scheduleForm.start_time}
+                  onChangeText={(v) =>
+                    setScheduleForm({ ...scheduleForm, start_time: v })
+                  }
+                />
               </View>
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>End Time (ISO)</Text>
-                <TextInput style={styles.input} value={scheduleForm.end_time} onChangeText={(v) => setScheduleForm({ ...scheduleForm, end_time: v })} />
+                <TextInput
+                  style={styles.input}
+                  value={scheduleForm.end_time}
+                  onChangeText={(v) =>
+                    setScheduleForm({ ...scheduleForm, end_time: v })
+                  }
+                />
               </View>
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>Is Booked (true/false)</Text>
-                <TextInput style={styles.input} value={scheduleForm.is_booked} onChangeText={(v) => setScheduleForm({ ...scheduleForm, is_booked: v })} />
+                <TextInput
+                  style={styles.input}
+                  value={scheduleForm.is_booked}
+                  onChangeText={(v) =>
+                    setScheduleForm({ ...scheduleForm, is_booked: v })
+                  }
+                />
               </View>
             </ScrollView>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.secondaryButton} onPress={() => { setEditingSchedule(null); setShowCreateModal(null); }}>
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() => {
+                  setEditingSchedule(null);
+                  setShowCreateModal(null);
+                }}
+              >
                 <Text style={styles.secondaryButtonText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.primaryButton} onPress={editingSchedule ? saveSchedule : createSchedule}>
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={editingSchedule ? saveSchedule : createSchedule}
+              >
                 <Text style={styles.primaryButtonText}>Save</Text>
               </TouchableOpacity>
             </View>
@@ -3805,26 +3969,57 @@ export default function AdminDashboard() {
             <ScrollView style={styles.modalFormScroll}>
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>Title</Text>
-                <TextInput style={styles.input} value={maintenanceForm.title} onChangeText={(v) => setMaintenanceForm({ ...maintenanceForm, title: v })} />
+                <TextInput
+                  style={styles.input}
+                  value={maintenanceForm.title}
+                  onChangeText={(v) =>
+                    setMaintenanceForm({ ...maintenanceForm, title: v })
+                  }
+                />
               </View>
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>Description</Text>
-                <TextInput style={[styles.input, { height: 80 }]} multiline value={maintenanceForm.description} onChangeText={(v) => setMaintenanceForm({ ...maintenanceForm, description: v })} />
+                <TextInput
+                  style={[styles.input, { height: 80 }]}
+                  multiline
+                  value={maintenanceForm.description}
+                  onChangeText={(v) =>
+                    setMaintenanceForm({ ...maintenanceForm, description: v })
+                  }
+                />
               </View>
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>Status</Text>
-                <TextInput style={styles.input} value={maintenanceForm.status} onChangeText={(v) => setMaintenanceForm({ ...maintenanceForm, status: v })} />
+                <TextInput
+                  style={styles.input}
+                  value={maintenanceForm.status}
+                  onChangeText={(v) =>
+                    setMaintenanceForm({ ...maintenanceForm, status: v })
+                  }
+                />
               </View>
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>Priority</Text>
-                <TextInput style={styles.input} value={maintenanceForm.priority} onChangeText={(v) => setMaintenanceForm({ ...maintenanceForm, priority: v })} />
+                <TextInput
+                  style={styles.input}
+                  value={maintenanceForm.priority}
+                  onChangeText={(v) =>
+                    setMaintenanceForm({ ...maintenanceForm, priority: v })
+                  }
+                />
               </View>
             </ScrollView>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.secondaryButton} onPress={() => setEditingMaintenance(null)}>
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() => setEditingMaintenance(null)}
+              >
                 <Text style={styles.secondaryButtonText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.primaryButton} onPress={saveMaintenance}>
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={saveMaintenance}
+              >
                 <Text style={styles.primaryButtonText}>Save Changes</Text>
               </TouchableOpacity>
             </View>
@@ -3839,27 +4034,62 @@ export default function AdminDashboard() {
             <Text style={styles.modalTitle}>Edit Leave Request</Text>
             <ScrollView style={styles.modalFormScroll}>
               <View style={styles.fieldWrap}>
-                <Text style={styles.fieldLabel}>Overall Status (pending_end/active/ended)</Text>
-                <TextInput style={styles.input} value={leaveForm.status} onChangeText={(v) => setLeaveForm({ ...leaveForm, status: v })} />
+                <Text style={styles.fieldLabel}>
+                  Overall Status (pending_end/active/ended)
+                </Text>
+                <TextInput
+                  style={styles.input}
+                  value={leaveForm.status}
+                  onChangeText={(v) =>
+                    setLeaveForm({ ...leaveForm, status: v })
+                  }
+                />
               </View>
               <View style={styles.fieldWrap}>
-                <Text style={styles.fieldLabel}>Request Status (pending/approved/rejected)</Text>
-                <TextInput style={styles.input} value={leaveForm.end_request_status} onChangeText={(v) => setLeaveForm({ ...leaveForm, end_request_status: v })} />
+                <Text style={styles.fieldLabel}>
+                  Request Status (pending/approved/rejected)
+                </Text>
+                <TextInput
+                  style={styles.input}
+                  value={leaveForm.end_request_status}
+                  onChangeText={(v) =>
+                    setLeaveForm({ ...leaveForm, end_request_status: v })
+                  }
+                />
               </View>
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>Requested End Date</Text>
-                <TextInput style={styles.input} value={leaveForm.end_request_date} onChangeText={(v) => setLeaveForm({ ...leaveForm, end_request_date: v })} />
+                <TextInput
+                  style={styles.input}
+                  value={leaveForm.end_request_date}
+                  onChangeText={(v) =>
+                    setLeaveForm({ ...leaveForm, end_request_date: v })
+                  }
+                />
               </View>
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>Reason</Text>
-                <TextInput style={[styles.input, { height: 80 }]} multiline value={leaveForm.end_request_reason} onChangeText={(v) => setLeaveForm({ ...leaveForm, end_request_reason: v })} />
+                <TextInput
+                  style={[styles.input, { height: 80 }]}
+                  multiline
+                  value={leaveForm.end_request_reason}
+                  onChangeText={(v) =>
+                    setLeaveForm({ ...leaveForm, end_request_reason: v })
+                  }
+                />
               </View>
             </ScrollView>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.secondaryButton} onPress={() => setEditingLeave(null)}>
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() => setEditingLeave(null)}
+              >
                 <Text style={styles.secondaryButtonText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.primaryButton} onPress={saveLeave}>
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={saveLeave}
+              >
                 <Text style={styles.primaryButtonText}>Save Changes</Text>
               </TouchableOpacity>
             </View>

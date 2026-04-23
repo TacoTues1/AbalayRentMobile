@@ -3,7 +3,7 @@ import { decode } from "base64-arraybuffer";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
-import { useRouter } from "expo-router";
+import { useRouter, useNavigation } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -265,6 +265,7 @@ export default function Profile() {
     | "privacy"
     | "report_bug"
     | "delete_account"
+    | "payment_methods"
   >("menu");
 
   // --- PROFILE STATE ---
@@ -347,6 +348,28 @@ export default function Profile() {
     push: true,
   });
 
+  const navigation = useNavigation();
+
+  useEffect(() => {
+    // Hide bottom tab bar when in a sub-view (currentView is not 'menu')
+    if (currentView !== "menu") {
+      navigation.setOptions({ tabBarStyle: { display: "none" } });
+    } else {
+      navigation.setOptions({ tabBarStyle: undefined });
+    }
+  }, [currentView, navigation]);
+
+  // --- PAYMENT METHODS STATE ---
+  const [gcashNumber, setGcashNumber] = useState("");
+  const [mayaNumber, setMayaNumber] = useState("");
+  const [gcashQrUrl, setGcashQrUrl] = useState("");
+  const [mayaQrUrl, setMayaQrUrl] = useState("");
+  const [gcashVerified, setGcashVerified] = useState(false);
+  const [mayaVerified, setMayaVerified] = useState(false);
+  const [uploadingQr, setUploadingQr] = useState<"gcash" | "maya" | null>(null);
+
+  const [loginRecords, setLoginRecords] = useState<any[]>([]);
+
   // --- UI STATE ---
   const [showGenderModal, setShowGenderModal] = useState(false);
   const [showBirthdayPicker, setShowBirthdayPicker] = useState(false);
@@ -395,6 +418,18 @@ export default function Profile() {
   const openGenderPicker = () => {
     setShowBirthdayPicker(false);
     openModalSafely(() => setShowGenderModal(true));
+  };
+
+  const isVisitorMode =
+    !session || String(profileRole || "").trim().toLowerCase() === "visitor";
+  const profileReturnTo = encodeURIComponent("/(tabs)/profile");
+  const handleOpenLogin = () => {
+    router.push(`/login?returnTo=${profileReturnTo}` as any);
+  };
+  const handleOpenCreateAccount = () => {
+    router.push(
+      `/login?initialView=register&returnTo=${profileReturnTo}` as any,
+    );
   };
 
   useEffect(() => {
@@ -472,12 +507,49 @@ export default function Profile() {
               push: data.notification_preferences.push ?? true,
             });
           }
+
+          if (data.accepted_payments) {
+            const ap = data.accepted_payments;
+            if (ap.gcash) {
+              setGcashNumber(ap.gcash.number || "");
+              setGcashVerified(ap.gcash.verified ?? false);
+              setGcashQrUrl(ap.gcash.qr_url || "");
+            }
+            if (ap.maya) {
+              setMayaNumber(ap.maya.number || "");
+              setMayaVerified(ap.maya.verified ?? false);
+              setMayaQrUrl(ap.maya.qr_url || "");
+            }
+          }
         }
       }
     } finally {
       setLoading(false);
     }
   };
+
+  const loadLoginRecords = async () => {
+    if (!session?.user?.id) return;
+    try {
+      const { data, error } = await supabase
+        .from("login_records")
+        .select("*")
+        .eq("user_id", session.user.id)
+        .order("created_at", { ascending: false })
+        .limit(3);
+      if (!error && data) {
+        setLoginRecords(data);
+      }
+    } catch (e) {
+      console.warn("loadLoginRecords error:", e);
+    }
+  };
+
+  useEffect(() => {
+    if (currentView === "Password" && session?.user?.id) {
+      loadLoginRecords();
+    }
+  }, [currentView, session?.user?.id]);
 
   // --- AVATAR LOGIC ---
   const pickImage = async () => {
@@ -656,6 +728,103 @@ export default function Profile() {
       setEditingPhone(false);
       Alert.alert("Success", "Profile updated");
       setCurrentView("menu");
+    }
+  };
+
+  const handleUpdatePaymentMethods = async () => {
+    if (!session?.user?.id) return;
+    setSaving(true);
+    try {
+      const { data: currentProfile } = await supabase
+        .from("profiles")
+        .select("accepted_payments")
+        .eq("id", session.user.id)
+        .single();
+
+      const newAcceptedPayments = {
+        ...(currentProfile?.accepted_payments || {}),
+        gcash: {
+          number: gcashNumber,
+          verified: gcashVerified,
+          qr_url: gcashQrUrl,
+        },
+        maya: {
+          number: mayaNumber,
+          verified: mayaVerified,
+          qr_url: mayaQrUrl,
+        },
+      };
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({ accepted_payments: newAcceptedPayments })
+        .eq("id", session.user.id);
+
+      if (error) throw error;
+      Alert.alert("Success", "Payment methods updated successfully.");
+      setCurrentView("menu");
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to update payment methods.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const pickQrImage = async (type: "gcash" | "maya") => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        quality: 0.6,
+        base64: true,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        uploadQr(type, result.assets[0]);
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to pick QR image");
+    }
+  };
+
+  const uploadQr = async (
+    type: "gcash" | "maya",
+    imageAsset: ImagePicker.ImagePickerAsset,
+  ) => {
+    if (!session?.user?.id) return;
+    setUploadingQr(type);
+
+    try {
+      const base64 = imageAsset.base64;
+      const fileExt = imageAsset.uri.split(".").pop()?.toLowerCase() || "jpg";
+      const fileName = `${session.user.id}/${type}-qr-${Date.now()}.${fileExt}`;
+      const filePath = `payment_qrs/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("avatars")
+        .upload(filePath, decode(base64!), {
+          contentType: `image/${fileExt}`,
+          upsert: true,
+        });
+
+      if (uploadError) throw uploadError;
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("avatars").getPublicUrl(filePath);
+
+      if (type === "gcash") setGcashQrUrl(publicUrl);
+      else setMayaQrUrl(publicUrl);
+
+      Alert.alert(
+        "Success",
+        `${type === "gcash" ? "GCash" : "Maya"} QR code uploaded!`,
+      );
+    } catch (error: any) {
+      console.error(error);
+      Alert.alert("Upload Failed", error.message || "Could not upload QR");
+    } finally {
+      setUploadingQr(null);
     }
   };
 
@@ -1112,326 +1281,454 @@ export default function Profile() {
             >
               Settings
             </Text>
-            <View style={styles.profileCard}>
-              <View
-                style={[
-                  styles.avatarWrapperBig,
-                  { backgroundColor: isDark ? colors.card : "#eee" },
-                ]}
-              >
-                {avatarUrl ? (
-                  <Image
-                    source={{ uri: avatarUrl }}
-                    style={styles.avatarImage}
-                  />
-                ) : (
-                  <Text
-                    style={[
-                      styles.avatarInitialsBig,
-                      { color: isDark ? colors.textMuted : "#ccc" },
-                    ]}
-                  >
-                    {(firstName?.[0] || "U").toUpperCase()}
-                  </Text>
-                )}
-              </View>
-              <Text
-                style={[
-                  styles.profileName,
-                  { color: isDark ? colors.text : "#111" },
-                ]}
-              >
-                {firstName} {lastName}
-              </Text>
-              {/* Landlord Rating Stars */}
-              {profileRole === "landlord" && (
-                <View style={styles.ratingContainer}>
-                  <View style={{ flexDirection: "row", gap: 2 }}>
-                    {[1, 2, 3, 4, 5].map((star) => {
-                      const filled = landlordRating.average >= star;
-                      const halfFilled =
-                        !filled && landlordRating.average >= star - 0.5;
-                      return (
-                        <Ionicons
-                          key={star}
-                          name={
-                            filled
-                              ? "star"
-                              : halfFilled
-                                ? "star-half"
-                                : "star-outline"
-                          }
-                          size={18}
-                          color={
-                            filled || halfFilled
-                              ? "#eab308"
-                              : isDark
-                                ? "#555"
-                                : "#d1d5db"
-                          }
-                        />
-                      );
-                    })}
-                  </View>
-                  <Text
-                    style={[
-                      styles.ratingText,
-                      { color: isDark ? colors.textMuted : "#6b7280" },
-                    ]}
-                  >
-                    {landlordRating.count > 0
-                      ? `${landlordRating.average.toFixed(1)} (${landlordRating.count} review${landlordRating.count === 1 ? "" : "s"})`
-                      : "No reviews yet"}
-                  </Text>
-                </View>
-              )}
-              <TouchableOpacity
-                style={styles.editProfileBtn}
-                onPress={() => setCurrentView("personal")}
-              >
-                <Text style={styles.editProfileText}>Edit Profile</Text>
-                <Ionicons name="chevron-forward" size={12} color="white" />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Management Section */}
-          <Text
-            style={[
-              styles.sectionHeader,
-              { color: isDark ? colors.text : "#111" },
-            ]}
-          >
-            Management
-          </Text>
-          <View
-            style={[
-              styles.menuSection,
-              { backgroundColor: isDark ? colors.card : "white" },
-            ]}
-          >
-            <MenuRow
-              icon="business-outline"
-              label="All Properties"
-              onPress={() => router.push("/(tabs)/allproperties")}
-            />
-            <MenuRow
-              icon="search-outline"
-              label="Search Landlords"
-              onPress={() => router.push("/(tabs)/landlords")}
-            />
-            {profileRole === "landlord" && (
-              <>
-                <MenuRow
-                  icon="home-outline"
-                  label="My Properties"
-                  onPress={() => router.push("/(tabs)/landlordproperties")}
-                />
-                <MenuRow
-                  icon="calendar-outline"
-                  label="Schedule"
-                  onPress={() => router.push("/(tabs)/schedule")}
-                />
-              </>
-            )}
-            <MenuRow
-              icon="people-outline"
-              label="Bookings"
-              onPress={() => router.push("/(tabs)/bookings")}
-            />
-            <MenuRow
-              icon="hammer-outline"
-              label="Maintenance"
-              onPress={() => router.push("/(tabs)/maintenance")}
-            />
-            <MenuRow
-              icon="card-outline"
-              label="Payments"
-              onPress={() => router.push("/(tabs)/payments")}
-            />
-          </View>
-
-          {/* General Section */}
-          <Text
-            style={[
-              styles.sectionHeader,
-              { color: isDark ? colors.text : "#111" },
-            ]}
-          >
-            Account
-          </Text>
-          <View
-            style={[
-              styles.menuSection,
-              { backgroundColor: isDark ? colors.card : "white" },
-            ]}
-          >
-            <MenuRow
-              icon="person-outline"
-              label="Personal Details"
-              onPress={() => setCurrentView("personal")}
-            />
-            <MenuRow
-              icon="lock-closed-outline"
-              label="Password"
-              onPress={() => setCurrentView("Password")}
-            />
-            <MenuRow
-              icon="notifications-outline"
-              label="Notifications"
-              onPress={() => setCurrentView("notifications")}
-            />
-            {/* Dark Mode Toggle */}
-            <View
-              style={[
-                styles.menuRow,
-                {
-                  borderBottomColor: isDark ? colors.border : "#f3f4f6",
-                  flexDirection: "column",
-                  alignItems: "stretch",
-                  gap: 10,
-                },
-              ]}
-            >
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 12 }}
-              >
-                <View
+            {isVisitorMode ? (
+              <View style={styles.profileCard}>
+                <Text
                   style={[
-                    styles.menuIconBox,
-                    { backgroundColor: isDark ? "#2b2b2b" : "#f3f4f6" },
+                    styles.guestSubtitle,
+                    { color: isDark ? colors.textMuted : "#6b7280" },
                   ]}
                 >
-                  <Ionicons
-                    name="moon-outline"
-                    size={20}
-                    color={isDark ? "#a78bfa" : "#333"}
-                  />
+                  Log in or create an account to manage your profile and access
+                  more settings.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.profileCard}>
+                <View
+                  style={[
+                    styles.avatarWrapperBig,
+                    { backgroundColor: isDark ? colors.card : "#eee" },
+                  ]}
+                >
+                  {avatarUrl ? (
+                    <Image
+                      source={{ uri: avatarUrl }}
+                      style={styles.avatarImage}
+                    />
+                  ) : (
+                    <Text
+                      style={[
+                        styles.avatarInitialsBig,
+                        { color: isDark ? colors.textMuted : "#ccc" },
+                      ]}
+                    >
+                      {(firstName?.[0] || "U").toUpperCase()}
+                    </Text>
+                  )}
                 </View>
                 <Text
                   style={[
-                    styles.menuLabel,
-                    { color: isDark ? colors.text : "#333" },
+                    styles.profileName,
+                    { color: isDark ? colors.text : "#111" },
                   ]}
                 >
-                  Dark Mode
+                  {firstName} {lastName}
                 </Text>
-              </View>
-              <View
-                style={{
-                  flexDirection: "row",
-                  backgroundColor: isDark ? "#2b2b2b" : "#f3f4f6",
-                  borderRadius: 10,
-                  padding: 3,
-                }}
-              >
-                {(["light", "auto", "dark"] as const).map((mode) => (
-                  <TouchableOpacity
-                    key={mode}
-                    onPress={() => setThemeMode(mode)}
-                    style={{
-                      flex: 1,
-                      paddingVertical: 7,
-                      borderRadius: 8,
-                      alignItems: "center",
-                      backgroundColor:
-                        themeMode === mode
-                          ? isDark
-                            ? "#555"
-                            : "white"
-                          : "transparent",
-                      ...(themeMode === mode
-                        ? {
-                            shadowColor: "#000",
-                            shadowOpacity: 0.1,
-                            shadowRadius: 2,
-                            elevation: 2,
-                          }
-                        : {}),
-                    }}
-                  >
+                {/* Landlord Rating Stars */}
+                {profileRole === "landlord" && (
+                  <View style={styles.ratingContainer}>
+                    <View style={{ flexDirection: "row", gap: 2 }}>
+                      {[1, 2, 3, 4, 5].map((star) => {
+                        const filled = landlordRating.average >= star;
+                        const halfFilled =
+                          !filled && landlordRating.average >= star - 0.5;
+                        return (
+                          <Ionicons
+                            key={star}
+                            name={
+                              filled
+                                ? "star"
+                                : halfFilled
+                                  ? "star-half"
+                                  : "star-outline"
+                            }
+                            size={18}
+                            color={
+                              filled || halfFilled
+                                ? "#eab308"
+                                : isDark
+                                  ? "#555"
+                                  : "#d1d5db"
+                            }
+                          />
+                        );
+                      })}
+                    </View>
                     <Text
-                      style={{
-                        fontSize: 12,
-                        fontWeight: themeMode === mode ? "700" : "500",
-                        color:
-                          themeMode === mode
-                            ? isDark
-                              ? "#fff"
-                              : "#111"
-                            : isDark
-                              ? "#888"
-                              : "#666",
-                      }}
+                      style={[
+                        styles.ratingText,
+                        { color: isDark ? colors.textMuted : "#6b7280" },
+                      ]}
                     >
-                      {mode === "light"
-                        ? "Off"
-                        : mode === "dark"
-                          ? "On"
-                          : "Auto"}
+                      {landlordRating.count > 0
+                        ? `${landlordRating.average.toFixed(1)} (${landlordRating.count} review${landlordRating.count === 1 ? "" : "s"})`
+                        : "No reviews yet"}
                     </Text>
-                  </TouchableOpacity>
-                ))}
+                  </View>
+                )}
+                <TouchableOpacity
+                  style={styles.editProfileBtn}
+                  onPress={() => setCurrentView("personal")}
+                >
+                  <Text style={styles.editProfileText}>Edit Profile</Text>
+                  <Ionicons name="chevron-forward" size={12} color="white" />
+                </TouchableOpacity>
               </View>
-            </View>
-          </View>
-
-          {/* Legal Section */}
-          <Text
-            style={[
-              styles.sectionHeader,
-              { color: isDark ? colors.text : "#111" },
-            ]}
-          >
-            Legal
-          </Text>
-          <View
-            style={[
-              styles.menuSection,
-              { backgroundColor: isDark ? colors.card : "white" },
-            ]}
-          >
-            <MenuRow
-              icon="document-text-outline"
-              label="Terms of Service"
-              onPress={() => setCurrentView("terms")}
-            />
-            <MenuRow
-              icon="shield-checkmark-outline"
-              label="Privacy Policy"
-              onPress={() => setCurrentView("privacy")}
-            />
-          </View>
-
-          {/* Logout Section */}
-          <View
-            style={[
-              styles.menuSection,
-              {
-                marginTop: 20,
-                backgroundColor: isDark ? colors.card : "white",
-              },
-            ]}
-          >
-            <MenuRow
-              icon="shield-outline"
-              label="Emergency Contacts"
-              onPress={() => setCurrentView("emergency_contacts")}
-            />
-            <MenuRow
-              icon="bug-outline"
-              label="Report a Bug"
-              onPress={handleReportBug}
-            />
-            {session && (
-              <MenuRow
-                icon="log-out-outline"
-                label="Log Out"
-                onPress={handleSignOut}
-                danger
-              />
             )}
           </View>
+
+          {isVisitorMode ? (
+            <>
+              <View style={styles.authActionGroup}>
+                <TouchableOpacity
+                  style={[
+                    styles.authPrimaryBtn,
+                    {
+                      backgroundColor: isDark ? colors.text : "#111827",
+                    },
+                  ]}
+                  onPress={handleOpenLogin}
+                >
+                  <Text
+                    style={[
+                      styles.authPrimaryBtnText,
+                      { color: isDark ? colors.background : "white" },
+                    ]}
+                  >
+                    Login
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.authSecondaryBtn,
+                    { borderColor: isDark ? colors.border : "#111827" },
+                  ]}
+                  onPress={handleOpenCreateAccount}
+                >
+                  <Text
+                    style={[
+                      styles.authSecondaryBtnText,
+                      { color: isDark ? colors.text : "#111827" },
+                    ]}
+                  >
+                    Create Account
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text
+                style={[
+                  styles.sectionHeader,
+                  { color: isDark ? colors.text : "#111" },
+                ]}
+              >
+                Legal
+              </Text>
+              <View
+                style={[
+                  styles.menuSection,
+                  { backgroundColor: isDark ? colors.card : "white" },
+                ]}
+              >
+                <MenuRow
+                  icon="document-text-outline"
+                  label="Terms of Service"
+                  onPress={() => setCurrentView("terms")}
+                />
+                <MenuRow
+                  icon="shield-checkmark-outline"
+                  label="Privacy Policy"
+                  onPress={() => setCurrentView("privacy")}
+                />
+              </View>
+
+              <Text
+                style={[
+                  styles.sectionHeader,
+                  { color: isDark ? colors.text : "#111" },
+                ]}
+              >
+                Support
+              </Text>
+              <View
+                style={[
+                  styles.menuSection,
+                  { backgroundColor: isDark ? colors.card : "white" },
+                ]}
+              >
+                <MenuRow
+                  icon="shield-outline"
+                  label="Emergency Contacts"
+                  onPress={() => setCurrentView("emergency_contacts")}
+                />
+                <MenuRow
+                  icon="bug-outline"
+                  label="Report a Bug"
+                  onPress={handleReportBug}
+                />
+              </View>
+            </>
+          ) : (
+            <>
+              {/* Management Section */}
+              <Text
+                style={[
+                  styles.sectionHeader,
+                  { color: isDark ? colors.text : "#111" },
+                ]}
+              >
+                Management
+              </Text>
+              <View
+                style={[
+                  styles.menuSection,
+                  { backgroundColor: isDark ? colors.card : "white" },
+                ]}
+              >
+                <MenuRow
+                  icon="business-outline"
+                  label="All Properties"
+                  onPress={() => router.push("/(tabs)/allproperties")}
+                />
+                <MenuRow
+                  icon="search-outline"
+                  label="Search Landlords"
+                  onPress={() => router.push("/(tabs)/landlords")}
+                />
+                {profileRole === "landlord" && (
+                  <>
+                    <MenuRow
+                      icon="home-outline"
+                      label="My Properties"
+                      onPress={() => router.push("/(tabs)/landlordproperties")}
+                    />
+                    <MenuRow
+                      icon="calendar-outline"
+                      label="Schedule"
+                      onPress={() => router.push("/(tabs)/schedule")}
+                    />
+                  </>
+                )}
+                <MenuRow
+                  icon="people-outline"
+                  label={
+                    profileRole === "landlord"
+                      ? "Tenants Viewing Requests"
+                      : "My Viewing Requests"
+                  }
+                  onPress={() => router.push("/(tabs)/bookings")}
+                />
+                <MenuRow
+                  icon="hammer-outline"
+                  label={
+                    profileRole === "landlord"
+                      ? "Tenants Maintenance Requests"
+                      : "Maintenance"
+                  }
+                  onPress={() => router.push("/(tabs)/maintenance")}
+                />
+                <MenuRow
+                  icon="card-outline"
+                  label="Payments"
+                  onPress={() => router.push("/(tabs)/payments")}
+                />
+              </View>
+
+              {/* General Section */}
+              <Text
+                style={[
+                  styles.sectionHeader,
+                  { color: isDark ? colors.text : "#111" },
+                ]}
+              >
+                Account
+              </Text>
+              <View
+                style={[
+                  styles.menuSection,
+                  { backgroundColor: isDark ? colors.card : "white" },
+                ]}
+              >
+                <MenuRow
+                  icon="person-outline"
+                  label="Personal Details"
+                  onPress={() => setCurrentView("personal")}
+                />
+                <MenuRow
+                  icon="lock-closed-outline"
+                  label="Password & Security"
+                  onPress={() => setCurrentView("Password")}
+                />
+                {profileRole === "landlord" && (
+                  <MenuRow
+                    icon="wallet-outline"
+                    label="Payment Methods"
+                    onPress={() => setCurrentView("payment_methods")}
+                  />
+                )}
+                <MenuRow
+                  icon="notifications-outline"
+                  label="Notifications"
+                  onPress={() => setCurrentView("notifications")}
+                />
+                {/* Dark Mode Toggle */}
+                <View
+                  style={[
+                    styles.menuRow,
+                    {
+                      borderBottomColor: isDark ? colors.border : "#f3f4f6",
+                      flexDirection: "column",
+                      alignItems: "stretch",
+                      gap: 10,
+                    },
+                  ]}
+                >
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 12,
+                    }}
+                  >
+                    <View
+                      style={[
+                        styles.menuIconBox,
+                        { backgroundColor: isDark ? "#2b2b2b" : "#f3f4f6" },
+                      ]}
+                    >
+                      <Ionicons
+                        name="moon-outline"
+                        size={20}
+                        color={isDark ? "#a78bfa" : "#333"}
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.menuLabel,
+                        { color: isDark ? colors.text : "#333" },
+                      ]}
+                    >
+                      Dark Mode
+                    </Text>
+                  </View>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      backgroundColor: isDark ? "#2b2b2b" : "#f3f4f6",
+                      borderRadius: 10,
+                      padding: 3,
+                    }}
+                  >
+                    {(["light", "auto", "dark"] as const).map((mode) => (
+                      <TouchableOpacity
+                        key={mode}
+                        onPress={() => setThemeMode(mode)}
+                        style={{
+                          flex: 1,
+                          paddingVertical: 7,
+                          borderRadius: 8,
+                          alignItems: "center",
+                          backgroundColor:
+                            themeMode === mode
+                              ? isDark
+                                ? "#555"
+                                : "white"
+                              : "transparent",
+                          ...(themeMode === mode
+                            ? {
+                                shadowColor: "#000",
+                                shadowOpacity: 0.1,
+                                shadowRadius: 2,
+                                elevation: 2,
+                              }
+                            : {}),
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 12,
+                            fontWeight: themeMode === mode ? "700" : "500",
+                            color:
+                              themeMode === mode
+                                ? isDark
+                                  ? "#fff"
+                                  : "#111"
+                                : isDark
+                                  ? "#888"
+                                  : "#666",
+                          }}
+                        >
+                          {mode === "light"
+                            ? "Off"
+                            : mode === "dark"
+                              ? "On"
+                              : "Auto"}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              </View>
+
+              {/* Legal Section */}
+              <Text
+                style={[
+                  styles.sectionHeader,
+                  { color: isDark ? colors.text : "#111" },
+                ]}
+              >
+                Legal
+              </Text>
+              <View
+                style={[
+                  styles.menuSection,
+                  { backgroundColor: isDark ? colors.card : "white" },
+                ]}
+              >
+                <MenuRow
+                  icon="document-text-outline"
+                  label="Terms of Service"
+                  onPress={() => setCurrentView("terms")}
+                />
+                <MenuRow
+                  icon="shield-checkmark-outline"
+                  label="Privacy Policy"
+                  onPress={() => setCurrentView("privacy")}
+                />
+              </View>
+
+              {/* Logout Section */}
+              <View
+                style={[
+                  styles.menuSection,
+                  {
+                    marginTop: 20,
+                    backgroundColor: isDark ? colors.card : "white",
+                  },
+                ]}
+              >
+                <MenuRow
+                  icon="shield-outline"
+                  label="Emergency Contacts"
+                  onPress={() => setCurrentView("emergency_contacts")}
+                />
+                <MenuRow
+                  icon="bug-outline"
+                  label="Report a Bug"
+                  onPress={handleReportBug}
+                />
+                {session && (
+                  <MenuRow
+                    icon="log-out-outline"
+                    label="Log Out"
+                    onPress={handleSignOut}
+                    danger
+                  />
+                )}
+              </View>
+            </>
+          )}
         </ScrollView>
       </SafeAreaView>
     );
@@ -2227,7 +2524,7 @@ export default function Profile() {
           { backgroundColor: isDark ? colors.background : "#f9fafb" },
         ]}
       >
-        <SubHeader title="Password" />
+        <SubHeader title="Password & Security" />
         <ScrollView contentContainerStyle={{ padding: 20 }}>
           <Text
             style={[
@@ -2321,6 +2618,95 @@ export default function Profile() {
               <Text style={styles.saveBtnText}>Update Password</Text>
             )}
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.saveBtn, { backgroundColor: "#ef4444" }]}
+            onPress={() => setCurrentView("delete_account")}
+          >
+            <Text style={styles.saveBtnText}>Delete Account</Text>
+          </TouchableOpacity>
+
+          {/* LOGIN RECORDS */}
+          <View style={{ marginTop: 30, marginBottom: 20 }}>
+            <Text
+              style={{
+                fontWeight: "bold",
+                fontSize: 13,
+                color: isDark ? colors.text : "#4b5563",
+                marginBottom: 5,
+                textTransform: "uppercase",
+              }}
+            >
+              LOGIN RECORDS
+            </Text>
+            <Text
+              style={{
+                fontSize: 12,
+                color: isDark ? colors.textMuted : "#9ca3af",
+                marginBottom: 15,
+              }}
+            >
+              Showing your 3 latest sign-ins.
+            </Text>
+
+            {loginRecords.length > 0 ? (
+              loginRecords.map((rec) => (
+                <View
+                  key={rec.id}
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    backgroundColor: isDark ? colors.card : "#f8f9fa",
+                    paddingHorizontal: 16,
+                    paddingVertical: 14,
+                    borderRadius: 12,
+                    marginBottom: 10,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: isDark ? colors.text : "#1f2937",
+                      fontWeight: "500",
+                      fontSize: 14,
+                    }}
+                  >
+                    {new Date(rec.created_at).toLocaleString("en-US", {
+                      year: "numeric",
+                      month: "numeric",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                      second: "2-digit",
+                      hour12: true,
+                    })}
+                  </Text>
+                  <Text
+                    style={{
+                      color: isDark ? colors.textMuted : "#6b7280",
+                      fontWeight: "bold",
+                      fontSize: 12,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {rec.method || "PASSWORD"}
+                  </Text>
+                </View>
+              ))
+            ) : (
+              <View
+                style={{
+                  backgroundColor: isDark ? colors.card : "#f8f9fa",
+                  padding: 15,
+                  borderRadius: 12,
+                  alignItems: "center",
+                }}
+              >
+                <Text style={{ color: isDark ? colors.textMuted : "#999" }}>
+                  No login records found yet.
+                </Text>
+              </View>
+            )}
+          </View>
 
           {/* DELETE ACCOUNT BUTTON */}
           <View
@@ -2329,15 +2715,6 @@ export default function Profile() {
               borderTopColor: isDark ? colors.border : "#eee",
             }}
           >
-            {/* <Text style={{ color: isDark ? colors.textMuted : '#666', fontSize: 13, marginBottom: 15 }}>
-              If you no longer want to use your Abalay account, you can request to delete it.
-            </Text> */}
-            <TouchableOpacity
-              style={[styles.saveBtn, { backgroundColor: "#ef4444" }]}
-              onPress={() => setCurrentView("delete_account")}
-            >
-              <Text style={styles.saveBtnText}>Delete Account</Text>
-            </TouchableOpacity>
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -2607,6 +2984,325 @@ export default function Profile() {
               </TouchableOpacity>
             </>
           )}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // --- PAYMENT METHODS ---
+  if (currentView === "payment_methods") {
+    const PaymentMethodCard = ({
+      type,
+      title,
+      subtitle,
+      icon,
+      iconBg,
+      number,
+      onNumberChange,
+      verified,
+      qrUrl,
+      onUploadQr,
+      isUploading,
+    }: any) => (
+      <View
+        style={[
+          styles.paymentCard,
+          {
+            backgroundColor: isDark ? colors.card : "white",
+            borderColor:
+              type === "gcash" ? "#3b82f6" : type === "maya" ? "#10b981" : "#eee",
+            borderWidth: 1.5,
+          },
+        ]}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <View style={[styles.paymentIconCircle, { backgroundColor: iconBg }]}>
+            <Text style={{ color: "white", fontWeight: "bold", fontSize: 18 }}>
+              {icon}
+            </Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text
+              style={[
+                styles.paymentCardTitle,
+                { color: isDark ? colors.text : "#111" },
+              ]}
+            >
+              {title}
+            </Text>
+            <Text
+              style={{
+                fontSize: 12,
+                color: isDark ? colors.textMuted : "#6b7280",
+              }}
+            >
+              {subtitle}
+            </Text>
+          </View>
+          <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+            <View
+              style={[
+                styles.paymentBadge,
+                { backgroundColor: verified ? "#d1fae5" : "#fee2e2" },
+              ]}
+            >
+              <Text
+                style={{
+                  fontSize: 10,
+                  fontWeight: "700",
+                  color: verified ? "#065f46" : "#991b1b",
+                }}
+              >
+                {verified ? "Verified" : "Unverified"}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={{
+                backgroundColor: isDark ? colors.surface : "#f3f4f6",
+                paddingHorizontal: 10,
+                paddingVertical: 5,
+                borderRadius: 8,
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 12,
+                  fontWeight: "600",
+                  color: isDark ? colors.text : "#374151",
+                }}
+              >
+                Change
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View
+          style={[
+            styles.paymentNumberBox,
+            {
+              backgroundColor: isDark ? colors.surface : "#fff",
+              borderColor: isDark ? colors.border : "#e5e7eb",
+            },
+          ]}
+        >
+          <Ionicons
+            name="call-outline"
+            size={18}
+            color={type === "gcash" ? "#3b82f6" : "#10b981"}
+          />
+          <TextInput
+            style={{
+              flex: 1,
+              paddingVertical: 10,
+              fontSize: 16,
+              fontWeight: "600",
+              color: isDark ? colors.text : "#111",
+            }}
+            value={number}
+            onChangeText={onNumberChange}
+            keyboardType="phone-pad"
+            placeholder="09XXXXXXXXX"
+            placeholderTextColor={isDark ? colors.textMuted : "#999"}
+          />
+        </View>
+
+        <Text
+          style={{
+            fontSize: 11,
+            fontWeight: "700",
+            color: isDark ? colors.textSecondary : "#6b7280",
+            marginTop: 15,
+            marginBottom: 8,
+          }}
+        >
+          QR CODE (OPTIONAL)
+        </Text>
+
+        <TouchableOpacity
+          onPress={onUploadQr}
+          disabled={isUploading}
+          style={[
+            styles.paymentUploadQr,
+            {
+              backgroundColor: isDark ? colors.surface : "#fff",
+              borderColor: isDark ? colors.border : "#e5e7eb",
+            },
+          ]}
+        >
+          {isUploading ? (
+            <ActivityIndicator color={colors.accent} />
+          ) : qrUrl ? (
+            <Image source={{ uri: qrUrl }} style={styles.paymentQrPreview} />
+          ) : (
+            <>
+              <Ionicons
+                name="image-outline"
+                size={24}
+                color={isDark ? colors.textMuted : "#9ca3af"}
+              />
+              <Text
+                style={{
+                  fontSize: 11,
+                  color: isDark ? colors.textMuted : "#9ca3af",
+                  marginTop: 4,
+                }}
+              >
+                Upload QR
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
+    );
+
+    return (
+      <SafeAreaView
+        style={[
+          styles.container,
+          { backgroundColor: isDark ? colors.background : "#f9fafb" },
+        ]}
+      >
+        <SubHeader
+          title="Payment Methods"
+          rightAction={() => (
+            <TouchableOpacity
+              onPress={handleUpdatePaymentMethods}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color="#2563eb" />
+              ) : (
+                <Text
+                  style={{
+                    color: "#2563eb",
+                    fontWeight: "700",
+                    fontSize: 16,
+                  }}
+                >
+                  Save
+                </Text>
+              )}
+            </TouchableOpacity>
+          )}
+        />
+        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+          <Text
+            style={[
+              styles.sectionTitle,
+              { color: isDark ? colors.text : "#111", marginBottom: 8 },
+            ]}
+          >
+            Payment Methods
+          </Text>
+          <Text
+            style={{
+              fontSize: 13,
+              color: isDark ? colors.textMuted : "#6b7280",
+              marginBottom: 24,
+              lineHeight: 18,
+            }}
+          >
+            Manage your GCash and Maya numbers. Tenants will see these as
+            payment options.
+          </Text>
+
+          {/* GCash */}
+          <PaymentMethodCard
+            type="gcash"
+            title="GCash"
+            subtitle="Mobile wallet"
+            icon="G"
+            iconBg="#3b82f6"
+            number={gcashNumber}
+            onNumberChange={setGcashNumber}
+            verified={gcashVerified}
+            qrUrl={gcashQrUrl}
+            onUploadQr={() => pickQrImage("gcash")}
+            isUploading={uploadingQr === "gcash"}
+          />
+
+          {/* Maya */}
+          <PaymentMethodCard
+            type="maya"
+            title="Maya"
+            subtitle="Digital payment"
+            icon="M"
+            iconBg="#10b981"
+            number={mayaNumber}
+            onNumberChange={setMayaNumber}
+            verified={mayaVerified}
+            qrUrl={mayaQrUrl}
+            onUploadQr={() => pickQrImage("maya")}
+            isUploading={uploadingQr === "maya"}
+          />
+
+          {/* Cash */}
+          <View
+            style={[
+              styles.paymentCard,
+              {
+                backgroundColor: isDark ? colors.card : "#f8f9fa",
+                borderColor: isDark ? colors.border : "#eee",
+                borderWidth: 1,
+                opacity: 0.85,
+                marginTop: 10,
+              },
+            ]}
+          >
+            <View
+              style={{ flexDirection: "row", alignItems: "center", gap: 12 }}
+            >
+              <View
+                style={[
+                  styles.paymentIconCircle,
+                  { backgroundColor: isDark ? "#1f2937" : "#111" },
+                ]}
+              >
+                <Text
+                  style={{ color: "white", fontWeight: "bold", fontSize: 16 }}
+                >
+                  ₱
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.paymentCardTitle,
+                    { color: isDark ? colors.text : "#111" },
+                  ]}
+                >
+                  Cash
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: isDark ? colors.textMuted : "#6b7280",
+                  }}
+                >
+                  Always accepted — cannot be disabled
+                </Text>
+              </View>
+              <View
+                style={{
+                  backgroundColor: isDark ? colors.surface : "#f3f4f6",
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 12,
+                }}
+              >
+                <Text
+                  style={{
+                    fontSize: 11,
+                    fontWeight: "700",
+                    color: isDark ? colors.textSecondary : "#6b7280",
+                  }}
+                >
+                  Default
+                </Text>
+              </View>
+            </View>
+          </View>
         </ScrollView>
       </SafeAreaView>
     );
@@ -3027,6 +3723,12 @@ const styles = StyleSheet.create({
     color: "#111",
     marginBottom: 10,
   },
+  guestSubtitle: {
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+    maxWidth: 280,
+  },
   ratingContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -3083,6 +3785,31 @@ const styles = StyleSheet.create({
     backgroundColor: "#f3f4f6",
     alignItems: "center",
     justifyContent: "center",
+  },
+  authActionGroup: {
+    marginHorizontal: 20,
+    gap: 12,
+  },
+  authPrimaryBtn: {
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  authPrimaryBtnText: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  authSecondaryBtn: {
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  authSecondaryBtnText: {
+    fontSize: 15,
+    fontWeight: "700",
   },
 
   // Form Styles (Reused)
@@ -3351,5 +4078,51 @@ const styles = StyleSheet.create({
   emergencySourceText: {
     fontSize: 11,
     fontWeight: "600",
+  },
+
+  // Payment Methods
+  paymentCard: {
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
+  paymentIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  paymentCardTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  paymentBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  paymentNumberBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 16,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+  },
+  paymentUploadQr: {
+    height: 120,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  paymentQrPreview: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "contain",
   },
 });

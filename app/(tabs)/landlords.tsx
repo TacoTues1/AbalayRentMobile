@@ -352,7 +352,10 @@ export default function LandlordsSearchScreen() {
       ]}
     >
       <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity
+          onPress={() => router.replace("/(tabs)")}
+          style={styles.backBtn}
+        >
           <Ionicons
             name="arrow-back"
             size={22}

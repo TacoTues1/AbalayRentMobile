@@ -686,8 +686,14 @@ export default function TabLayout() {
         name="assigntenant"
         options={{ href: null, tabBarStyle: { display: "none" } }}
       />
-      <Tabs.Screen name="landlords" options={{ href: null }} />
-      <Tabs.Screen name="landlord/[id]" options={{ href: null }} />
+      <Tabs.Screen
+        name="landlords"
+        options={{ href: null, tabBarStyle: { display: "none" } }}
+      />
+      <Tabs.Screen
+        name="landlord/[id]"
+        options={{ href: null, tabBarStyle: { display: "none" } }}
+      />
       <Tabs.Screen name="active-properties" options={{ href: null }} />
       <Tabs.Screen name="rented-tenant/[id]" options={{ href: null }} />
       <Tabs.Screen

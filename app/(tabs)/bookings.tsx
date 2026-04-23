@@ -22,15 +22,50 @@ import {
     View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import GuestGuard from "../../components/auth/GuestGuard";
 import CalendarPicker from "../../components/ui/CalendarPicker";
 import { createNotification } from "../../lib/notifications";
 import { supabase } from "../../lib/supabase";
+import { downloadExcel } from "../../lib/exportExcel";
 import { useTheme } from "../../lib/theme";
-import GuestGuard from "../../components/auth/GuestGuard";
 
 // Optional: Define your backend URL if you want to send actual emails like the Next.js app
 const API_URL = (process.env.EXPO_PUBLIC_API_URL || "").replace(/\/+$/, "");
 const BOOKINGS_LOADING_SKELETON_COUNT = 4;
+const DEFAULT_PAID_MOVE_IN_ITEMS = {
+  rent: false,
+  securityDeposit: false,
+  advance: false,
+};
+
+const joinMoveInLabels = (labels: string[]) => {
+  if (labels.length <= 1) return labels[0] || "";
+  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+  return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
+};
+
+const buildMoveInDescription = ({
+  rentAmount,
+  advanceAmount,
+  securityDepositAmount,
+  paidOffline = false,
+}: {
+  rentAmount: number;
+  advanceAmount: number;
+  securityDepositAmount: number;
+  paidOffline?: boolean;
+}) => {
+  const parts: string[] = [];
+  if (rentAmount > 0) parts.push("Rent");
+  if (advanceAmount > 0) parts.push("Advance");
+  if (securityDepositAmount > 0) parts.push("Security Deposit");
+
+  const base = parts.length
+    ? `Move-in Payment (${parts.join(" + ")})`
+    : "Move-in Payment";
+
+  return paidOffline ? `${base} - Paid Offline` : base;
+};
 
 function SkeletonBlock({
   width = "100%",
@@ -139,7 +174,14 @@ export default function Bookings() {
   const [wifiDueDay, setWifiDueDay] = useState("");
   const [waterDueDay, setWaterDueDay] = useState("");
   const [electricityDueDay, setElectricityDueDay] = useState("");
-  const [alreadyPaid, setAlreadyPaid] = useState(false);
+  const [paidMoveInItems, setPaidMoveInItems] = useState(
+    DEFAULT_PAID_MOVE_IN_ITEMS,
+  );
+  const togglePaidMoveInItem = (
+    key: keyof typeof DEFAULT_PAID_MOVE_IN_ITEMS,
+  ) => {
+    setPaidMoveInItems((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
   const [penaltyDetails, setPenaltyDetails] = useState("");
   const [contractFile, setContractFile] = useState<any>(null);
   const [uploadingContract, setUploadingContract] = useState(false);
@@ -591,7 +633,7 @@ export default function Bookings() {
           return;
         }
 
-        const propIds = myProperties.map((p) => p.id);
+        const propIds = myProperties.map((p: any) => p.id);
 
         const query = supabase
           .from("bookings")
@@ -624,7 +666,7 @@ export default function Bookings() {
           .eq("status", "accepted");
 
         if (acceptedApps && acceptedApps.length > 0) {
-          const appsToBook = acceptedApps.map((app) => ({
+          const appsToBook = acceptedApps.map((app: any) => ({
             id: app.id,
             is_application: true,
             property_id: app.property_id,
@@ -665,12 +707,12 @@ export default function Bookings() {
         .in("id", tenantIds);
 
       const propMap: any = {};
-      properties?.forEach((p) => {
+      properties?.forEach((p: any) => {
         propMap[p.id] = p;
       });
 
       const tenantMap: any = {};
-      tenantProfiles?.forEach((t) => {
+      tenantProfiles?.forEach((t: any) => {
         tenantMap[t.id] = t;
       });
 
@@ -1098,7 +1140,7 @@ export default function Bookings() {
     setWifiDueDay("");
     setWaterDueDay("");
     setElectricityDueDay("");
-    setAlreadyPaid(false);
+    setPaidMoveInItems({ ...DEFAULT_PAID_MOVE_IN_ITEMS });
     setContractFile(null);
     setSelectedPropertyId(requestedPropertyId);
     setShowWifiDayPicker(false);
@@ -1259,6 +1301,33 @@ export default function Bookings() {
     const securityDeposit = hasSecurityDeposit
       ? Number(selectedProp?.security_deposit_amount || rentAmount)
       : 0;
+    const effectivePaidMoveInItems = {
+      rent: paidMoveInItems.rent,
+      securityDeposit: hasSecurityDeposit && paidMoveInItems.securityDeposit,
+      advance: hasAdvance && paidMoveInItems.advance,
+    };
+    const pendingRentAmount = effectivePaidMoveInItems.rent ? 0 : rentAmount;
+    const pendingAdvanceAmount = effectivePaidMoveInItems.advance
+      ? 0
+      : advanceAmount;
+    const pendingSecurityDepositAmount =
+      effectivePaidMoveInItems.securityDeposit ? 0 : securityDeposit;
+    const paidOfflineRentAmount = effectivePaidMoveInItems.rent
+      ? rentAmount
+      : 0;
+    const paidOfflineAdvanceAmount = effectivePaidMoveInItems.advance
+      ? advanceAmount
+      : 0;
+    const paidOfflineSecurityDepositAmount =
+      effectivePaidMoveInItems.securityDeposit ? securityDeposit : 0;
+    const hasPendingMoveInAmount =
+      pendingRentAmount + pendingAdvanceAmount + pendingSecurityDepositAmount >
+      0;
+    const hasPaidOfflineMoveInAmount =
+      paidOfflineRentAmount +
+        paidOfflineAdvanceAmount +
+        paidOfflineSecurityDepositAmount >
+      0;
 
     try {
       // DB Updates
@@ -1306,9 +1375,19 @@ export default function Bookings() {
 
       // Notification
       try {
-        let msg = `You have been assigned to "${selectedProp?.title}" from ${startDate}.`;
-        if (alreadyPaid) msg += ` Move-in fees were marked as already paid.`;
-        else msg += ` Move-in bill sent.`;
+        const startDateLabel = new Date(startDate).toLocaleDateString("en-US", {
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        });
+        let msg = `Your occupancy will start on ${startDateLabel} for "${selectedProp?.title}".`;
+        if (hasPendingMoveInAmount && hasPaidOfflineMoveInAmount) {
+          msg += ` Some move-in fees were marked as already paid offline, and a bill was sent for the remaining fees.`;
+        } else if (hasPaidOfflineMoveInAmount) {
+          msg += ` Move-in fees were marked as already paid offline.`;
+        } else if (hasPendingMoveInAmount) {
+          msg += ` Move-in bill sent.`;
+        }
 
         await createNotification(booking.tenant, "occupancy_assigned", msg, {
           actor: session.user.id,
@@ -1341,7 +1420,7 @@ export default function Bookings() {
             }),
           }).catch((e) => console.log("Email Error:", e));
 
-          if (!alreadyPaid) {
+          if (hasPendingMoveInAmount) {
             fetch(`${API_URL}/api/notify`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1358,8 +1437,9 @@ export default function Bookings() {
                   `${session?.user?.user_metadata?.first_name || ""} ${session?.user?.user_metadata?.last_name || ""}`.trim() ||
                   "Landlord",
                 landlordPhone: session?.user?.user_metadata?.phone || "",
-                securityDeposit: securityDeposit,
-                rentAmount: rentAmount,
+                securityDeposit: pendingSecurityDepositAmount,
+                rentAmount: pendingRentAmount,
+                advanceAmount: pendingAdvanceAmount,
                 contractPdfUrl: contractUrl,
               }),
             }).catch((e) => console.log("Move-in email Error:", e));
@@ -1370,18 +1450,21 @@ export default function Bookings() {
       }
 
       // Bill
-      if (!alreadyPaid) {
+      if (hasPendingMoveInAmount) {
         // Tenant hasn't paid yet — create a pending bill
         await supabase.from("payment_requests").insert({
           landlord: session.user.id,
           tenant: booking.tenant,
           property_id: selectedPropertyId,
           occupancy_id: newOccupancy.id,
-          rent_amount: rentAmount,
-          advance_amount: advanceAmount,
-          security_deposit_amount: securityDeposit,
-          bills_description:
-            "Move-in Payment (Rent + Advance + Security Deposit)",
+          rent_amount: pendingRentAmount,
+          advance_amount: pendingAdvanceAmount,
+          security_deposit_amount: pendingSecurityDepositAmount,
+          bills_description: buildMoveInDescription({
+            rentAmount: pendingRentAmount,
+            advanceAmount: pendingAdvanceAmount,
+            securityDepositAmount: pendingSecurityDepositAmount,
+          }),
           due_date: new Date(startDate).toISOString(),
           status: "pending",
           is_move_in_payment: true,
@@ -1394,11 +1477,15 @@ export default function Bookings() {
           tenant: booking.tenant,
           property_id: selectedPropertyId,
           occupancy_id: newOccupancy.id,
-          rent_amount: rentAmount,
-          advance_amount: advanceAmount,
-          security_deposit_amount: securityDeposit,
-          bills_description:
-            "Move-in Payment (Rent + Advance + Security Deposit) - Paid Offline",
+          rent_amount: paidOfflineRentAmount,
+          advance_amount: paidOfflineAdvanceAmount,
+          security_deposit_amount: paidOfflineSecurityDepositAmount,
+          bills_description: buildMoveInDescription({
+            rentAmount: paidOfflineRentAmount,
+            advanceAmount: paidOfflineAdvanceAmount,
+            securityDepositAmount: paidOfflineSecurityDepositAmount,
+            paidOffline: true,
+          }),
           due_date: new Date(startDate).toISOString(),
           status: "paid",
           is_move_in_payment: true,
@@ -1410,9 +1497,11 @@ export default function Bookings() {
       setAssignBooking(null);
       Alert.alert(
         "Success",
-        alreadyPaid
-          ? "Tenant assigned successfully!"
-          : "Tenant assigned! Move-in payment bill sent.",
+        hasPendingMoveInAmount && hasPaidOfflineMoveInAmount
+          ? "Tenant assigned! Remaining move-in bill created."
+          : hasPendingMoveInAmount
+            ? "Tenant assigned! Move-in payment bill sent."
+            : "Tenant assigned successfully!",
       );
       loadBookings(session.user.id, profile.role, filter);
     } catch (err: any) {
@@ -1465,11 +1554,15 @@ export default function Bookings() {
     }
 
     Alert.alert(
-      "Confirm Assignment?",
-      "This will generate a move-in bill and mark the property as occupied.",
+      "Warning: Permanent Action",
+      "This action CANNOT be undone. This will officially assign the tenant and generate a move-in bill. Are you sure you want to proceed?",
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Confirm & Assign", onPress: executeAssignment },
+        {
+          text: "Yes, Confirm & Assign",
+          style: "destructive",
+          onPress: executeAssignment,
+        },
       ],
     );
   };
@@ -2526,22 +2619,74 @@ export default function Bookings() {
           {
             backgroundColor: isDark ? colors.surface : "white",
             borderBottomColor: isDark ? colors.border : "#f3f4f6",
+            flexDirection: "row",
+            justifyContent: "space-between",
+            alignItems: "center",
           },
         ]}
       >
-        <Text
-          style={[styles.headerTitle, { color: isDark ? colors.text : "#111" }]}
-        >
-          Viewing Bookings
-        </Text>
-        <Text
-          style={[
-            styles.headerSub,
-            { color: isDark ? colors.textMuted : "#666" },
-          ]}
-        >
-          Manage your viewing appointments.
-        </Text>
+        <View style={{ flex: 1 }}>
+          <Text
+            style={[
+              styles.headerTitle,
+              { color: isDark ? colors.text : "#111" },
+            ]}
+          >
+            Viewing Bookings
+          </Text>
+          <Text
+            style={[
+              styles.headerSub,
+              { color: isDark ? colors.textMuted : "#666" },
+            ]}
+          >
+            Manage your viewing appointments.
+          </Text>
+        </View>
+
+        {profile?.role === "landlord" && allBookings.length > 0 && (
+          <TouchableOpacity
+            onPress={() => {
+              const rows = allBookings
+                .filter((b) => !b.is_application)
+                .map((b) => ({
+                  Property: b.property?.title || "-",
+                  Tenant: b.tenant_profile
+                    ? `${b.tenant_profile.first_name || ""} ${b.tenant_profile.last_name || ""}`.trim()
+                    : "-",
+                  Status: (b.status || "").replace(/_/g, " "),
+                  "Booking Date": b.booking_date
+                    ? new Date(b.booking_date).toLocaleDateString()
+                    : "-",
+                  "Start Time": b.start_time
+                    ? new Date(b.start_time).toLocaleString()
+                    : "-",
+                  "End Time": b.end_time
+                    ? new Date(b.end_time).toLocaleString()
+                    : "-",
+                  Notes: b.notes || "-",
+                }));
+              downloadExcel(
+                rows,
+                "Bookings",
+                `bookings_${new Date().toISOString().slice(0, 10)}`,
+              );
+            }}
+            style={[
+              styles.exportBtn,
+              {
+                borderColor: isDark ? colors.border : "#d1d5db",
+                backgroundColor: isDark ? colors.card : "white",
+              },
+            ]}
+          >
+            <Ionicons
+              name="download-outline"
+              size={18}
+              color={isDark ? colors.text : "#374151"}
+            />
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Stats Grid */}
@@ -4197,6 +4342,21 @@ export default function Bookings() {
                     : 0;
                   const uiTotalMoveIn =
                     rentPrice + uiAdvanceAmount + uiSecurityDeposit;
+                  const effectivePaidMoveInItems = {
+                    rent: paidMoveInItems.rent,
+                    securityDeposit:
+                      hasSecurityDeposit && paidMoveInItems.securityDeposit,
+                    advance: hasAdvance && paidMoveInItems.advance,
+                  };
+                  const paidOfflineLabels = [
+                    effectivePaidMoveInItems.rent ? "Rent Bill" : null,
+                    effectivePaidMoveInItems.securityDeposit
+                      ? "Security Deposit"
+                      : null,
+                    effectivePaidMoveInItems.advance ? "Advance Payment" : null,
+                  ].filter(Boolean) as string[];
+                  const hasPaidOfflineMoveInAmount =
+                    paidOfflineLabels.length > 0;
 
                   return (
                     <View style={{ width: "100%" }}>
@@ -4310,6 +4470,34 @@ export default function Bookings() {
                   const isElecFree = amenities.includes("Free Electricity");
                   const isWifiFree = amenities.includes("Free WiFi");
                   const requireWifiDueDate = amenities.includes("Paid WiFi");
+                  const rentPrice =
+                    selectedPropInfo?.price ||
+                    assignBooking?.property?.price ||
+                    0;
+                  const hasAdvance =
+                    typeof selectedPropInfo?.has_advance === "boolean"
+                      ? selectedPropInfo?.has_advance
+                      : Number(selectedPropInfo?.advance_amount || 0) > 0;
+                  const hasSecurityDeposit =
+                    typeof selectedPropInfo?.has_security_deposit === "boolean"
+                      ? selectedPropInfo?.has_security_deposit
+                      : Number(selectedPropInfo?.security_deposit_amount || 0) >
+                        0;
+                  const effectivePaidMoveInItems = {
+                    rent: paidMoveInItems.rent,
+                    securityDeposit:
+                      hasSecurityDeposit && paidMoveInItems.securityDeposit,
+                    advance: hasAdvance && paidMoveInItems.advance,
+                  };
+                  const paidOfflineLabels = [
+                    effectivePaidMoveInItems.rent ? "Rent Bill" : null,
+                    effectivePaidMoveInItems.securityDeposit
+                      ? "Security Deposit"
+                      : null,
+                    effectivePaidMoveInItems.advance ? "Advance Payment" : null,
+                  ].filter(Boolean) as string[];
+                  const hasPaidOfflineMoveInAmount =
+                    paidOfflineLabels.length > 0;
 
                   return (
                     <View style={{ width: "100%" }}>
@@ -4528,36 +4716,84 @@ export default function Bookings() {
                       )}
 
                       <View style={styles.alreadyPaidCard}>
-                        <View style={{ flex: 1, paddingRight: 10 }}>
+                        <View style={{ flex: 1 }}>
                           <Text style={styles.alreadyPaidTitle}>
                             Tenant already paid?
                           </Text>
                           <Text style={styles.alreadyPaidDesc}>
-                            Skip auto-billing if payment was received offline.
+                            Tap each fee already paid offline. Only unpaid fees
+                            will be auto-billed.
                           </Text>
                         </View>
-                        <TouchableOpacity
-                          activeOpacity={0.8}
-                          onPress={() => setAlreadyPaid(!alreadyPaid)}
-                        >
-                          <View
+                        <View style={styles.alreadyPaidOptions}>
+                          <TouchableOpacity
+                            activeOpacity={0.85}
+                            onPress={() => togglePaidMoveInItem("rent")}
                             style={[
-                              styles.switchTrack,
-                              alreadyPaid && styles.switchTrackActive,
+                              styles.alreadyPaidOption,
+                              effectivePaidMoveInItems.rent &&
+                                styles.alreadyPaidOptionActive,
                             ]}
                           >
-                            <View
+                            <Text
                               style={[
-                                styles.switchThumb,
-                                alreadyPaid && styles.switchThumbActive,
+                                styles.alreadyPaidOptionText,
+                                effectivePaidMoveInItems.rent &&
+                                  styles.alreadyPaidOptionTextActive,
                               ]}
-                            />
-                          </View>
-                        </TouchableOpacity>
+                            >
+                              Rent Bill
+                            </Text>
+                          </TouchableOpacity>
+                          {hasSecurityDeposit && (
+                            <TouchableOpacity
+                              activeOpacity={0.85}
+                              onPress={() =>
+                                togglePaidMoveInItem("securityDeposit")
+                              }
+                              style={[
+                                styles.alreadyPaidOption,
+                                effectivePaidMoveInItems.securityDeposit &&
+                                  styles.alreadyPaidOptionActive,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.alreadyPaidOptionText,
+                                  effectivePaidMoveInItems.securityDeposit &&
+                                    styles.alreadyPaidOptionTextActive,
+                                ]}
+                              >
+                                Security Deposit
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+                          {hasAdvance && (
+                            <TouchableOpacity
+                              activeOpacity={0.85}
+                              onPress={() => togglePaidMoveInItem("advance")}
+                              style={[
+                                styles.alreadyPaidOption,
+                                effectivePaidMoveInItems.advance &&
+                                  styles.alreadyPaidOptionActive,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.alreadyPaidOptionText,
+                                  effectivePaidMoveInItems.advance &&
+                                    styles.alreadyPaidOptionTextActive,
+                                ]}
+                              >
+                                Advance Payment
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
                       </View>
-                      {alreadyPaid && (
+                      {hasPaidOfflineMoveInAmount && (
                         <Text style={styles.alreadyPaidNote}>
-                          ✓ No move-in bill will be generated
+                          Paid offline: {joinMoveInLabels(paidOfflineLabels)}
                         </Text>
                       )}
                     </View>
@@ -4719,6 +4955,14 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 24, fontWeight: "900", color: "#111" },
   headerSub: { fontSize: 14, color: "#666", marginTop: 4 },
+  exportBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+  },
 
   statsGrid: { flexDirection: "row", gap: 10, padding: 20, paddingBottom: 0 },
   statCard: {
@@ -5494,8 +5738,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: "#e5e7eb",
-    flexDirection: "row",
-    alignItems: "center",
     shadowColor: "#000",
     shadowOpacity: 0.02,
     shadowRadius: 10,
@@ -5503,6 +5745,30 @@ const styles = StyleSheet.create({
   },
   alreadyPaidTitle: { fontSize: 13, fontWeight: "800", color: "#111" },
   alreadyPaidDesc: { fontSize: 11, color: "#6b7280", marginTop: 3 },
+  alreadyPaidOptions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 12,
+  },
+  alreadyPaidOption: {
+    backgroundColor: "#f8fafc",
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  alreadyPaidOptionActive: {
+    backgroundColor: "#ecfdf5",
+    borderColor: "#10b981",
+  },
+  alreadyPaidOptionText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#374151",
+  },
+  alreadyPaidOptionTextActive: { color: "#047857" },
   switchTrack: {
     width: 50,
     height: 28,

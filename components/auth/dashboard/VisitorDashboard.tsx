@@ -37,6 +37,709 @@ const NO_OCCUPANCY_LOADING_SKELETON_COUNT = 6;
 const MAX_DISPLAY_ITEMS = 7;
 const NEARBY_RADIUS_KM = 1;
 
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#f9fafb" },
+  section: { marginTop: 24 },
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    marginBottom: 12,
+    alignItems: "center",
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: "900",
+    color: "#111",
+    textTransform: "uppercase",
+  },
+  seeMore: { fontSize: 14, color: "#333", fontWeight: "600" },
+  listContainer: { paddingHorizontal: 20, paddingBottom: 10 },
+
+  // Header
+  dashboardContent: { padding: 20 },
+  headerRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    marginBottom: 20,
+  },
+  headerTitle: { fontSize: 26, fontWeight: "bold", color: "#111" },
+  headerSubtitle: { fontSize: 13, color: "#666", marginTop: 4 },
+  seeMoreLink: { fontSize: 12, fontWeight: "bold", color: "#666" },
+
+  // Active Card
+  activeCard: {
+    backgroundColor: "white",
+    borderRadius: 24,
+    padding: 0,
+    marginBottom: 20,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 5,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#eee",
+  },
+  activeImageContainer: { height: 220, position: "relative" },
+  activeImage: { width: "100%", height: "100%" },
+  activeGradient: {
+    position: "absolute",
+    bottom: 0,
+    width: "100%",
+    height: 100,
+  },
+  activeBadge: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#ecfdf5",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#d1fae5",
+  },
+  statusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
+  activeBadgeText: {
+    fontSize: 10,
+    fontWeight: "bold",
+    color: "#047857",
+    textTransform: "uppercase",
+  },
+  activeInfoOverlay: { position: "absolute", bottom: 12, left: 16, right: 16 },
+  activeTitle: {
+    fontSize: 22,
+    fontWeight: "bold",
+    color: "white",
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowRadius: 4,
+  },
+  activeAddress: { fontSize: 12, color: "rgba(255,255,255,0.9)", marginTop: 2 },
+  sliderDots: {
+    position: "absolute",
+    top: 16,
+    right: 16,
+    flexDirection: "row",
+    gap: 4,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "rgba(255,255,255,0.4)",
+  },
+  dotActive: { width: 12, backgroundColor: "white" },
+
+  activeContent: { padding: 16 },
+  leaseRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f3f4f6",
+    paddingBottom: 12,
+  },
+  leaseItem: {},
+  leaseLabel: {
+    fontSize: 10,
+    color: "#9ca3af",
+    fontWeight: "bold",
+    marginBottom: 4,
+  },
+  leaseValue: { fontSize: 13, fontWeight: "bold", color: "#111" },
+  gridActions: { flexDirection: "row", gap: 10 },
+  gridBtn: {
+    flex: 1,
+    height: 40,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+  },
+  btnGray: { backgroundColor: "#f3f4f6" },
+  btnBlack: { backgroundColor: "#000" },
+  btnOutline: {
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    backgroundColor: "white",
+  },
+  btnOutlineRed: {
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    backgroundColor: "#fef2f2",
+  },
+  btnDisabled: { backgroundColor: "#f3f4f6" },
+  btnTextGray: { fontWeight: "bold", fontSize: 12, color: "#374151" },
+  btnTextWhite: { fontWeight: "bold", fontSize: 12, color: "white" },
+  btnTextBlack: { fontWeight: "bold", fontSize: 12, color: "#111" },
+  btnTextRed: { fontWeight: "bold", fontSize: 12, color: "#dc2626" },
+  btnTextDisabled: { fontWeight: "bold", fontSize: 12, color: "#9ca3af" },
+
+  // Info Cards
+  infoCard: {
+    backgroundColor: "white",
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#f3f4f6",
+  },
+  cardHeaderSmall: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 16,
+  },
+  iconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#f3f4f6",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cardTitleSmall: { fontSize: 14, fontWeight: "bold", color: "#111" },
+  rowBetween: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  textLabel: { fontSize: 12, color: "#6b7280" },
+  textLabelBold: { fontSize: 13, color: "#374151", fontWeight: "bold" },
+  textValueBlack: { fontSize: 13, fontWeight: "bold", color: "#000" },
+  textValueGray: { fontSize: 13, fontWeight: "bold", color: "#6b7280" },
+  textValueBig: { fontSize: 18, fontWeight: "900", color: "#111" },
+  borderTop: { borderTopWidth: 1, borderTopColor: "#f3f4f6" },
+  tipBox: {
+    marginTop: 10,
+    backgroundColor: "#f9fafb",
+    padding: 8,
+    borderRadius: 8,
+  },
+  tipText: { fontSize: 10, color: "#4b5563" },
+  centerBox: { alignItems: "center", paddingVertical: 10 },
+
+  utilityItem: { flexDirection: "row", gap: 12, alignItems: "center" },
+  utilIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  utilTitle: { fontSize: 13, fontWeight: "bold", color: "#1f2937" },
+  utilSub: { fontSize: 11, color: "#6b7280" },
+
+  badgeRed: {
+    backgroundColor: "#fef2f2",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#fee2e2",
+  },
+  badgeRedText: { fontSize: 10, color: "#ea580c", fontWeight: "bold" },
+  seeAllText: { fontSize: 12, fontWeight: "bold", color: "#666" },
+
+  billRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 12,
+    backgroundColor: "#f8fafc",
+    borderRadius: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#f1f5f9",
+  },
+  billIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: "white",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  billTitle: { fontSize: 13, fontWeight: "bold", color: "#334155" },
+  billDate: { fontSize: 10, color: "#64748b" },
+  billAmount: { fontSize: 14, fontWeight: "900", color: "#0f172a" },
+  payBtnSmall: {
+    marginTop: 4,
+    backgroundColor: "black",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  payBtnText: { color: "white", fontSize: 10, fontWeight: "bold" },
+  emptyStateBox: {
+    alignItems: "center",
+    padding: 20,
+    backgroundColor: "#f8fafc",
+    borderRadius: 12,
+    borderStyle: "dashed",
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+  },
+  emptyStateText: {
+    marginTop: 8,
+    fontSize: 13,
+    color: "#64748b",
+    fontWeight: "500",
+  },
+  noteText: {
+    fontSize: 10,
+    color: "#94a3b8",
+    marginTop: 10,
+    textAlign: "center",
+  },
+
+  // Payment Overview
+  borderCard: {
+    backgroundColor: "white",
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 80,
+    borderWidth: 1,
+    borderColor: "#f3f4f6",
+  },
+  overviewRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  ovLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#9ca3af",
+    marginBottom: 4,
+  },
+  ovSub: { fontSize: 11, color: "#4b5563", fontWeight: "500" },
+  ovValue: { fontSize: 18, fontWeight: "900" },
+  ovBox: {
+    flex: 1,
+    backgroundColor: "#f9fafb",
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#f3f4f6",
+  },
+  ovDate: { fontSize: 13, fontWeight: "bold", color: "#111" },
+  ovDateGray: { fontSize: 13, fontWeight: "bold", color: "#6b7280" },
+
+  historySection: { marginTop: 20 },
+  historyGrid: { flexDirection: "row", flexWrap: "wrap" },
+  monthCol: { width: "16.66%", alignItems: "center", marginBottom: 12 },
+  monthText: {
+    fontSize: 10,
+    fontWeight: "bold",
+    marginBottom: 4,
+    textTransform: "uppercase",
+  },
+  dotPaid: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#86efac",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dotCurrent: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: "#000",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dotEmpty: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+  },
+
+  // Browse grid (no-occupancy)
+  browseSearchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f3f4f6",
+    paddingHorizontal: 14,
+    height: 46,
+    borderRadius: 14,
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 14,
+    marginBottom: 4,
+  },
+  browseSearchInput: { flex: 1, fontSize: 14, color: "#111" },
+  cityChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: "#f3f4f6",
+  },
+  cityChipText: { fontSize: 12, fontWeight: "700" },
+  browseGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+  },
+  gridCard: {
+    width: "48.5%",
+    backgroundColor: "white",
+    borderRadius: 14,
+    marginBottom: 12,
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 3,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#f3f4f6",
+  },
+  gridCardImage: { height: 120, position: "relative" },
+
+  // Existing Card & Modal Styles preserved...
+  card: {
+    width: CARD_WIDTH,
+    marginRight: 12,
+    backgroundColor: "white",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    overflow: "hidden",
+  },
+  cardImageContainer: {
+    height: 120,
+    width: "100%",
+    position: "relative",
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
+    overflow: "hidden",
+  },
+  cardImage: { width: "100%", height: "100%" },
+  cardGradient: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 60,
+  },
+  cardHeader: {
+    position: "absolute",
+    top: 10,
+    left: 10,
+    alignItems: "flex-start",
+  },
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginBottom: 4,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  badgeAvailable: { backgroundColor: "white" },
+  badgeOccupied: { backgroundColor: "rgba(0,0,0,0.8)" },
+  badgeFav: { backgroundColor: "#f43f5e", borderWidth: 0 },
+  badgeText: { fontSize: 10, fontWeight: "bold", textTransform: "uppercase" },
+  textDark: { color: "black" },
+  textWhite: { color: "white" },
+  cardActions: { position: "absolute", top: 8, right: 8 },
+  actionBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.9)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  actionBtnActive: { backgroundColor: "#111" },
+  priceOverlay: { position: "absolute", bottom: 8, left: 10 },
+  priceText: {
+    color: "white",
+    fontSize: 15,
+    fontWeight: "bold",
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowRadius: 4,
+  },
+  priceSub: {
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 9,
+    fontWeight: "600",
+    textTransform: "uppercase",
+  },
+  cardContent: { padding: 8 },
+  cardLocation: { fontSize: 10, color: "#6b7280", marginBottom: 4 },
+  cardBadgeRow: {
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    alignItems: "center",
+    gap: 4,
+    marginBottom: 6,
+  },
+  cardMetaBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 999,
+    alignItems: "center",
+  },
+  cardTitle: {
+    fontSize: 12,
+    fontWeight: "bold",
+    color: "#111",
+    marginBottom: 2,
+  },
+  featureRow: { flexDirection: "row", alignItems: "center" },
+  featureItem: { flexDirection: "row", alignItems: "center", gap: 4 },
+  featureText: { fontSize: 10, color: "#4b5563", fontWeight: "500" },
+  divider: {
+    width: 3,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "#d1d5db",
+    marginHorizontal: 6,
+  },
+  compareBtn: {
+    position: "absolute",
+    bottom: 30,
+    alignSelf: "center",
+    backgroundColor: "#111",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 30,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  compareText: {
+    color: "white",
+    fontWeight: "bold",
+    fontSize: 13,
+    letterSpacing: 0.5,
+  },
+  compareBadge: {
+    position: "absolute",
+    top: -6,
+    right: -6,
+    backgroundColor: "#ef4444",
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#111",
+  },
+  compareBadgeText: { color: "white", fontSize: 10, fontWeight: "bold" },
+
+  // Modals
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  modalContent: {
+    backgroundColor: "white",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    minHeight: 400,
+  },
+  modalIconContainer: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#111",
+    marginBottom: 8,
+  },
+  modalSubtitle: { fontSize: 14, color: "#666", marginBottom: 20 },
+  input: {
+    backgroundColor: "#f9fafb",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 14,
+    marginBottom: 16,
+  },
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#374151",
+    marginBottom: 6,
+  },
+  modalActions: { flexDirection: "row", gap: 12, marginTop: 10 },
+  cancelBtn: {
+    flex: 1,
+    backgroundColor: "#f3f4f6",
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  cancelBtnText: { fontWeight: "bold", color: "#374151" },
+  confirmBtn: {
+    flex: 1,
+    backgroundColor: "#111",
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  confirmBtnText: { fontWeight: "bold", color: "white" },
+
+  // Review Modal Styles
+  ratingCard: {
+    backgroundColor: "#f9fafb",
+    padding: 16,
+    borderRadius: 16,
+    marginBottom: 16,
+  },
+  ratingRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  ratingLabel: { fontSize: 13, fontWeight: "700", color: "#374151" },
+  starsRow: { flexDirection: "row", gap: 6 },
+  textArea: {
+    backgroundColor: "#f9fafb",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderRadius: 12,
+    padding: 14,
+    height: 100,
+    fontSize: 14,
+    marginBottom: 16,
+    textAlignVertical: "top",
+  },
+  checkboxContainer: { marginBottom: 20 },
+  authModalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  authModalContent: {
+    backgroundColor: "white",
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    padding: 24,
+    paddingBottom: Platform.OS === "ios" ? 40 : 30,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 20,
+  },
+  authModalHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: "#e5e7eb",
+    borderRadius: 2,
+    marginBottom: 24,
+  },
+  authModalTitle: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#111827",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  authModalSubtitle: {
+    fontSize: 15,
+    color: "#6b7280",
+    textAlign: "center",
+    marginBottom: 32,
+    lineHeight: 22,
+    paddingHorizontal: 20,
+  },
+  authModalPrimaryBtn: {
+    width: "100%",
+    backgroundColor: "#111827",
+    paddingVertical: 16,
+    borderRadius: 16,
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  authModalPrimaryBtnText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  authModalSecondaryBtn: {
+    width: "100%",
+    backgroundColor: "transparent",
+    paddingVertical: 16,
+    borderRadius: 16,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+  },
+  authModalSecondaryBtnText: {
+    color: "#111827",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  searchDropdown: {
+    position: "absolute",
+    top: 65,
+    left: 0,
+    right: 0,
+    borderRadius: 16,
+    zIndex: 2000,
+    elevation: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 15,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  searchDropdownItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    gap: 12,
+    borderBottomWidth: 1,
+  },
+  searchDropdownTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  searchDropdownCity: {
+    fontSize: 11,
+    fontWeight: "500",
+    marginTop: 2,
+  },
+});
+
 function toRadians(degrees: number) {
   return degrees * (Math.PI / 180);
 }
@@ -185,11 +888,13 @@ export default function VisitorDashboard({ session, profile }: any) {
   const [propertyStats, setPropertyStats] = useState<any>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [showAuthModal, setShowAuthModal] = useState(!session && !authModalDismissedThisSession);
+  const [showAuthModal, setShowAuthModal] = useState(
+    !session && !authModalDismissedThisSession,
+  );
 
   useEffect(() => {
     if (!session && !authModalDismissedThisSession) {
-      // Ensure it stays true or re-triggers if needed, 
+      // Ensure it stays true or re-triggers if needed,
       // but initial state handles the "immediate" requirement
       setShowAuthModal(true);
     }
@@ -208,7 +913,8 @@ export default function VisitorDashboard({ session, profile }: any) {
   } | null>(null);
   const [nearbyProperties, setNearbyProperties] = useState<any[]>([]);
   const [cityProperties, setCityProperties] = useState<any[]>([]);
-  const [locationPermission, setLocationPermission] = useState<string>("prompt");
+  const [locationPermission, setLocationPermission] =
+    useState<string>("prompt");
 
   // Auto-sliding image index (matches web)
   const [currentImageIndex, setCurrentImageIndex] = useState<{
@@ -239,6 +945,21 @@ export default function VisitorDashboard({ session, profile }: any) {
     useState(false);
   const [noOccupancySelectedAmenities, setNoOccupancySelectedAmenities] =
     useState<string[]>([]);
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (noOccupancySearch.trim()) {
+      const filtered = properties.filter(
+        (p: any) =>
+          p.title?.toLowerCase().includes(noOccupancySearch.toLowerCase()) ||
+          p.city?.toLowerCase().includes(noOccupancySearch.toLowerCase()),
+      );
+      setSearchResults(filtered);
+    } else {
+      setSearchResults([]);
+    }
+  }, [noOccupancySearch, properties]);
 
   const browseAvailableAmenities = [
     "Kitchen",
@@ -263,17 +984,6 @@ export default function VisitorDashboard({ session, profile }: any) {
     "Fire extinguisher",
     "First aid kit",
   ];
-
-  const browseClearFilters = () => {
-    setNoOccupancySortBy("newest");
-    setNoOccupancyBedrooms(null);
-    setNoOccupancyMaxPrice(null);
-    setNoOccupancyPriceRange({ min: "", max: "" });
-    setNoOccupancyMinRating(0);
-    setNoOccupancyFilterFavorites(false);
-    setNoOccupancySelectedAmenities([]);
-    setNoOccupancyCityFilter(null);
-  };
 
   const browseToggleAmenity = (a: string) => {
     setNoOccupancySelectedAmenities((prev) =>
@@ -374,8 +1084,7 @@ export default function VisitorDashboard({ session, profile }: any) {
             property.images.length > 1
           ) {
             const currentIdx = prev[property.id] || 0;
-            newIndex[property.id] =
-              (currentIdx + 1) % property.images.length;
+            newIndex[property.id] = (currentIdx + 1) % property.images.length;
           }
         });
         return newIndex;
@@ -535,9 +1244,7 @@ export default function VisitorDashboard({ session, profile }: any) {
               const cityLower = city.toLowerCase();
               const inCity = availableProps.filter((p: any) => {
                 const pCity = (p.city || "").toLowerCase();
-                return (
-                  pCity.includes(cityLower) || cityLower.includes(pCity)
-                );
+                return pCity.includes(cityLower) || cityLower.includes(pCity);
               });
               setCityProperties(inCity);
             } else {
@@ -552,9 +1259,7 @@ export default function VisitorDashboard({ session, profile }: any) {
           // Nearby Properties (within 1km)
           const nearby = availableProps
             .map((property: any) => {
-              const propCoords = extractCoordinates(
-                property.location_link,
-              );
+              const propCoords = extractCoordinates(property.location_link);
               if (!propCoords) return null;
               const distanceKm = getDistanceFromLatLonInKm(
                 coords.lat,
@@ -566,9 +1271,7 @@ export default function VisitorDashboard({ session, profile }: any) {
               return { property, distanceKm };
             })
             .filter(Boolean)
-            .sort(
-              (a: any, b: any) => a.distanceKm - b.distanceKm,
-            )
+            .sort((a: any, b: any) => a.distanceKm - b.distanceKm)
             .map(({ property }: any) => property);
           setNearbyProperties(nearby);
         } else {
@@ -2753,9 +3456,8 @@ export default function VisitorDashboard({ session, profile }: any) {
           <Image
             source={{
               uri:
-                item.images?.[
-                  currentImageIndex[item.id] || 0
-                ] || "https://via.placeholder.com/400",
+                item.images?.[currentImageIndex[item.id] || 0] ||
+                "https://via.placeholder.com/400",
             }}
             style={styles.cardImage}
           />
@@ -2794,50 +3496,6 @@ export default function VisitorDashboard({ session, profile }: any) {
                   ]}
                 >
                   {stats.favorite_count}
-                </Text>
-              </View>
-            )}
-            {topRatedId === item.id && (
-              <View
-                style={[
-                  styles.badge,
-                  {
-                    backgroundColor: "#fffbeb",
-                    borderWidth: 1,
-                    borderColor: "#fde68a",
-                  },
-                ]}
-              >
-                <Ionicons name="trophy" size={10} color="#d97706" />
-                <Text
-                  style={[
-                    styles.badgeText,
-                    { color: "#d97706", marginLeft: 3 },
-                  ]}
-                >
-                  Top Rated
-                </Text>
-              </View>
-            )}
-            {mostFavId === item.id && (
-              <View
-                style={[
-                  styles.badge,
-                  {
-                    backgroundColor: "#fff1f2",
-                    borderWidth: 1,
-                    borderColor: "#fecdd3",
-                  },
-                ]}
-              >
-                <Ionicons name="heart" size={10} color="#e11d48" />
-                <Text
-                  style={[
-                    styles.badgeText,
-                    { color: "#e11d48", marginLeft: 3 },
-                  ]}
-                >
-                  Most Favorite
                 </Text>
               </View>
             )}
@@ -2891,22 +3549,20 @@ export default function VisitorDashboard({ session, profile }: any) {
                 gap: 4,
               }}
             >
-              {item.images
-                .slice(0, 5)
-                .map((_: any, idx: number) => (
-                  <View
-                    key={idx}
-                    style={{
-                      width: 5,
-                      height: 5,
-                      borderRadius: 3,
-                      backgroundColor:
-                        (currentImageIndex[item.id] || 0) === idx
-                          ? "white"
-                          : "rgba(255,255,255,0.4)",
-                    }}
-                  />
-                ))}
+              {item.images.slice(0, 5).map((_: any, idx: number) => (
+                <View
+                  key={idx}
+                  style={{
+                    width: 5,
+                    height: 5,
+                    borderRadius: 3,
+                    backgroundColor:
+                      (currentImageIndex[item.id] || 0) === idx
+                        ? "white"
+                        : "rgba(255,255,255,0.4)",
+                  }}
+                />
+              ))}
               {item.images.length > 5 && (
                 <View
                   style={{
@@ -2937,6 +3593,42 @@ export default function VisitorDashboard({ session, profile }: any) {
             {[item.city, item.state_province].filter(Boolean).join(", ") ||
               "Location not set"}
           </Text>
+          {(topRatedId === item.id || mostFavId === item.id) && (
+            <View style={styles.cardBadgeRow}>
+              {topRatedId === item.id && (
+                <View
+                  style={[
+                    styles.cardMetaBadge,
+                    {
+                      backgroundColor: "#fffbeb",
+                      borderWidth: 1,
+                      borderColor: "#fde68a",
+                    },
+                  ]}
+                >
+                  <Text style={[styles.badgeText, { color: "#d97706" }]}>
+                    Top Rated
+                  </Text>
+                </View>
+              )}
+              {mostFavId === item.id && (
+                <View
+                  style={[
+                    styles.cardMetaBadge,
+                    {
+                      backgroundColor: "#fff1f2",
+                      borderWidth: 1,
+                      borderColor: "#fecdd3",
+                    },
+                  ]}
+                >
+                  <Text style={[styles.badgeText, { color: "#e11d48" }]}>
+                    Most Favorite
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
           <View
             style={[
               styles.featureRow,
@@ -3044,13 +3736,6 @@ export default function VisitorDashboard({ session, profile }: any) {
           backgroundColor={skeletonColor}
           style={{ marginTop: 6 }}
         />
-        <SkeletonBlock
-          width="100%"
-          height={11}
-          borderRadius={6}
-          backgroundColor={skeletonColor}
-          style={{ marginTop: 8 }}
-        />
       </View>
     </View>
   );
@@ -3058,14 +3743,6 @@ export default function VisitorDashboard({ session, profile }: any) {
   // --- COMPUTED: Filtered properties for no-occupancy discovery sections ---
   const filteredProperties = properties
     .filter((p: any) => {
-      if (noOccupancySearch) {
-        const q = noOccupancySearch.toLowerCase();
-        if (
-          !p.title?.toLowerCase().includes(q) &&
-          !p.city?.toLowerCase().includes(q)
-        )
-          return false;
-      }
       if (noOccupancyCityFilter && p.city !== noOccupancyCityFilter)
         return false;
       if (noOccupancyBedrooms !== null) {
@@ -3257,7 +3934,10 @@ export default function VisitorDashboard({ session, profile }: any) {
       ]}
     >
       {loading && !occupancy ? (
-        <ScrollView key="loading-scroll" contentContainerStyle={{ paddingBottom: 130 }}>
+        <ScrollView
+          key="loading-scroll"
+          contentContainerStyle={{ paddingBottom: 130 }}
+        >
           <View
             style={{
               flexDirection: "row",
@@ -3321,168 +4001,170 @@ export default function VisitorDashboard({ session, profile }: any) {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
         >
-        {occupancy ? (
-          <View style={styles.dashboardContent}>
-            {/* Header */}
-            <View style={styles.headerRow}>
+          {occupancy ? (
+            <View style={styles.dashboardContent}>
+              {/* Header */}
+              <View style={styles.headerRow}>
+                {showActivePropertySkeleton ? (
+                  <View style={{ gap: 8 }}>
+                    <SkeletonBlock
+                      width={170}
+                      height={20}
+                      borderRadius={8}
+                      backgroundColor={skeletonColor}
+                    />
+                    <SkeletonBlock
+                      width={210}
+                      height={14}
+                      borderRadius={7}
+                      backgroundColor={skeletonColor}
+                    />
+                  </View>
+                ) : (
+                  <View>
+                    <Text
+                      style={[
+                        styles.headerTitle,
+                        { color: isDark ? colors.text : "#111" },
+                      ]}
+                    >
+                      Your Active Property
+                    </Text>
+                    <Text
+                      style={[
+                        styles.headerSubtitle,
+                        { color: isDark ? colors.textSecondary : "#666" },
+                      ]}
+                    >
+                      Manage your stay and payments.
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {/* 1. Main Property Card */}
               {showActivePropertySkeleton ? (
-                <View style={{ gap: 8 }}>
-                  <SkeletonBlock
-                    width={170}
-                    height={20}
-                    borderRadius={8}
-                    backgroundColor={skeletonColor}
-                  />
-                  <SkeletonBlock
-                    width={210}
-                    height={14}
-                    borderRadius={7}
-                    backgroundColor={skeletonColor}
-                  />
+                <View
+                  style={[
+                    styles.activeCard,
+                    {
+                      backgroundColor: isDark ? colors.card : "white",
+                      borderColor: isDark ? colors.cardBorder : "#eee",
+                    },
+                  ]}
+                >
+                  <View style={styles.activeImageContainer}>
+                    <SkeletonBlock
+                      width="100%"
+                      height={220}
+                      borderRadius={0}
+                      backgroundColor={skeletonColor}
+                    />
+                  </View>
+                  <View
+                    style={[
+                      styles.activeContent,
+                      { backgroundColor: isDark ? colors.card : "white" },
+                    ]}
+                  >
+                    <SkeletonBlock
+                      width="62%"
+                      height={12}
+                      borderRadius={6}
+                      backgroundColor={skeletonColor}
+                    />
+                    <SkeletonBlock
+                      width="100%"
+                      height={40}
+                      borderRadius={10}
+                      backgroundColor={skeletonColor}
+                      style={{ marginTop: 12 }}
+                    />
+                    <SkeletonBlock
+                      width="100%"
+                      height={40}
+                      borderRadius={10}
+                      backgroundColor={skeletonColor}
+                      style={{ marginTop: 10 }}
+                    />
+                  </View>
                 </View>
               ) : (
-                <View>
-                  <Text
-                    style={[
-                      styles.headerTitle,
-                      { color: isDark ? colors.text : "#111" },
-                    ]}
-                  >
-                    Your Active Property
-                  </Text>
-                  <Text
-                    style={[
-                      styles.headerSubtitle,
-                      { color: isDark ? colors.textSecondary : "#666" },
-                    ]}
-                  >
-                    Manage your stay and payments.
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            {/* 1. Main Property Card */}
-            {showActivePropertySkeleton ? (
-              <View
-                style={[
-                  styles.activeCard,
-                  {
-                    backgroundColor: isDark ? colors.card : "white",
-                    borderColor: isDark ? colors.cardBorder : "#eee",
-                  },
-                ]}
-              >
-                <View style={styles.activeImageContainer}>
-                  <SkeletonBlock
-                    width="100%"
-                    height={220}
-                    borderRadius={0}
-                    backgroundColor={skeletonColor}
-                  />
-                </View>
                 <View
                   style={[
-                    styles.activeContent,
-                    { backgroundColor: isDark ? colors.card : "white" },
+                    styles.activeCard,
+                    {
+                      backgroundColor: isDark ? colors.card : "white",
+                      borderColor: isDark ? colors.cardBorder : "#eee",
+                    },
                   ]}
                 >
-                  <SkeletonBlock
-                    width="62%"
-                    height={12}
-                    borderRadius={6}
-                    backgroundColor={skeletonColor}
-                  />
-                  <SkeletonBlock
-                    width="100%"
-                    height={40}
-                    borderRadius={10}
-                    backgroundColor={skeletonColor}
-                    style={{ marginTop: 12 }}
-                  />
-                  <SkeletonBlock
-                    width="100%"
-                    height={40}
-                    borderRadius={10}
-                    backgroundColor={skeletonColor}
-                    style={{ marginTop: 10 }}
-                  />
-                </View>
-              </View>
-            ) : (
-              <View
-                style={[
-                  styles.activeCard,
-                  {
-                    backgroundColor: isDark ? colors.card : "white",
-                    borderColor: isDark ? colors.cardBorder : "#eee",
-                  },
-                ]}
-              >
-                <View style={styles.activeImageContainer}>
-                  <Image
-                    source={{
-                      uri:
-                        occupancy.property?.images?.[
-                          activePropertyImageIndex
-                        ] || "https://via.placeholder.com/600",
-                    }}
-                    style={styles.activeImage}
-                  />
-                  <LinearGradient
-                    colors={["transparent", "rgba(0,0,0,0.7)"]}
-                    style={styles.activeGradient}
-                  />
-
-                  <View style={styles.activeBadge}>
-                    <View
-                      style={[
-                        styles.statusDot,
-                        occupancy.status === "pending_end"
-                          ? { backgroundColor: "#f59e0b" }
-                          : { backgroundColor: "#10b981" },
-                      ]}
+                  <View style={styles.activeImageContainer}>
+                    <Image
+                      source={{
+                        uri:
+                          occupancy.property?.images?.[
+                            activePropertyImageIndex
+                          ] || "https://via.placeholder.com/600",
+                      }}
+                      style={styles.activeImage}
                     />
-                    <Text style={styles.activeBadgeText}>
-                      {occupancy.status === "pending_end"
-                        ? "Move-out Pending"
-                        : "Active Property"}
-                    </Text>
-                  </View>
+                    <LinearGradient
+                      colors={["transparent", "rgba(0,0,0,0.7)"]}
+                      style={styles.activeGradient}
+                    />
 
-                  {/* Title Overlay */}
-                  <View style={styles.activeInfoOverlay}>
-                    <Text style={styles.activeTitle} numberOfLines={1}>
-                      {occupancy.property?.title}
-                    </Text>
-                    <Text style={styles.activeAddress} numberOfLines={1}>
-                      {occupancy.property?.address}, {occupancy.property?.city}
-                    </Text>
-                  </View>
-
-                  {/* Slider Dots */}
-                  {occupancy.property?.images?.length > 1 && (
-                    <View style={styles.sliderDots}>
-                      {occupancy.property.images.map((_: any, i: number) => (
-                        <View
-                          key={i}
-                          style={[
-                            styles.dot,
-                            i === activePropertyImageIndex && styles.dotActive,
-                          ]}
-                        />
-                      ))}
+                    <View style={styles.activeBadge}>
+                      <View
+                        style={[
+                          styles.statusDot,
+                          occupancy.status === "pending_end"
+                            ? { backgroundColor: "#f59e0b" }
+                            : { backgroundColor: "#10b981" },
+                        ]}
+                      />
+                      <Text style={styles.activeBadgeText}>
+                        {occupancy.status === "pending_end"
+                          ? "Move-out Pending"
+                          : "Active Property"}
+                      </Text>
                     </View>
-                  )}
-                </View>
 
-                <View
-                  style={[
-                    styles.activeContent,
-                    { backgroundColor: isDark ? colors.card : "white" },
-                  ]}
-                >
-                  {/* <View
+                    {/* Title Overlay */}
+                    <View style={styles.activeInfoOverlay}>
+                      <Text style={styles.activeTitle} numberOfLines={1}>
+                        {occupancy.property?.title}
+                      </Text>
+                      <Text style={styles.activeAddress} numberOfLines={1}>
+                        {occupancy.property?.address},{" "}
+                        {occupancy.property?.city}
+                      </Text>
+                    </View>
+
+                    {/* Slider Dots */}
+                    {occupancy.property?.images?.length > 1 && (
+                      <View style={styles.sliderDots}>
+                        {occupancy.property.images.map((_: any, i: number) => (
+                          <View
+                            key={i}
+                            style={[
+                              styles.dot,
+                              i === activePropertyImageIndex &&
+                                styles.dotActive,
+                            ]}
+                          />
+                        ))}
+                      </View>
+                    )}
+                  </View>
+
+                  <View
+                    style={[
+                      styles.activeContent,
+                      { backgroundColor: isDark ? colors.card : "white" },
+                    ]}
+                  >
+                    {/* <View
                   style={[
                     styles.leaseRow,
                     { borderBottomColor: isDark ? colors.border : "#f3f4f6" },
@@ -3508,416 +4190,188 @@ export default function VisitorDashboard({ session, profile }: any) {
                   </View>
                 </View> */}
 
-                  <View style={styles.gridActions}>
-                    <TouchableOpacity
-                      style={[
-                        styles.gridBtn,
-                        {
-                          backgroundColor: isDark ? colors.surface : "#f3f4f6",
-                        },
-                      ]}
-                      onPress={() =>
-                        router.push(
-                          `/properties/${occupancy.property?.id}` as any,
-                        )
-                      }
-                    >
-                      <Text
+                    <View style={styles.gridActions}>
+                      <TouchableOpacity
                         style={[
-                          styles.btnTextGray,
-                          { color: isDark ? colors.text : "#374151" },
+                          styles.gridBtn,
+                          {
+                            backgroundColor: isDark
+                              ? colors.surface
+                              : "#f3f4f6",
+                          },
                         ]}
+                        onPress={() =>
+                          router.push(
+                            `/properties/${occupancy.property?.id}` as any,
+                          )
+                        }
                       >
-                        View Details
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[
-                        styles.gridBtn,
-                        occupancy.contract_url
-                          ? styles.btnBlack
-                          : {
-                              backgroundColor: isDark
-                                ? colors.surface
-                                : "#f3f4f6",
-                            },
-                      ]}
-                      disabled={!occupancy.contract_url}
-                      onPress={() =>
-                        occupancy.contract_url &&
-                        Linking.openURL(occupancy.contract_url)
-                      }
-                    >
-                      <Ionicons
-                        name="document-text-outline"
-                        size={16}
-                        color={
+                        <Text
+                          style={[
+                            styles.btnTextGray,
+                            { color: isDark ? colors.text : "#374151" },
+                          ]}
+                        >
+                          View Details
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.gridBtn,
                           occupancy.contract_url
-                            ? "white"
-                            : isDark
-                              ? colors.textMuted
-                              : "#999"
-                        }
-                        style={{ marginRight: 4 }}
-                      />
-                      <Text
-                        style={
-                          occupancy.contract_url
-                            ? styles.btnTextWhite
-                            : [
-                                styles.btnTextDisabled,
-                                {
-                                  color: isDark ? colors.textMuted : "#9ca3af",
-                                },
-                              ]
+                            ? styles.btnBlack
+                            : {
+                                backgroundColor: isDark
+                                  ? colors.surface
+                                  : "#f3f4f6",
+                              },
+                        ]}
+                        disabled={!occupancy.contract_url}
+                        onPress={() =>
+                          occupancy.contract_url &&
+                          Linking.openURL(occupancy.contract_url)
                         }
                       >
-                        {occupancy.contract_url
-                          ? "View Contract"
-                          : "Contract Pending"}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                  {!isFamilyMember && (
-                    <View style={[styles.gridActions, { marginTop: 8 }]}></View>
-                  )}
-                  {occupancy.property?.terms_conditions ? (
-                    <TouchableOpacity
-                      style={[
-                        styles.gridBtn,
-                        {
-                          marginTop: 8,
-                          backgroundColor: isDark ? colors.surface : "#f3f4f6",
-                          borderWidth: 1,
-                          borderColor: isDark ? colors.cardBorder : "#e5e7eb",
-                          width: "100%",
-                        },
-                      ]}
-                      onPress={() => {
-                        const terms = occupancy.property.terms_conditions;
-                        if (
-                          typeof terms === "string" &&
-                          terms.startsWith("http")
-                        ) {
-                          Linking.openURL(terms);
-                        } else {
-                          setShowTermsModal(true);
-                        }
-                      }}
-                    >
-                      <Ionicons
-                        name="document-text-outline"
-                        size={16}
-                        color={isDark ? colors.textSecondary : "#333"}
-                        style={{ marginRight: 6 }}
-                      />
-                      <Text
+                        <Ionicons
+                          name="document-text-outline"
+                          size={16}
+                          color={
+                            occupancy.contract_url
+                              ? "white"
+                              : isDark
+                                ? colors.textMuted
+                                : "#999"
+                          }
+                          style={{ marginRight: 4 }}
+                        />
+                        <Text
+                          style={
+                            occupancy.contract_url
+                              ? styles.btnTextWhite
+                              : [
+                                  styles.btnTextDisabled,
+                                  {
+                                    color: isDark
+                                      ? colors.textMuted
+                                      : "#9ca3af",
+                                  },
+                                ]
+                          }
+                        >
+                          {occupancy.contract_url
+                            ? "View Contract"
+                            : "Contract Pending"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    {!isFamilyMember && (
+                      <View
+                        style={[styles.gridActions, { marginTop: 8 }]}
+                      ></View>
+                    )}
+                    {occupancy.property?.terms_conditions ? (
+                      <TouchableOpacity
                         style={[
-                          styles.btnTextBlack,
-                          { color: isDark ? colors.text : "#111" },
+                          styles.gridBtn,
+                          {
+                            marginTop: 8,
+                            backgroundColor: isDark
+                              ? colors.surface
+                              : "#f3f4f6",
+                            borderWidth: 1,
+                            borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                            width: "100%",
+                          },
                         ]}
+                        onPress={() => {
+                          const terms = occupancy.property.terms_conditions;
+                          if (
+                            typeof terms === "string" &&
+                            terms.startsWith("http")
+                          ) {
+                            Linking.openURL(terms);
+                          } else {
+                            setShowTermsModal(true);
+                          }
+                        }}
                       >
-                        View Property Terms
-                      </Text>
-                    </TouchableOpacity>
-                  ) : null}
+                        <Ionicons
+                          name="document-text-outline"
+                          size={16}
+                          color={isDark ? colors.textSecondary : "#333"}
+                          style={{ marginRight: 6 }}
+                        />
+                        <Text
+                          style={[
+                            styles.btnTextBlack,
+                            { color: isDark ? colors.text : "#111" },
+                          ]}
+                        >
+                          View Property Terms
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
                 </View>
-              </View>
-            )}
+              )}
 
-            {/* 2. Security Deposit */}
-            {showSecurityDepositSkeleton ? (
-              <View
-                style={[
-                  styles.infoCard,
-                  {
-                    backgroundColor: isDark ? colors.card : "white",
-                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                  },
-                ]}
-              >
-                <View style={styles.cardHeaderSmall}>
-                  <SkeletonBlock
-                    width={32}
-                    height={32}
-                    borderRadius={16}
-                    backgroundColor={skeletonColor}
-                  />
-                  <SkeletonBlock
-                    width="38%"
-                    height={14}
-                    borderRadius={7}
-                    backgroundColor={skeletonColor}
-                  />
-                </View>
-                <SkeletonBlock
-                  width="100%"
-                  height={12}
-                  borderRadius={6}
-                  backgroundColor={skeletonColor}
-                  style={{ marginBottom: 10 }}
-                />
-                <SkeletonBlock
-                  width="100%"
-                  height={12}
-                  borderRadius={6}
-                  backgroundColor={skeletonColor}
-                  style={{ marginBottom: 10 }}
-                />
-                <SkeletonBlock
-                  width="72%"
-                  height={18}
-                  borderRadius={9}
-                  backgroundColor={skeletonColor}
-                />
-              </View>
-            ) : (
-              <View
-                style={[
-                  styles.infoCard,
-                  {
-                    backgroundColor: isDark ? colors.card : "white",
-                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                  },
-                ]}
-              >
-                <View style={styles.cardHeaderSmall}>
-                  <View
-                    style={[
-                      styles.iconCircle,
-                      { backgroundColor: isDark ? colors.badge : "#f3f4f6" },
-                    ]}
-                  >
-                    <Ionicons
-                      name="lock-closed-outline"
-                      size={16}
-                      color={isDark ? colors.textSecondary : "#333"}
-                    />
-                  </View>
-                  <Text
-                    style={[
-                      styles.cardTitleSmall,
-                      { color: isDark ? colors.text : "#111" },
-                    ]}
-                  >
-                    Security Deposit
-                  </Text>
-                </View>
-                {securityDepositPaid ? (
-                  <View>
-                    <View style={styles.rowBetween}>
-                      <Text
-                        style={[
-                          styles.textLabel,
-                          { color: isDark ? colors.textMuted : "#6b7280" },
-                        ]}
-                      >
-                        Total Deposit
-                      </Text>
-                      <Text
-                        style={[
-                          styles.textValueBlack,
-                          { color: isDark ? colors.text : "#000" },
-                        ]}
-                      >
-                        ₱
-                        {Number(
-                          occupancy.security_deposit || 0,
-                        ).toLocaleString()}
-                      </Text>
-                    </View>
-                    <View style={styles.rowBetween}>
-                      <Text style={styles.textLabel}>Used</Text>
-                      <Text style={styles.textValueGray}>
-                        ₱
-                        {Number(
-                          occupancy.security_deposit_used || 0,
-                        ).toLocaleString()}
-                      </Text>
-                    </View>
-                    <View
-                      style={[
-                        styles.rowBetween,
-                        styles.borderTop,
-                        {
-                          paddingTop: 8,
-                          marginTop: 4,
-                          borderTopColor: isDark ? colors.border : "#f3f4f6",
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.textLabelBold,
-                          { color: isDark ? colors.text : "#374151" },
-                        ]}
-                      >
-                        Remaining Balance
-                      </Text>
-                      <Text
-                        style={[
-                          styles.textValueBig,
-                          { color: isDark ? colors.text : "#111" },
-                        ]}
-                      >
-                        ₱
-                        {Number(
-                          (occupancy.security_deposit || 0) -
-                            (occupancy.security_deposit_used || 0),
-                        ).toLocaleString()}
-                      </Text>
-                    </View>
-                    {daysUntilContractEnd !== null &&
-                      daysUntilContractEnd <= 30 && (
-                        <View style={styles.tipBox}>
-                          <Text style={styles.tipText}>
-                            💡 Deposit can be used for last month.
-                          </Text>
-                        </View>
-                      )}
-                  </View>
-                ) : securityDepositProcessing ? (
-                  <View style={styles.centerBox}>
-                    <Ionicons
-                      name="hourglass-outline"
-                      size={24}
-                      color="#f59e0b"
-                      style={{ marginBottom: 4 }}
-                    />
-                    <Text
-                      style={[
-                        styles.textLabel,
-                        { color: "#f59e0b", fontWeight: "bold" },
-                      ]}
-                    >
-                      Deposit Payment Processing
-                    </Text>
-                    <Text style={styles.textValueGray}>
-                      Please wait for confirmation.
-                    </Text>
-                  </View>
-                ) : (
-                  <View style={styles.centerBox}>
-                    <Text style={styles.textLabel}>
-                      No security deposit paid yet
-                    </Text>
-                    <Text style={styles.textValueGray}>
-                      Required: ₱
-                      {Number(occupancy.security_deposit || 0).toLocaleString()}
-                    </Text>
-                  </View>
-                )}
-              </View>
-            )}
-
-            {/* Family Members Section */}
-            {showFamilyMembersSkeleton ? (
-              <View
-                style={[
-                  styles.infoCard,
-                  {
-                    backgroundColor: isDark ? colors.card : "white",
-                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                  },
-                ]}
-              >
-                <View style={[styles.rowBetween, { marginBottom: 12 }]}>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    <SkeletonBlock
-                      width={32}
-                      height={32}
-                      borderRadius={16}
-                      backgroundColor={skeletonColor}
-                    />
-                    <View>
-                      <SkeletonBlock
-                        width={124}
-                        height={14}
-                        borderRadius={7}
-                        backgroundColor={skeletonColor}
-                      />
-                      <SkeletonBlock
-                        width={88}
-                        height={10}
-                        borderRadius={5}
-                        backgroundColor={skeletonColor}
-                        style={{ marginTop: 6 }}
-                      />
-                    </View>
-                  </View>
-                  {!isFamilyMember && (
-                    <SkeletonBlock
-                      width={92}
-                      height={24}
-                      borderRadius={12}
-                      backgroundColor={skeletonColor}
-                    />
-                  )}
-                </View>
-
-                {Array.from({ length: 3 }).map((_, index) => (
-                  <View
-                    key={`family-skeleton-${index}`}
-                    style={{
-                      padding: 10,
-                      backgroundColor: isDark ? colors.surface : "#f9fafb",
-                      borderRadius: 12,
-                      borderWidth: 1,
+              {/* 2. Security Deposit */}
+              {showSecurityDepositSkeleton ? (
+                <View
+                  style={[
+                    styles.infoCard,
+                    {
+                      backgroundColor: isDark ? colors.card : "white",
                       borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                      marginBottom: index === 2 ? 0 : 8,
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 10,
-                    }}
-                  >
+                    },
+                  ]}
+                >
+                  <View style={styles.cardHeaderSmall}>
                     <SkeletonBlock
                       width={32}
                       height={32}
                       borderRadius={16}
                       backgroundColor={skeletonColor}
                     />
-                    <View style={{ flex: 1 }}>
-                      <SkeletonBlock
-                        width="54%"
-                        height={12}
-                        borderRadius={6}
-                        backgroundColor={skeletonColor}
-                      />
-                      <SkeletonBlock
-                        width="68%"
-                        height={10}
-                        borderRadius={5}
-                        backgroundColor={skeletonColor}
-                        style={{ marginTop: 6 }}
-                      />
-                    </View>
+                    <SkeletonBlock
+                      width="38%"
+                      height={14}
+                      borderRadius={7}
+                      backgroundColor={skeletonColor}
+                    />
                   </View>
-                ))}
-              </View>
-            ) : (
-              <View
-                style={[
-                  styles.infoCard,
-                  {
-                    backgroundColor: isDark ? colors.card : "white",
-                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                  },
-                ]}
-              >
-                <View style={[styles.rowBetween, { marginBottom: 12 }]}>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
+                  <SkeletonBlock
+                    width="100%"
+                    height={12}
+                    borderRadius={6}
+                    backgroundColor={skeletonColor}
+                    style={{ marginBottom: 10 }}
+                  />
+                  <SkeletonBlock
+                    width="100%"
+                    height={12}
+                    borderRadius={6}
+                    backgroundColor={skeletonColor}
+                    style={{ marginBottom: 10 }}
+                  />
+                  <SkeletonBlock
+                    width="72%"
+                    height={18}
+                    borderRadius={9}
+                    backgroundColor={skeletonColor}
+                  />
+                </View>
+              ) : (
+                <View
+                  style={[
+                    styles.infoCard,
+                    {
+                      backgroundColor: isDark ? colors.card : "white",
+                      borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                    },
+                  ]}
+                >
+                  <View style={styles.cardHeaderSmall}>
                     <View
                       style={[
                         styles.iconCircle,
@@ -3925,439 +4379,163 @@ export default function VisitorDashboard({ session, profile }: any) {
                       ]}
                     >
                       <Ionicons
-                        name="people-outline"
+                        name="lock-closed-outline"
                         size={16}
-                        color={isDark ? colors.textSecondary : "#374151"}
+                        color={isDark ? colors.textSecondary : "#333"}
                       />
                     </View>
+                    <Text
+                      style={[
+                        styles.cardTitleSmall,
+                        { color: isDark ? colors.text : "#111" },
+                      ]}
+                    >
+                      Security Deposit
+                    </Text>
+                  </View>
+                  {securityDepositPaid ? (
                     <View>
-                      <Text
+                      <View style={styles.rowBetween}>
+                        <Text
+                          style={[
+                            styles.textLabel,
+                            { color: isDark ? colors.textMuted : "#6b7280" },
+                          ]}
+                        >
+                          Total Deposit
+                        </Text>
+                        <Text
+                          style={[
+                            styles.textValueBlack,
+                            { color: isDark ? colors.text : "#000" },
+                          ]}
+                        >
+                          ₱
+                          {Number(
+                            occupancy.security_deposit || 0,
+                          ).toLocaleString()}
+                        </Text>
+                      </View>
+                      <View style={styles.rowBetween}>
+                        <Text style={styles.textLabel}>Used</Text>
+                        <Text style={styles.textValueGray}>
+                          ₱
+                          {Number(
+                            occupancy.security_deposit_used || 0,
+                          ).toLocaleString()}
+                        </Text>
+                      </View>
+                      <View
                         style={[
-                          styles.cardTitleSmall,
-                          { color: isDark ? colors.text : "#111" },
+                          styles.rowBetween,
+                          styles.borderTop,
+                          {
+                            paddingTop: 8,
+                            marginTop: 4,
+                            borderTopColor: isDark ? colors.border : "#f3f4f6",
+                          },
                         ]}
                       >
-                        Family Members
-                      </Text>
+                        <Text
+                          style={[
+                            styles.textLabelBold,
+                            { color: isDark ? colors.text : "#374151" },
+                          ]}
+                        >
+                          Remaining Balance
+                        </Text>
+                        <Text
+                          style={[
+                            styles.textValueBig,
+                            { color: isDark ? colors.text : "#111" },
+                          ]}
+                        >
+                          ₱
+                          {Number(
+                            (occupancy.security_deposit || 0) -
+                              (occupancy.security_deposit_used || 0),
+                          ).toLocaleString()}
+                        </Text>
+                      </View>
+                      {daysUntilContractEnd !== null &&
+                        daysUntilContractEnd <= 30 && (
+                          <View style={styles.tipBox}>
+                            <Text style={styles.tipText}>
+                              💡 Deposit can be used for last month.
+                            </Text>
+                          </View>
+                        )}
+                    </View>
+                  ) : securityDepositProcessing ? (
+                    <View style={styles.centerBox}>
+                      <Ionicons
+                        name="hourglass-outline"
+                        size={24}
+                        color="#f59e0b"
+                        style={{ marginBottom: 4 }}
+                      />
                       <Text
-                        style={{
-                          fontSize: 10,
-                          color: isDark ? colors.textMuted : "#6b7280",
-                        }}
+                        style={[
+                          styles.textLabel,
+                          { color: "#f59e0b", fontWeight: "bold" },
+                        ]}
                       >
-                        {familyMembers.length + 1}/5 members
+                        Deposit Payment Processing
+                      </Text>
+                      <Text style={styles.textValueGray}>
+                        Please wait for confirmation.
                       </Text>
                     </View>
-                  </View>
-                  {!isFamilyMember && familyMembers.length < 4 && (
-                    <TouchableOpacity
-                      onPress={() => router.push("/(tabs)/add-family" as any)}
-                      style={{
-                        backgroundColor: isDark ? colors.surface : "#f3f4f6",
-                        paddingHorizontal: 10,
-                        paddingVertical: 4,
-                        borderRadius: 12,
-                        borderWidth: 1,
-                        borderColor: isDark ? colors.cardBorder : "#e5e7eb",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          fontSize: 10,
-                          fontWeight: "bold",
-                          color: isDark ? colors.text : "#111827",
-                        }}
-                      >
-                        + Add Member
+                  ) : (
+                    <View style={styles.centerBox}>
+                      <Text style={styles.textLabel}>
+                        No security deposit paid yet
                       </Text>
-                    </TouchableOpacity>
+                      <Text style={styles.textValueGray}>
+                        Required: ₱
+                        {Number(
+                          occupancy.security_deposit || 0,
+                        ).toLocaleString()}
+                      </Text>
+                    </View>
                   )}
                 </View>
+              )}
 
-                {/* Primary Tenant (Mother) */}
+              {/* Family Members Section */}
+              {showFamilyMembersSkeleton ? (
                 <View
-                  style={{
-                    padding: 10,
-                    backgroundColor: isDark ? colors.surface : "#f9fafb",
-                    borderRadius: 12,
-                    borderWidth: 1,
-                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                    marginBottom: 8,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 10,
-                  }}
+                  style={[
+                    styles.infoCard,
+                    {
+                      backgroundColor: isDark ? colors.card : "white",
+                      borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                    },
+                  ]}
                 >
-                  <View
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: 16,
-                      backgroundColor: "#4b5563",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    {isFamilyMember && occupancy?.tenant?.avatar_url ? (
-                      <Image
-                        source={{ uri: occupancy.tenant.avatar_url }}
-                        style={{ width: 32, height: 32, borderRadius: 16 }}
-                      />
-                    ) : !isFamilyMember && profile?.avatar_url ? (
-                      <Image
-                        source={{ uri: profile.avatar_url }}
-                        style={{ width: 32, height: 32, borderRadius: 16 }}
-                      />
-                    ) : (
-                      <Text
-                        style={{
-                          color: "white",
-                          fontSize: 12,
-                          fontWeight: "bold",
-                        }}
-                      >
-                        {isFamilyMember
-                          ? `${occupancy?.tenant?.first_name?.[0] || ""}${occupancy?.tenant?.last_name?.[0] || ""}`
-                          : `${profile?.first_name?.[0] || ""}${profile?.last_name?.[0] || ""}`}
-                      </Text>
-                    )}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={{
-                        fontSize: 13,
-                        fontWeight: "bold",
-                        color: isDark ? colors.text : "#111827",
-                      }}
-                    >
-                      {isFamilyMember
-                        ? `${occupancy?.tenant?.first_name || ""} ${occupancy?.tenant?.last_name || ""}`.trim() ||
-                          "Primary Tenant"
-                        : `${profile?.first_name} ${profile?.last_name}`}
-                    </Text>
-                    <Text
-                      style={{
-                        fontSize: 10,
-                        color: isDark ? colors.textMuted : "#6b7280",
-                        fontWeight: "bold",
-                      }}
-                    >
-                      Primary Tenant
-                    </Text>
-                  </View>
-                  <View
-                    style={{
-                      backgroundColor: isDark ? colors.surface : "#e5e7eb",
-                      paddingHorizontal: 8,
-                      paddingVertical: 2,
-                      borderRadius: 10,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontSize: 9,
-                        fontWeight: "bold",
-                        color: isDark ? colors.textSecondary : "#374151",
-                      }}
-                    >
-                      Owner
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Members List */}
-                {loadingFamily ? (
-                  <ActivityIndicator
-                    size="small"
-                    color="#6366f1"
-                    style={{ marginVertical: 10 }}
-                  />
-                ) : familyMembers.length > 0 ? (
-                  <View style={{ gap: 6 }}>
-                    {familyMembers.map((fm) => (
-                      <View
-                        key={fm.id}
-                        style={{
-                          padding: 10,
-                          backgroundColor: isDark ? colors.surface : "#f9fafb",
-                          borderRadius: 12,
-                          borderWidth: 1,
-                          borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 10,
-                        }}
-                      >
-                        <View
-                          style={{
-                            width: 32,
-                            height: 32,
-                            borderRadius: 16,
-                            backgroundColor: "#e5e7eb",
-                            alignItems: "center",
-                            justifyContent: "center",
-                          }}
-                        >
-                          {fm.member_profile?.avatar_url ? (
-                            <Image
-                              source={{ uri: fm.member_profile.avatar_url }}
-                              style={{
-                                width: 32,
-                                height: 32,
-                                borderRadius: 16,
-                              }}
-                            />
-                          ) : (
-                            <Text
-                              style={{
-                                color: "#374151",
-                                fontSize: 10,
-                                fontWeight: "bold",
-                              }}
-                            >
-                              {`${fm.member_profile?.first_name?.[0] || ""}${fm.member_profile?.last_name?.[0] || ""}`}
-                            </Text>
-                          )}
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text
-                            style={{
-                              fontSize: 12,
-                              fontWeight: "bold",
-                              color: isDark ? colors.text : "#111827",
-                            }}
-                            numberOfLines={1}
-                          >
-                            {fm.member_profile?.first_name}{" "}
-                            {fm.member_profile?.last_name}
-                          </Text>
-                          <Text
-                            style={{
-                              fontSize: 10,
-                              color: isDark ? colors.textMuted : "#9ca3af",
-                            }}
-                            numberOfLines={1}
-                          >
-                            {fm.member_profile?.email}
-                          </Text>
-                        </View>
-                        {!isFamilyMember &&
-                          (confirmRemoveMember === fm.id ? (
-                            <View style={{ flexDirection: "row", gap: 4 }}>
-                              <TouchableOpacity
-                                onPress={() => removeFamilyMember(fm.id)}
-                                disabled={removingMember === fm.id}
-                                style={{
-                                  backgroundColor: "#fef2f2",
-                                  borderColor: "#fecaca",
-                                  borderWidth: 1,
-                                  paddingHorizontal: 6,
-                                  paddingVertical: 2,
-                                  borderRadius: 6,
-                                }}
-                              >
-                                <Text
-                                  style={{
-                                    fontSize: 9,
-                                    fontWeight: "bold",
-                                    color: "#ef4444",
-                                  }}
-                                >
-                                  Yes
-                                </Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                onPress={() => setConfirmRemoveMember(null)}
-                                style={{
-                                  backgroundColor: "#f3f4f6",
-                                  paddingHorizontal: 6,
-                                  paddingVertical: 2,
-                                  borderRadius: 6,
-                                }}
-                              >
-                                <Text
-                                  style={{
-                                    fontSize: 9,
-                                    fontWeight: "bold",
-                                    color: "#6b7280",
-                                  }}
-                                >
-                                  No
-                                </Text>
-                              </TouchableOpacity>
-                            </View>
-                          ) : (
-                            <TouchableOpacity
-                              onPress={() => setConfirmRemoveMember(fm.id)}
-                              style={{ padding: 4 }}
-                            >
-                              <Ionicons
-                                name="trash-outline"
-                                size={16}
-                                color="#ef4444"
-                              />
-                            </TouchableOpacity>
-                          ))}
-                      </View>
-                    ))}
-                  </View>
-                ) : (
-                  <View style={{ alignItems: "center", paddingVertical: 10 }}>
-                    <Text style={{ fontSize: 11, color: "#9ca3af" }}>
-                      No family members added yet.
-                    </Text>
-                  </View>
-                )}
-
-                {isFamilyMember && (
-                  <View
-                    style={{
-                      marginTop: 10,
-                      padding: 9,
-                      backgroundColor: isDark
-                        ? "rgba(180,83,9,0.12)"
-                        : "#fffbeb",
-                      borderRadius: 10,
-                      borderWidth: 1,
-                      borderColor: isDark ? "rgba(180,83,9,0.25)" : "#fde68a",
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 8,
-                    }}
-                  >
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "flex-start",
-                        flex: 1,
-                        gap: 6,
-                      }}
-                    >
-                      <Ionicons
-                        name="information-circle-outline"
-                        size={14}
-                        color={isDark ? "#fbbf24" : "#b45309"}
-                        style={{ marginTop: 0 }}
-                      />
-                      <Text
-                        style={{
-                          fontSize: 10,
-                          lineHeight: 14,
-                          color: isDark ? "#fbbf24" : "#92400e",
-                          fontWeight: "700",
-                          flex: 1,
-                        }}
-                      >
-                        You are a family member. Only the primary tenant can
-                        manage family members.
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      onPress={confirmLeaveFamilyGroup}
-                      disabled={leavingFamily}
-                      style={{
-                        paddingHorizontal: 10,
-                        paddingVertical: 5,
-                        borderRadius: 10,
-                        borderWidth: 1,
-                        borderColor: isDark
-                          ? "rgba(252,165,165,0.45)"
-                          : "#fecaca",
-                        backgroundColor: isDark
-                          ? "rgba(127,29,29,0.35)"
-                          : "#fef2f2",
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 4,
-                      }}
-                    >
-                      {leavingFamily ? (
-                        <ActivityIndicator
-                          size="small"
-                          color={isDark ? "#fecaca" : "#b91c1c"}
-                        />
-                      ) : (
-                        <Ionicons
-                          name="exit-outline"
-                          size={12}
-                          color={isDark ? "#fecaca" : "#b91c1c"}
-                        />
-                      )}
-                      <Text
-                        style={{
-                          fontSize: 10,
-                          fontWeight: "bold",
-                          color: isDark ? "#fecaca" : "#b91c1c",
-                        }}
-                      >
-                        {leavingFamily ? "Leaving..." : "Leave Family"}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
-            )}
-
-            {/* 4. Recent Payments */}
-            {showRecentPaymentsSkeleton ? (
-              <View
-                style={[
-                  styles.infoCard,
-                  {
-                    backgroundColor: isDark ? colors.card : "white",
-                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                  },
-                ]}
-              >
-                <View style={[styles.rowBetween, { marginBottom: 16 }]}>
-                  <SkeletonBlock
-                    width={132}
-                    height={14}
-                    borderRadius={7}
-                    backgroundColor={skeletonColor}
-                  />
-                  <SkeletonBlock
-                    width={54}
-                    height={12}
-                    borderRadius={6}
-                    backgroundColor={skeletonColor}
-                  />
-                </View>
-
-                {Array.from({ length: 2 }).map((_, index) => (
-                  <View
-                    key={`recent-payment-skeleton-${index}`}
-                    style={[
-                      styles.billRow,
-                      {
-                        backgroundColor: isDark ? colors.surface : "#f8fafc",
-                        borderColor: isDark ? colors.cardBorder : "#f1f5f9",
-                      },
-                    ]}
-                  >
+                  <View style={[styles.rowBetween, { marginBottom: 12 }]}>
                     <View
                       style={{
                         flexDirection: "row",
                         alignItems: "center",
-                        gap: 10,
+                        gap: 8,
                       }}
                     >
                       <SkeletonBlock
-                        width={36}
-                        height={36}
-                        borderRadius={8}
+                        width={32}
+                        height={32}
+                        borderRadius={16}
                         backgroundColor={skeletonColor}
                       />
                       <View>
                         <SkeletonBlock
-                          width={108}
-                          height={12}
-                          borderRadius={6}
+                          width={124}
+                          height={14}
+                          borderRadius={7}
                           backgroundColor={skeletonColor}
                         />
                         <SkeletonBlock
-                          width={86}
+                          width={88}
                           height={10}
                           borderRadius={5}
                           backgroundColor={skeletonColor}
@@ -4365,856 +4543,1462 @@ export default function VisitorDashboard({ session, profile }: any) {
                         />
                       </View>
                     </View>
-                    <View style={{ alignItems: "flex-end" }}>
+                    {!isFamilyMember && (
                       <SkeletonBlock
-                        width={72}
-                        height={12}
-                        borderRadius={6}
+                        width={92}
+                        height={24}
+                        borderRadius={12}
                         backgroundColor={skeletonColor}
                       />
-                      <SkeletonBlock
-                        width={62}
-                        height={18}
-                        borderRadius={6}
-                        backgroundColor={skeletonColor}
-                        style={{ marginTop: 6 }}
-                      />
-                    </View>
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <View
-                style={[
-                  styles.infoCard,
-                  {
-                    backgroundColor: isDark ? colors.card : "white",
-                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                  },
-                ]}
-              >
-                <View style={[styles.rowBetween, { marginBottom: 16 }]}>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    <Text
-                      style={[
-                        styles.cardTitleSmall,
-                        { color: isDark ? colors.text : "#111" },
-                      ]}
-                    >
-                      Recent Payments
-                    </Text>
-                    {pendingPayments.length > 0 && (
-                      <View style={styles.badgeRed}>
-                        <Text style={styles.badgeRedText}>
-                          {pendingPayments.length} Pending
-                        </Text>
-                      </View>
                     )}
                   </View>
-                  <TouchableOpacity
-                    onPress={() => router.push("/payments" as any)}
-                  >
-                    <Text style={styles.seeAllText}>See All</Text>
-                  </TouchableOpacity>
-                </View>
 
-                {pendingPayments.length > 0 ? (
-                  pendingPayments.map((bill, i) => {
-                    const total =
-                      (Number(bill.rent_amount) || 0) +
-                      (Number(bill.water_bill) || 0) +
-                      (Number(bill.electrical_bill) || 0) +
-                      (Number(bill.other_bills) || 0) +
-                      (Number(bill.security_deposit_amount) || 0) +
-                      (Number(bill.advance_amount) || 0);
-                    const isMoveIn =
-                      bill.is_move_in_payment ||
-                      Number(bill.security_deposit_amount) > 0;
-                    return (
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <View
+                      key={`family-skeleton-${index}`}
+                      style={{
+                        padding: 10,
+                        backgroundColor: isDark ? colors.surface : "#f9fafb",
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                        marginBottom: index === 2 ? 0 : 8,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 10,
+                      }}
+                    >
+                      <SkeletonBlock
+                        width={32}
+                        height={32}
+                        borderRadius={16}
+                        backgroundColor={skeletonColor}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <SkeletonBlock
+                          width="54%"
+                          height={12}
+                          borderRadius={6}
+                          backgroundColor={skeletonColor}
+                        />
+                        <SkeletonBlock
+                          width="68%"
+                          height={10}
+                          borderRadius={5}
+                          backgroundColor={skeletonColor}
+                          style={{ marginTop: 6 }}
+                        />
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <View
+                  style={[
+                    styles.infoCard,
+                    {
+                      backgroundColor: isDark ? colors.card : "white",
+                      borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                    },
+                  ]}
+                >
+                  <View style={[styles.rowBetween, { marginBottom: 12 }]}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
                       <View
-                        key={i}
                         style={[
-                          styles.billRow,
+                          styles.iconCircle,
                           {
-                            backgroundColor: isDark
-                              ? colors.surface
-                              : "#f8fafc",
-                            borderColor: isDark ? colors.cardBorder : "#f1f5f9",
+                            backgroundColor: isDark ? colors.badge : "#f3f4f6",
                           },
                         ]}
                       >
-                        <View
+                        <Ionicons
+                          name="people-outline"
+                          size={16}
+                          color={isDark ? colors.textSecondary : "#374151"}
+                        />
+                      </View>
+                      <View>
+                        <Text
+                          style={[
+                            styles.cardTitleSmall,
+                            { color: isDark ? colors.text : "#111" },
+                          ]}
+                        >
+                          Family Members
+                        </Text>
+                        <Text
                           style={{
+                            fontSize: 10,
+                            color: isDark ? colors.textMuted : "#6b7280",
+                          }}
+                        >
+                          {familyMembers.length + 1}/5 members
+                        </Text>
+                      </View>
+                    </View>
+                    {!isFamilyMember && familyMembers.length < 4 && (
+                      <TouchableOpacity
+                        onPress={() => router.push("/(tabs)/add-family" as any)}
+                        style={{
+                          backgroundColor: isDark ? colors.surface : "#f3f4f6",
+                          paddingHorizontal: 10,
+                          paddingVertical: 4,
+                          borderRadius: 12,
+                          borderWidth: 1,
+                          borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 10,
+                            fontWeight: "bold",
+                            color: isDark ? colors.text : "#111827",
+                          }}
+                        >
+                          + Add Member
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* Primary Tenant (Mother) */}
+                  <View
+                    style={{
+                      padding: 10,
+                      backgroundColor: isDark ? colors.surface : "#f9fafb",
+                      borderRadius: 12,
+                      borderWidth: 1,
+                      borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                      marginBottom: 8,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                  >
+                    <View
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 16,
+                        backgroundColor: "#4b5563",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      {isFamilyMember && occupancy?.tenant?.avatar_url ? (
+                        <Image
+                          source={{ uri: occupancy.tenant.avatar_url }}
+                          style={{ width: 32, height: 32, borderRadius: 16 }}
+                        />
+                      ) : !isFamilyMember && profile?.avatar_url ? (
+                        <Image
+                          source={{ uri: profile.avatar_url }}
+                          style={{ width: 32, height: 32, borderRadius: 16 }}
+                        />
+                      ) : (
+                        <Text
+                          style={{
+                            color: "white",
+                            fontSize: 12,
+                            fontWeight: "bold",
+                          }}
+                        >
+                          {isFamilyMember
+                            ? `${occupancy?.tenant?.first_name?.[0] || ""}${occupancy?.tenant?.last_name?.[0] || ""}`
+                            : `${profile?.first_name?.[0] || ""}${profile?.last_name?.[0] || ""}`}
+                        </Text>
+                      )}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={{
+                          fontSize: 13,
+                          fontWeight: "bold",
+                          color: isDark ? colors.text : "#111827",
+                        }}
+                      >
+                        {isFamilyMember
+                          ? `${occupancy?.tenant?.first_name || ""} ${occupancy?.tenant?.last_name || ""}`.trim() ||
+                            "Primary Tenant"
+                          : `${profile?.first_name} ${profile?.last_name}`}
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          color: isDark ? colors.textMuted : "#6b7280",
+                          fontWeight: "bold",
+                        }}
+                      >
+                        Primary Tenant
+                      </Text>
+                    </View>
+                    <View
+                      style={{
+                        backgroundColor: isDark ? colors.surface : "#e5e7eb",
+                        paddingHorizontal: 8,
+                        paddingVertical: 2,
+                        borderRadius: 10,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 9,
+                          fontWeight: "bold",
+                          color: isDark ? colors.textSecondary : "#374151",
+                        }}
+                      >
+                        Owner
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Members List */}
+                  {loadingFamily ? (
+                    <ActivityIndicator
+                      size="small"
+                      color="#6366f1"
+                      style={{ marginVertical: 10 }}
+                    />
+                  ) : familyMembers.length > 0 ? (
+                    <View style={{ gap: 6 }}>
+                      {familyMembers.map((fm) => (
+                        <View
+                          key={fm.id}
+                          style={{
+                            padding: 10,
+                            backgroundColor: isDark
+                              ? colors.surface
+                              : "#f9fafb",
+                            borderRadius: 12,
+                            borderWidth: 1,
+                            borderColor: isDark ? colors.cardBorder : "#f3f4f6",
                             flexDirection: "row",
                             alignItems: "center",
                             gap: 10,
                           }}
                         >
                           <View
-                            style={[
-                              styles.billIcon,
-                              {
-                                backgroundColor: isDark ? colors.card : "white",
-                                borderColor: isDark
-                                  ? colors.cardBorder
-                                  : "#e2e8f0",
-                              },
-                            ]}
+                            style={{
+                              width: 32,
+                              height: 32,
+                              borderRadius: 16,
+                              backgroundColor: "#e5e7eb",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
                           >
-                            <Ionicons
-                              name={
-                                bill.rent_amount > 0
-                                  ? "home-outline"
-                                  : "flash-outline"
-                              }
-                              size={18}
-                              color={isDark ? colors.textSecondary : "#333"}
-                            />
-                          </View>
-                          <View>
-                            <Text
-                              style={[
-                                styles.billTitle,
-                                { color: isDark ? colors.text : "#334155" },
-                              ]}
-                            >
-                              {isMoveIn
-                                ? "Move-in Bill"
-                                : bill.rent_amount > 0
-                                  ? "House Rent"
-                                  : "Utility Bill"}
-                            </Text>
-                            {bill.status === "pending_confirmation" ? (
-                              <Text
-                                style={[
-                                  styles.billDate,
-                                  { color: "#f59e0b", fontWeight: "bold" },
-                                ]}
-                              >
-                                Processing Payment
-                              </Text>
-                            ) : bill.status === "rejected" ? (
-                              <Text
-                                style={[
-                                  styles.billDate,
-                                  { color: "#ef4444", fontWeight: "bold" },
-                                ]}
-                              >
-                                Payment Rejected
-                              </Text>
+                            {fm.member_profile?.avatar_url ? (
+                              <Image
+                                source={{ uri: fm.member_profile.avatar_url }}
+                                style={{
+                                  width: 32,
+                                  height: 32,
+                                  borderRadius: 16,
+                                }}
+                              />
                             ) : (
-                              <Text style={styles.billDate}>
-                                Due:{" "}
-                                {new Date(bill.due_date).toLocaleDateString()}
+                              <Text
+                                style={{
+                                  color: "#374151",
+                                  fontSize: 10,
+                                  fontWeight: "bold",
+                                }}
+                              >
+                                {`${fm.member_profile?.first_name?.[0] || ""}${fm.member_profile?.last_name?.[0] || ""}`}
                               </Text>
                             )}
                           </View>
-                        </View>
-                        <View style={{ alignItems: "flex-end" }}>
-                          <Text
-                            style={[
-                              styles.billAmount,
-                              { color: isDark ? colors.text : "#0f172a" },
-                            ]}
-                          >
-                            ₱{total.toLocaleString()}
-                          </Text>
-                          {bill.status === "pending_confirmation" ? (
-                            <View
-                              style={[
-                                styles.payBtnSmall,
-                                { backgroundColor: "#fef3c7" },
-                              ]}
+                          <View style={{ flex: 1 }}>
+                            <Text
+                              style={{
+                                fontSize: 12,
+                                fontWeight: "bold",
+                                color: isDark ? colors.text : "#111827",
+                              }}
+                              numberOfLines={1}
                             >
-                              <Text
-                                style={[
-                                  styles.payBtnText,
-                                  { color: "#d97706" },
-                                ]}
+                              {fm.member_profile?.first_name}{" "}
+                              {fm.member_profile?.last_name}
+                            </Text>
+                            <Text
+                              style={{
+                                fontSize: 10,
+                                color: isDark ? colors.textMuted : "#9ca3af",
+                              }}
+                              numberOfLines={1}
+                            >
+                              {fm.member_profile?.email}
+                            </Text>
+                          </View>
+                          {!isFamilyMember &&
+                            (confirmRemoveMember === fm.id ? (
+                              <View style={{ flexDirection: "row", gap: 4 }}>
+                                <TouchableOpacity
+                                  onPress={() => removeFamilyMember(fm.id)}
+                                  disabled={removingMember === fm.id}
+                                  style={{
+                                    backgroundColor: "#fef2f2",
+                                    borderColor: "#fecaca",
+                                    borderWidth: 1,
+                                    paddingHorizontal: 6,
+                                    paddingVertical: 2,
+                                    borderRadius: 6,
+                                  }}
+                                >
+                                  <Text
+                                    style={{
+                                      fontSize: 9,
+                                      fontWeight: "bold",
+                                      color: "#ef4444",
+                                    }}
+                                  >
+                                    Yes
+                                  </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  onPress={() => setConfirmRemoveMember(null)}
+                                  style={{
+                                    backgroundColor: "#f3f4f6",
+                                    paddingHorizontal: 6,
+                                    paddingVertical: 2,
+                                    borderRadius: 6,
+                                  }}
+                                >
+                                  <Text
+                                    style={{
+                                      fontSize: 9,
+                                      fontWeight: "bold",
+                                      color: "#6b7280",
+                                    }}
+                                  >
+                                    No
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            ) : (
+                              <TouchableOpacity
+                                onPress={() => setConfirmRemoveMember(fm.id)}
+                                style={{ padding: 4 }}
                               >
-                                {" "}
-                                verifying{" "}
-                              </Text>
-                            </View>
-                          ) : (
-                            <TouchableOpacity
-                              style={styles.payBtnSmall}
-                              onPress={() => router.push("/payments" as any)}
-                            >
-                              <Text style={styles.payBtnText}>
-                                {bill.status === "rejected"
-                                  ? "Retry"
-                                  : "Pay Now"}
-                              </Text>
-                            </TouchableOpacity>
-                          )}
+                                <Ionicons
+                                  name="trash-outline"
+                                  size={16}
+                                  color="#ef4444"
+                                />
+                              </TouchableOpacity>
+                            ))}
                         </View>
-                      </View>
-                    );
-                  })
-                ) : (
-                  <View style={styles.emptyStateBox}>
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={32}
-                      color="#10b981"
-                    />
-                    <Text style={styles.emptyStateText}>
-                      You're all caught up!
-                    </Text>
-                  </View>
-                )}
-                <Text style={styles.noteText}>
-                  Note: Landlord is not liable for late utility payments.
-                </Text>
-              </View>
-            )}
+                      ))}
+                    </View>
+                  ) : (
+                    <View style={{ alignItems: "center", paddingVertical: 10 }}>
+                      <Text style={{ fontSize: 11, color: "#9ca3af" }}>
+                        No family members added yet.
+                      </Text>
+                    </View>
+                  )}
 
-            {/* 5. Payment Overview */}
-            {showPaymentOverviewSkeleton ? (
-              <View
-                style={[
-                  styles.borderCard,
-                  {
-                    backgroundColor: isDark ? colors.card : "white",
-                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                  },
-                ]}
-              >
-                <SkeletonBlock
-                  width={138}
-                  height={14}
-                  borderRadius={7}
-                  backgroundColor={skeletonColor}
-                />
-                <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
-                  <SkeletonBlock
-                    width="48%"
-                    height={118}
-                    borderRadius={12}
-                    backgroundColor={skeletonColor}
-                  />
-                  <SkeletonBlock
-                    width="48%"
-                    height={118}
-                    borderRadius={12}
-                    backgroundColor={skeletonColor}
-                  />
+                  {isFamilyMember && (
+                    <View
+                      style={{
+                        marginTop: 10,
+                        padding: 9,
+                        backgroundColor: isDark
+                          ? "rgba(180,83,9,0.12)"
+                          : "#fffbeb",
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: isDark ? "rgba(180,83,9,0.25)" : "#fde68a",
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 8,
+                      }}
+                    >
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "flex-start",
+                          flex: 1,
+                          gap: 6,
+                        }}
+                      >
+                        <Ionicons
+                          name="information-circle-outline"
+                          size={14}
+                          color={isDark ? "#fbbf24" : "#b45309"}
+                          style={{ marginTop: 0 }}
+                        />
+                        <Text
+                          style={{
+                            fontSize: 10,
+                            lineHeight: 14,
+                            color: isDark ? "#fbbf24" : "#92400e",
+                            fontWeight: "700",
+                            flex: 1,
+                          }}
+                        >
+                          You are a family member. Only the primary tenant can
+                          manage family members.
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        onPress={confirmLeaveFamilyGroup}
+                        disabled={leavingFamily}
+                        style={{
+                          paddingHorizontal: 10,
+                          paddingVertical: 5,
+                          borderRadius: 10,
+                          borderWidth: 1,
+                          borderColor: isDark
+                            ? "rgba(252,165,165,0.45)"
+                            : "#fecaca",
+                          backgroundColor: isDark
+                            ? "rgba(127,29,29,0.35)"
+                            : "#fef2f2",
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
+                        {leavingFamily ? (
+                          <ActivityIndicator
+                            size="small"
+                            color={isDark ? "#fecaca" : "#b91c1c"}
+                          />
+                        ) : (
+                          <Ionicons
+                            name="exit-outline"
+                            size={12}
+                            color={isDark ? "#fecaca" : "#b91c1c"}
+                          />
+                        )}
+                        <Text
+                          style={{
+                            fontSize: 10,
+                            fontWeight: "bold",
+                            color: isDark ? "#fecaca" : "#b91c1c",
+                          }}
+                        >
+                          {leavingFamily ? "Leaving..." : "Leave Family"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
-                <View style={styles.historySection}>
-                  <SkeletonBlock
-                    width={182}
-                    height={12}
-                    borderRadius={6}
-                    backgroundColor={skeletonColor}
-                  />
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      flexWrap: "wrap",
-                      marginTop: 10,
-                      gap: 8,
-                    }}
-                  >
-                    {Array.from({ length: 12 }).map((_, index) => (
-                      <SkeletonBlock
-                        key={`month-skeleton-${index}`}
-                        width={34}
-                        height={34}
-                        borderRadius={17}
-                        backgroundColor={skeletonColor}
-                      />
-                    ))}
-                  </View>
-                </View>
-              </View>
-            ) : (
-              <View
-                style={[
-                  styles.borderCard,
-                  {
-                    backgroundColor: isDark ? colors.card : "white",
-                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                  },
-                ]}
-              >
-                <Text
+              )}
+
+              {/* 4. Recent Payments */}
+              {showRecentPaymentsSkeleton ? (
+                <View
                   style={[
-                    styles.cardTitleSmall,
-                    { color: isDark ? colors.text : "#111" },
+                    styles.infoCard,
+                    {
+                      backgroundColor: isDark ? colors.card : "white",
+                      borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                    },
                   ]}
                 >
-                  Payment Overview
-                </Text>
-
-                <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
-                  <View
-                    style={[
-                      styles.ovBox,
-                      {
-                        backgroundColor: isDark ? colors.surface : "#f9fafb",
-                        borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.ovLabel,
-                        { color: isDark ? colors.textMuted : "#9ca3af" },
-                      ]}
-                    >
-                      NEXT HOUSE DUE DATE
-                    </Text>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 6,
-                        marginVertical: 4,
-                      }}
-                    >
-                      {/* <Ionicons name="calendar-outline" size={18} color="#000" /> */}
-                      <Text
-                        style={[
-                          styles.ovDate,
-                          {
-                            fontSize: 15,
-                            color: isDark ? colors.text : "#111",
-                          },
-                        ]}
-                      >
-                        {nextPaymentDate}
-                      </Text>
-                    </View>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 6,
-                        marginBottom: 4,
-                      }}
-                    >
-                      <Ionicons
-                        name="calendar-outline"
-                        size={14}
-                        color={isDark ? colors.textSecondary : "#333"}
-                      />
-                      <Text
-                        style={{
-                          fontSize: 11,
-                          fontWeight: "600",
-                          color: isDark ? colors.textSecondary : "#333",
-                        }}
-                      >
-                        Expected Bill: ₱
-                        {Number(
-                          occupancy.property?.price || 0,
-                        ).toLocaleString()}
-                      </Text>
-                    </View>
+                  <View style={[styles.rowBetween, { marginBottom: 16 }]}>
+                    <SkeletonBlock
+                      width={132}
+                      height={14}
+                      borderRadius={7}
+                      backgroundColor={skeletonColor}
+                    />
+                    <SkeletonBlock
+                      width={54}
+                      height={12}
+                      borderRadius={6}
+                      backgroundColor={skeletonColor}
+                    />
                   </View>
 
-                  {/* UTILITY DUE DATES BOX */}
-                  <View
-                    style={[
-                      styles.ovBox,
-                      {
-                        backgroundColor: isDark ? colors.surface : "#f9fafb",
-                        borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                      },
-                    ]}
-                  >
-                    <Text
+                  {Array.from({ length: 2 }).map((_, index) => (
+                    <View
+                      key={`recent-payment-skeleton-${index}`}
                       style={[
-                        styles.ovLabel,
-                        { color: isDark ? colors.textMuted : "#9ca3af" },
+                        styles.billRow,
+                        {
+                          backgroundColor: isDark ? colors.surface : "#f8fafc",
+                          borderColor: isDark ? colors.cardBorder : "#f1f5f9",
+                        },
                       ]}
                     >
-                      UTILITY DUE DATES
-                    </Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 10,
+                        }}
+                      >
+                        <SkeletonBlock
+                          width={36}
+                          height={36}
+                          borderRadius={8}
+                          backgroundColor={skeletonColor}
+                        />
+                        <View>
+                          <SkeletonBlock
+                            width={108}
+                            height={12}
+                            borderRadius={6}
+                            backgroundColor={skeletonColor}
+                          />
+                          <SkeletonBlock
+                            width={86}
+                            height={10}
+                            borderRadius={5}
+                            backgroundColor={skeletonColor}
+                            style={{ marginTop: 6 }}
+                          />
+                        </View>
+                      </View>
+                      <View style={{ alignItems: "flex-end" }}>
+                        <SkeletonBlock
+                          width={72}
+                          height={12}
+                          borderRadius={6}
+                          backgroundColor={skeletonColor}
+                        />
+                        <SkeletonBlock
+                          width={62}
+                          height={18}
+                          borderRadius={6}
+                          backgroundColor={skeletonColor}
+                          style={{ marginTop: 6 }}
+                        />
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <View
+                  style={[
+                    styles.infoCard,
+                    {
+                      backgroundColor: isDark ? colors.card : "white",
+                      borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                    },
+                  ]}
+                >
+                  <View style={[styles.rowBetween, { marginBottom: 16 }]}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.cardTitleSmall,
+                          { color: isDark ? colors.text : "#111" },
+                        ]}
+                      >
+                        Recent Payments
+                      </Text>
+                      {pendingPayments.length > 0 && (
+                        <View style={styles.badgeRed}>
+                          <Text style={styles.badgeRedText}>
+                            {pendingPayments.length} Pending
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => router.push("/payments" as any)}
+                    >
+                      <Text style={styles.seeAllText}>See All</Text>
+                    </TouchableOpacity>
+                  </View>
 
-                    <View style={{ marginTop: 8, gap: 8 }}>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                        }}
-                      >
-                        <Text
-                          style={{
-                            fontSize: 13,
-                            color: isDark ? colors.textSecondary : "#4b5563",
-                          }}
+                  {pendingPayments.length > 0 ? (
+                    pendingPayments.map((bill, i) => {
+                      const total =
+                        (Number(bill.rent_amount) || 0) +
+                        (Number(bill.water_bill) || 0) +
+                        (Number(bill.electrical_bill) || 0) +
+                        (Number(bill.other_bills) || 0) +
+                        (Number(bill.security_deposit_amount) || 0) +
+                        (Number(bill.advance_amount) || 0);
+                      const isMoveIn =
+                        bill.is_move_in_payment ||
+                        Number(bill.security_deposit_amount) > 0;
+                      return (
+                        <View
+                          key={i}
+                          style={[
+                            styles.billRow,
+                            {
+                              backgroundColor: isDark
+                                ? colors.surface
+                                : "#f8fafc",
+                              borderColor: isDark
+                                ? colors.cardBorder
+                                : "#f1f5f9",
+                            },
+                          ]}
                         >
-                          Water
-                        </Text>
-                        <Text
-                          style={{
-                            fontSize: 13,
-                            fontWeight: "700",
-                            color: isDark ? colors.text : "#111",
-                          }}
-                        >
-                          {getNextUtilityDateText(occupancy.water_due_day)}
-                        </Text>
-                      </View>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                        }}
-                      >
-                        <Text
-                          style={{
-                            fontSize: 13,
-                            color: isDark ? colors.textSecondary : "#4b5563",
-                          }}
-                        >
-                          Electricity
-                        </Text>
-                        <Text
-                          style={{
-                            fontSize: 13,
-                            fontWeight: "700",
-                            color: isDark ? colors.text : "#111",
-                          }}
-                        >
-                          {getNextUtilityDateText(
-                            occupancy.electricity_due_day,
-                          )}
-                        </Text>
-                      </View>
-                      {occupancy.wifi_due_day !== null &&
-                        occupancy.wifi_due_day !== undefined && (
                           <View
                             style={{
                               flexDirection: "row",
                               alignItems: "center",
-                              justifyContent: "space-between",
+                              gap: 10,
                             }}
                           >
-                            <Text
-                              style={{
-                                fontSize: 13,
-                                color: isDark
-                                  ? colors.textSecondary
-                                  : "#4b5563",
-                              }}
+                            <View
+                              style={[
+                                styles.billIcon,
+                                {
+                                  backgroundColor: isDark
+                                    ? colors.card
+                                    : "white",
+                                  borderColor: isDark
+                                    ? colors.cardBorder
+                                    : "#e2e8f0",
+                                },
+                              ]}
                             >
-                              WiFi Internet
-                            </Text>
-                            <Text
-                              style={{
-                                fontSize: 13,
-                                fontWeight: "700",
-                                color: isDark ? colors.text : "#111",
-                              }}
-                            >
-                              {getNextUtilityDateText(occupancy.wifi_due_day)}
-                            </Text>
-                          </View>
-                        )}
-                    </View>
-                  </View>
-                </View>
-
-                {/* Payment History Grid */}
-                <View style={styles.historySection}>
-                  <Text
-                    style={[
-                      styles.cardTitleSmall,
-                      {
-                        marginBottom: 10,
-                        color: isDark ? colors.text : "#111",
-                      },
-                    ]}
-                  >
-                    Rent Payment History ({new Date().getFullYear()})
-                  </Text>
-                  <View style={styles.historyGrid}>
-                    {(() => {
-                      // Build a Set of all paid month indices for current year
-                      // This accounts for advance payments covering extra months
-                      const paidMonths = new Set<number>();
-                      const currentYear = new Date().getFullYear();
-                      paymentHistory.forEach((p) => {
-                        const d = new Date(p.due_date);
-                        if (d.getFullYear() !== currentYear) return;
-                        const billMonth = d.getMonth();
-                        paidMonths.add(billMonth);
-                        // If bill has advance_amount, mark additional month(s) as covered
-                        const rent = parseFloat(p.rent_amount || 0);
-                        const advance = parseFloat(p.advance_amount || 0);
-                        if (rent > 0 && advance > 0) {
-                          const extraMonths = Math.floor(advance / rent);
-                          for (let m = 1; m <= extraMonths; m++) {
-                            const coveredMonth = billMonth + m;
-                            if (coveredMonth < 12) paidMonths.add(coveredMonth);
-                          }
-                        }
-                      });
-                      return (
-                        <>
-                          {[
-                            "Jan",
-                            "Feb",
-                            "Mar",
-                            "Apr",
-                            "May",
-                            "Jun",
-                            "Jul",
-                            "Aug",
-                            "Sep",
-                            "Oct",
-                            "Nov",
-                            "Dec",
-                          ].map((m, i) => {
-                            const isPaid = paidMonths.has(i);
-                            const isCurrent = new Date().getMonth() === i;
-                            return (
-                              <View key={m} style={styles.monthCol}>
+                              <Ionicons
+                                name={
+                                  bill.rent_amount > 0
+                                    ? "home-outline"
+                                    : "flash-outline"
+                                }
+                                size={18}
+                                color={isDark ? colors.textSecondary : "#333"}
+                              />
+                            </View>
+                            <View>
+                              <Text
+                                style={[
+                                  styles.billTitle,
+                                  { color: isDark ? colors.text : "#334155" },
+                                ]}
+                              >
+                                {isMoveIn
+                                  ? "Move-in Bill"
+                                  : bill.rent_amount > 0
+                                    ? "House Rent"
+                                    : "Utility Bill"}
+                              </Text>
+                              {bill.status === "pending_confirmation" ? (
                                 <Text
                                   style={[
-                                    styles.monthText,
-                                    isPaid
-                                      ? { color: isDark ? "#86efac" : "black" }
-                                      : {
-                                          color: isDark
-                                            ? colors.textMuted
-                                            : "#d1d5db",
-                                        },
+                                    styles.billDate,
+                                    { color: "#f59e0b", fontWeight: "bold" },
                                   ]}
                                 >
-                                  {m}
+                                  Processing Payment
                                 </Text>
-                                {isPaid ? (
-                                  <View
-                                    style={[
-                                      styles.dotPaid,
-                                      isDark && { backgroundColor: "#22c55e" },
-                                    ]}
-                                  >
-                                    <Ionicons
-                                      name="checkmark"
-                                      size={10}
-                                      color={isDark ? "white" : "black"}
-                                    />
-                                  </View>
-                                ) : isCurrent ? (
-                                  <View
-                                    style={[
-                                      styles.dotCurrent,
-                                      {
-                                        borderColor: isDark
-                                          ? colors.text
-                                          : "#000",
-                                      },
-                                    ]}
-                                  />
-                                ) : (
-                                  <View
-                                    style={[
-                                      styles.dotEmpty,
-                                      {
-                                        borderColor: isDark
-                                          ? colors.border
-                                          : "#e5e7eb",
-                                      },
-                                    ]}
-                                  />
-                                )}
+                              ) : bill.status === "rejected" ? (
+                                <Text
+                                  style={[
+                                    styles.billDate,
+                                    { color: "#ef4444", fontWeight: "bold" },
+                                  ]}
+                                >
+                                  Payment Rejected
+                                </Text>
+                              ) : (
+                                <Text style={styles.billDate}>
+                                  Due:{" "}
+                                  {new Date(bill.due_date).toLocaleDateString()}
+                                </Text>
+                              )}
+                            </View>
+                          </View>
+                          <View style={{ alignItems: "flex-end" }}>
+                            <Text
+                              style={[
+                                styles.billAmount,
+                                { color: isDark ? colors.text : "#0f172a" },
+                              ]}
+                            >
+                              ₱{total.toLocaleString()}
+                            </Text>
+                            {bill.status === "pending_confirmation" ? (
+                              <View
+                                style={[
+                                  styles.payBtnSmall,
+                                  { backgroundColor: "#fef3c7" },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.payBtnText,
+                                    { color: "#d97706" },
+                                  ]}
+                                >
+                                  {" "}
+                                  verifying{" "}
+                                </Text>
                               </View>
-                            );
-                          })}
-                        </>
+                            ) : (
+                              <TouchableOpacity
+                                style={styles.payBtnSmall}
+                                onPress={() => router.push("/payments" as any)}
+                              >
+                                <Text style={styles.payBtnText}>
+                                  {bill.status === "rejected"
+                                    ? "Retry"
+                                    : "Pay Now"}
+                                </Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        </View>
                       );
-                    })()}
-                  </View>
-                </View>
-              </View>
-            )}
-          </View>
-        ) : (
-          // --- DISCOVERY VIEW (Section-based carousels - matches Web) ---
-          <View>
-            {/* <View
-              style={{
-                flexDirection: "row",
-                paddingHorizontal: 16,
-                paddingTop: 14,
-                paddingBottom: 4,
-                gap: 10,
-                alignItems: "center",
-              }}
-            > */}
-              {/* <View
-                style={[
-                  styles.browseSearchBar,
-                  {
-                    flex: 1,
-                    marginHorizontal: 0,
-                    marginTop: 0,
-                    marginBottom: 0,
-                  },
-                  { backgroundColor: isDark ? colors.card : "#f3f4f6" },
-                ]}
-              > */}
-                {/* <Ionicons
-                  name="search"
-                  size={18}
-                  color={isDark ? colors.textMuted : "#9ca3af"}
-                /> */}
-                {/* <TextInput
-                  placeholder="Search by city or title..."
-                  placeholderTextColor={isDark ? colors.textMuted : "#c4c4c4"}
-                  style={[
-                    styles.browseSearchInput,
-                    { color: isDark ? colors.text : "#111" },
-                  ]}
-                  value={noOccupancySearch}
-                  onChangeText={setNoOccupancySearch}
-                /> */}
-                {/* {noOccupancySearch.length > 0 && (
-                  <TouchableOpacity onPress={() => setNoOccupancySearch("")}>
-                    <Ionicons
-                      name="close-circle"
-                      size={18}
-                      color={isDark ? colors.textMuted : "#ccc"}
-                    />
-                  </TouchableOpacity>
-                )} */}
-              {/* </View> */}
-              {/* <TouchableOpacity
-                onPress={() => setShowBrowseFilterModal(true)}
-                style={[
-                  {
-                    width: 46,
-                    height: 46,
-                    borderRadius: 14,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    borderWidth: 1.5,
-                  },
-                  {
-                    backgroundColor: isDark ? colors.card : "white",
-                    borderColor: isDark ? colors.border : "#e5e7eb",
-                  },
-                  (noOccupancyBedrooms !== null ||
-                    noOccupancyMaxPrice !== null ||
-                    noOccupancySortBy !== "newest") && {
-                    backgroundColor: isDark ? "white" : "#111",
-                    borderColor: isDark ? "white" : "#111",
-                  },
-                ]}
-              > */}
-                {/* <Ionicons
-                  name="options-outline"
-                  size={22}
-                  color={
-                    noOccupancyBedrooms !== null ||
-                    noOccupancyMaxPrice !== null ||
-                    noOccupancySortBy !== "newest"
-                      ? isDark
-                        ? "#111"
-                        : "white"
-                      : isDark
-                        ? colors.text
-                        : "#111"
-                  }
-                />
-              </TouchableOpacity> */}
-            {/* </View> */}
-
-            {/* {(() => {
-              const cities = Array.from(
-                new Set(properties.map((p: any) => p.city).filter(Boolean)),
-              ) as string[];
-              if (cities.length === 0) return null;
-              const chipBase = {
-                paddingHorizontal: 14,
-                paddingVertical: 7,
-                borderRadius: 20,
-                borderWidth: 1.5,
-              };
-              const activeStyle = {
-                backgroundColor: isDark ? "#fff" : "#111",
-                borderColor: isDark ? "#fff" : "#111",
-              };
-              const inactiveStyle = {
-                backgroundColor: isDark ? colors.card : "#f3f4f6",
-                borderColor: isDark ? colors.border : "#e5e7eb",
-              };
-              const activeText = {
-                color: isDark ? "#111" : "#fff",
-                fontWeight: "700" as const,
-                fontSize: 12,
-              };
-              const inactiveText = {
-                color: isDark ? colors.textMuted : "#555",
-                fontWeight: "600" as const,
-                fontSize: 12,
-              };
-              return (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{
-                    paddingHorizontal: 16,
-                    paddingVertical: 10,
-                    gap: 8,
-                    alignItems: "center",
-                  }}
-                >
-                  <TouchableOpacity
-                    onPress={() => setNoOccupancyCityFilter(null)}
-                    style={[
-                      chipBase,
-                      noOccupancyCityFilter === null
-                        ? activeStyle
-                        : inactiveStyle,
-                    ]}
-                  >
-                    <Text
-                      style={
-                        noOccupancyCityFilter === null
-                          ? activeText
-                          : inactiveText
-                      }
-                    >
-                      All
-                    </Text>
-                  </TouchableOpacity>
-                  {cities.map((city) => (
-                    <TouchableOpacity
-                      key={city}
-                      onPress={() =>
-                        setNoOccupancyCityFilter(
-                          noOccupancyCityFilter === city ? null : city,
-                        )
-                      }
-                      style={[
-                        chipBase,
-                        noOccupancyCityFilter === city
-                          ? activeStyle
-                          : inactiveStyle,
-                      ]}
-                    >
-                      <Text
-                        style={
-                          noOccupancyCityFilter === city
-                            ? activeText
-                            : inactiveText
-                        }
-                      >
-                        {city}
+                    })
+                  ) : (
+                    <View style={styles.emptyStateBox}>
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={32}
+                        color="#10b981"
+                      />
+                      <Text style={styles.emptyStateText}>
+                        You're all caught up!
                       </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              );
-            })()} */}
+                    </View>
+                  )}
+                  <Text style={styles.noteText}>
+                    Note: Landlord is not liable for late utility payments.
+                  </Text>
+                </View>
+              )}
 
-            {/* --- SECTION: Recommended Properties (matches web) --- */}
-            <View style={{ marginTop: 4 }}>
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 8,
-                  paddingHorizontal: 16,
-                  paddingBottom: 10,
-                }}
-              >
-                <Text
+              {/* 5. Payment Overview */}
+              {showPaymentOverviewSkeleton ? (
+                <View
                   style={[
-                    styles.sectionTitle,
+                    styles.borderCard,
                     {
-                      fontSize: 30,
-                      color: isDark ? colors.text : "#111",
-                      textTransform: "none",
+                      backgroundColor: isDark ? colors.card : "white",
+                      borderColor: isDark ? colors.cardBorder : "#f3f4f6",
                     },
                   ]}
                 >
-                  Recommended Properties
-                </Text>
+                  <SkeletonBlock
+                    width={138}
+                    height={14}
+                    borderRadius={7}
+                    backgroundColor={skeletonColor}
+                  />
+                  <View
+                    style={{ flexDirection: "row", gap: 10, marginTop: 10 }}
+                  >
+                    <SkeletonBlock
+                      width="48%"
+                      height={118}
+                      borderRadius={12}
+                      backgroundColor={skeletonColor}
+                    />
+                    <SkeletonBlock
+                      width="48%"
+                      height={118}
+                      borderRadius={12}
+                      backgroundColor={skeletonColor}
+                    />
+                  </View>
+                  <View style={styles.historySection}>
+                    <SkeletonBlock
+                      width={182}
+                      height={12}
+                      borderRadius={6}
+                      backgroundColor={skeletonColor}
+                    />
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        flexWrap: "wrap",
+                        marginTop: 10,
+                        gap: 8,
+                      }}
+                    >
+                      {Array.from({ length: 12 }).map((_, index) => (
+                        <SkeletonBlock
+                          key={`month-skeleton-${index}`}
+                          width={34}
+                          height={34}
+                          borderRadius={17}
+                          backgroundColor={skeletonColor}
+                        />
+                      ))}
+                    </View>
+                  </View>
+                </View>
+              ) : (
+                <View
+                  style={[
+                    styles.borderCard,
+                    {
+                      backgroundColor: isDark ? colors.card : "white",
+                      borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.cardTitleSmall,
+                      { color: isDark ? colors.text : "#111" },
+                    ]}
+                  >
+                    Payment Overview
+                  </Text>
+
+                  <View
+                    style={{ flexDirection: "row", gap: 10, marginTop: 10 }}
+                  >
+                    <View
+                      style={[
+                        styles.ovBox,
+                        {
+                          backgroundColor: isDark ? colors.surface : "#f9fafb",
+                          borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.ovLabel,
+                          { color: isDark ? colors.textMuted : "#9ca3af" },
+                        ]}
+                      >
+                        NEXT HOUSE DUE DATE
+                      </Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                          marginVertical: 4,
+                        }}
+                      >
+                        {/* <Ionicons name="calendar-outline" size={18} color="#000" /> */}
+                        <Text
+                          style={[
+                            styles.ovDate,
+                            {
+                              fontSize: 15,
+                              color: isDark ? colors.text : "#111",
+                            },
+                          ]}
+                        >
+                          {nextPaymentDate}
+                        </Text>
+                      </View>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                          marginBottom: 4,
+                        }}
+                      >
+                        <Ionicons
+                          name="calendar-outline"
+                          size={14}
+                          color={isDark ? colors.textSecondary : "#333"}
+                        />
+                        <Text
+                          style={{
+                            fontSize: 11,
+                            fontWeight: "600",
+                            color: isDark ? colors.textSecondary : "#333",
+                          }}
+                        >
+                          Expected Bill: ₱
+                          {Number(
+                            occupancy.property?.price || 0,
+                          ).toLocaleString()}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* UTILITY DUE DATES BOX */}
+                    <View
+                      style={[
+                        styles.ovBox,
+                        {
+                          backgroundColor: isDark ? colors.surface : "#f9fafb",
+                          borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.ovLabel,
+                          { color: isDark ? colors.textMuted : "#9ca3af" },
+                        ]}
+                      >
+                        UTILITY DUE DATES
+                      </Text>
+
+                      <View style={{ marginTop: 8, gap: 8 }}>
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 13,
+                              color: isDark ? colors.textSecondary : "#4b5563",
+                            }}
+                          >
+                            Water
+                          </Text>
+                          <Text
+                            style={{
+                              fontSize: 13,
+                              fontWeight: "700",
+                              color: isDark ? colors.text : "#111",
+                            }}
+                          >
+                            {getNextUtilityDateText(occupancy.water_due_day)}
+                          </Text>
+                        </View>
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 13,
+                              color: isDark ? colors.textSecondary : "#4b5563",
+                            }}
+                          >
+                            Electricity
+                          </Text>
+                          <Text
+                            style={{
+                              fontSize: 13,
+                              fontWeight: "700",
+                              color: isDark ? colors.text : "#111",
+                            }}
+                          >
+                            {getNextUtilityDateText(
+                              occupancy.electricity_due_day,
+                            )}
+                          </Text>
+                        </View>
+                        {occupancy.wifi_due_day !== null &&
+                          occupancy.wifi_due_day !== undefined && (
+                            <View
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                              }}
+                            >
+                              <Text
+                                style={{
+                                  fontSize: 13,
+                                  color: isDark
+                                    ? colors.textSecondary
+                                    : "#4b5563",
+                                }}
+                              >
+                                WiFi Internet
+                              </Text>
+                              <Text
+                                style={{
+                                  fontSize: 13,
+                                  fontWeight: "700",
+                                  color: isDark ? colors.text : "#111",
+                                }}
+                              >
+                                {getNextUtilityDateText(occupancy.wifi_due_day)}
+                              </Text>
+                            </View>
+                          )}
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Payment History Grid */}
+                  <View style={styles.historySection}>
+                    <Text
+                      style={[
+                        styles.cardTitleSmall,
+                        {
+                          marginBottom: 10,
+                          color: isDark ? colors.text : "#111",
+                        },
+                      ]}
+                    >
+                      Rent Payment History ({new Date().getFullYear()})
+                    </Text>
+                    <View style={styles.historyGrid}>
+                      {(() => {
+                        // Build a Set of all paid month indices for current year
+                        // This accounts for advance payments covering extra months
+                        const paidMonths = new Set<number>();
+                        const currentYear = new Date().getFullYear();
+                        paymentHistory.forEach((p) => {
+                          const d = new Date(p.due_date);
+                          if (d.getFullYear() !== currentYear) return;
+                          const billMonth = d.getMonth();
+                          paidMonths.add(billMonth);
+                          // If bill has advance_amount, mark additional month(s) as covered
+                          const rent = parseFloat(p.rent_amount || 0);
+                          const advance = parseFloat(p.advance_amount || 0);
+                          if (rent > 0 && advance > 0) {
+                            const extraMonths = Math.floor(advance / rent);
+                            for (let m = 1; m <= extraMonths; m++) {
+                              const coveredMonth = billMonth + m;
+                              if (coveredMonth < 12)
+                                paidMonths.add(coveredMonth);
+                            }
+                          }
+                        });
+                        return (
+                          <>
+                            {[
+                              "Jan",
+                              "Feb",
+                              "Mar",
+                              "Apr",
+                              "May",
+                              "Jun",
+                              "Jul",
+                              "Aug",
+                              "Sep",
+                              "Oct",
+                              "Nov",
+                              "Dec",
+                            ].map((m, i) => {
+                              const isPaid = paidMonths.has(i);
+                              const isCurrent = new Date().getMonth() === i;
+                              return (
+                                <View key={m} style={styles.monthCol}>
+                                  <Text
+                                    style={[
+                                      styles.monthText,
+                                      isPaid
+                                        ? {
+                                            color: isDark ? "#86efac" : "black",
+                                          }
+                                        : {
+                                            color: isDark
+                                              ? colors.textMuted
+                                              : "#d1d5db",
+                                          },
+                                    ]}
+                                  >
+                                    {m}
+                                  </Text>
+                                  {isPaid ? (
+                                    <View
+                                      style={[
+                                        styles.dotPaid,
+                                        isDark && {
+                                          backgroundColor: "#22c55e",
+                                        },
+                                      ]}
+                                    >
+                                      <Ionicons
+                                        name="checkmark"
+                                        size={10}
+                                        color={isDark ? "white" : "black"}
+                                      />
+                                    </View>
+                                  ) : isCurrent ? (
+                                    <View
+                                      style={[
+                                        styles.dotCurrent,
+                                        {
+                                          borderColor: isDark
+                                            ? colors.text
+                                            : "#000",
+                                        },
+                                      ]}
+                                    />
+                                  ) : (
+                                    <View
+                                      style={[
+                                        styles.dotEmpty,
+                                        {
+                                          borderColor: isDark
+                                            ? colors.border
+                                            : "#e5e7eb",
+                                        },
+                                      ]}
+                                    />
+                                  )}
+                                </View>
+                              );
+                            })}
+                          </>
+                        );
+                      })()}
+                    </View>
+                  </View>
+                </View>
+              )}
+            </View>
+          ) : (
+            // --- DISCOVERY VIEW (Section-based carousels - matches Web) ---
+            <View>
+              <View
+                style={{
+                  flexDirection: "row",
+                  paddingHorizontal: 16,
+                  paddingTop: 14,
+                  paddingBottom: 4,
+                  gap: 10,
+                  alignItems: "center",
+                  zIndex: 10,
+                }}
+              >
+                <View
+                  style={[
+                    styles.browseSearchBar,
+                    {
+                      flex: 1,
+                      marginHorizontal: 0,
+                      marginTop: 0,
+                      marginBottom: 0,
+                    },
+                    { backgroundColor: isDark ? colors.card : "#f3f4f6" },
+                  ]}
+                >
+                  <Ionicons
+                    name="search"
+                    size={18}
+                    color={isDark ? colors.textMuted : "#9ca3af"}
+                  />
+                  <TextInput
+                    placeholder="Search by city or title..."
+                    placeholderTextColor={isDark ? colors.textMuted : "#c4c4c4"}
+                    style={[
+                      styles.browseSearchInput,
+                      { color: isDark ? colors.text : "#111" },
+                    ]}
+                    value={noOccupancySearch}
+                    onChangeText={(text) => {
+                      setNoOccupancySearch(text);
+                      setShowSearchDropdown(true);
+                    }}
+                    onFocus={() => setShowSearchDropdown(true)}
+                  />
+                  {noOccupancySearch.length > 0 && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        setNoOccupancySearch("");
+                        setShowSearchDropdown(false);
+                      }}
+                    >
+                      <Ionicons
+                        name="close-circle"
+                        size={18}
+                        color={isDark ? colors.textMuted : "#ccc"}
+                      />
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
-              {filteredProperties.length === 0 ? (
+
+              {/* Search Dropdown */}
+              {showSearchDropdown && noOccupancySearch.trim() && (
+                <View
+                  style={[
+                    styles.searchDropdown,
+                    { backgroundColor: isDark ? colors.card : "white" },
+                  ]}
+                >
+                  <ScrollView
+                    keyboardShouldPersistTaps="handled"
+                    style={{ maxHeight: 300 }}
+                  >
+                    {searchResults.length > 0 ? (
+                      searchResults.map((p: any) => (
+                        <TouchableOpacity
+                          key={p.id}
+                          style={[
+                            styles.searchDropdownItem,
+                            {
+                              borderBottomColor: isDark
+                                ? colors.border
+                                : "#f1f5f9",
+                            },
+                          ]}
+                          onPress={() => {
+                            setShowSearchDropdown(false);
+                            setNoOccupancySearch("");
+                            router.push(`/properties/${p.id}` as any);
+                          }}
+                        >
+                          <Ionicons
+                            name="business-outline"
+                            size={16}
+                            color={isDark ? colors.textMuted : "#64748b"}
+                          />
+                          <View style={{ flex: 1 }}>
+                            <Text
+                              style={[
+                                styles.searchDropdownTitle,
+                                { color: isDark ? colors.text : "#1e293b" },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {p.title}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.searchDropdownCity,
+                                {
+                                  color: isDark ? colors.textMuted : "#94a3b8",
+                                },
+                              ]}
+                            >
+                              {p.city}
+                            </Text>
+                          </View>
+                          <Ionicons
+                            name="chevron-forward"
+                            size={14}
+                            color="#cbd5e1"
+                          />
+                        </TouchableOpacity>
+                      ))
+                    ) : (
+                      <View style={{ padding: 20, alignItems: "center" }}>
+                        <Text
+                          style={{
+                            fontSize: 13,
+                            color: isDark ? colors.textMuted : "#94a3b8",
+                            fontWeight: "500",
+                          }}
+                        >
+                          No properties found for "{noOccupancySearch}"
+                        </Text>
+                      </View>
+                    )}
+                  </ScrollView>
+                </View>
+              )}
+              {/* --- SECTION: Recommended Properties (matches web) --- */}
+              <View style={{ marginTop: 4 }}>
                 <View
                   style={{
+                    flexDirection: "row",
                     alignItems: "center",
-                    paddingVertical: 40,
+                    gap: 8,
+                    paddingHorizontal: 16,
+                    paddingBottom: 10,
                   }}
                 >
-                  <View
+                  <Text
                     style={[
-                      styles.emptyStateBox,
+                      styles.sectionTitle,
                       {
-                        width: 70,
-                        height: 70,
-                        borderRadius: 35,
-                        justifyContent: "center",
+                        fontSize: 30,
+                        color: isDark ? colors.text : "#111",
+                        textTransform: "none",
                       },
                     ]}
                   >
-                    <Ionicons
-                      name="home-outline"
-                      size={30}
-                      color={isDark ? colors.textMuted : "#d1d5db"}
-                    />
-                  </View>
-                  <Text
-                    style={{
-                      color: isDark ? colors.textMuted : "#6b7280",
-                      marginTop: 12,
-                      fontSize: 14,
-                      fontWeight: "700",
-                    }}
-                  >
-                    No properties found
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 12,
-                      color: isDark ? colors.textMuted : "#9ca3af",
-                      marginTop: 4,
-                    }}
-                  >
-                    Try adjusting your search or filter
+                    Recommended Properties
                   </Text>
                 </View>
-              ) : (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{
-                    paddingHorizontal: 12,
-                    gap: 10,
-                    paddingRight: 16,
-                  }}
-                >
-                  {filteredProperties
-                    .slice(0, MAX_DISPLAY_ITEMS)
-                    .map((item: any) => renderCard(item))}
-                  {filteredProperties.length > MAX_DISPLAY_ITEMS &&
-                    renderSeeAllCard(filteredProperties, () =>
-                      router.push("/(tabs)/allproperties" as any),
-                    )}
-                </ScrollView>
-              )}
-            </View>
+                {filteredProperties.length === 0 ? (
+                  <View
+                    style={{
+                      alignItems: "center",
+                      paddingVertical: 40,
+                    }}
+                  >
+                    <View
+                      style={[
+                        styles.emptyStateBox,
+                        {
+                          width: 70,
+                          height: 70,
+                          borderRadius: 35,
+                          justifyContent: "center",
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name="home-outline"
+                        size={30}
+                        color={isDark ? colors.textMuted : "#d1d5db"}
+                      />
+                    </View>
+                    <Text
+                      style={{
+                        color: isDark ? colors.textMuted : "#6b7280",
+                        marginTop: 12,
+                        fontSize: 14,
+                        fontWeight: "700",
+                      }}
+                    >
+                      No properties found
+                    </Text>
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        color: isDark ? colors.textMuted : "#9ca3af",
+                        marginTop: 4,
+                      }}
+                    >
+                      Try adjusting your search or filter
+                    </Text>
+                  </View>
+                ) : (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{
+                      paddingHorizontal: 12,
+                      gap: 10,
+                      paddingRight: 16,
+                    }}
+                  >
+                    {filteredProperties
+                      .slice(0, MAX_DISPLAY_ITEMS)
+                      .map((item: any) => renderCard(item))}
+                    {filteredProperties.length > MAX_DISPLAY_ITEMS &&
+                      renderSeeAllCard(filteredProperties, () =>
+                        router.push("/(tabs)/allproperties" as any),
+                      )}
+                  </ScrollView>
+                )}
+              </View>
 
-            {/* --- SECTION: Available in [City] (matches web) --- */}
-            {locationPermission === "granted" &&
-              userLocationCity !== "" &&
-              cityProperties.length > 0 && (
+              {/* --- SECTION: Available in [City] (matches web) --- */}
+              {locationPermission === "granted" &&
+                userLocationCity !== "" &&
+                cityProperties.length > 0 && (
+                  <View style={{ marginTop: 16 }}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                        paddingHorizontal: 16,
+                        paddingBottom: 10,
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.sectionTitle,
+                          {
+                            fontSize: 30,
+                            color: isDark ? colors.text : "#111",
+                            textTransform: "none",
+                          },
+                        ]}
+                      >
+                        Available in {userLocationCity}
+                      </Text>
+                    </View>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={{
+                        paddingHorizontal: 12,
+                        gap: 10,
+                        paddingRight: 16,
+                      }}
+                    >
+                      {cityProperties
+                        .slice(0, MAX_DISPLAY_ITEMS)
+                        .map((item: any) => renderCard(item))}
+                      {cityProperties.length > MAX_DISPLAY_ITEMS &&
+                        renderSeeAllCard(cityProperties, () =>
+                          router.push("/(tabs)/allproperties" as any),
+                        )}
+                    </ScrollView>
+                  </View>
+                )}
+
+              {/* --- SECTION: Nearby Properties (matches web) --- */}
+              {locationPermission === "granted" &&
+                nearbyProperties.length > 0 && (
+                  <View style={{ marginTop: 16 }}>
+                    <View
+                      style={{
+                        paddingHorizontal: 16,
+                        paddingBottom: 10,
+                      }}
+                    >
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <Ionicons
+                          name="navigate"
+                          size={18}
+                          color={isDark ? "#34d399" : "#059669"}
+                        />
+                        <Text
+                          style={[
+                            styles.sectionTitle,
+                            {
+                              fontSize: 30,
+                              color: isDark ? colors.text : "#111",
+                              textTransform: "none",
+                            },
+                          ]}
+                        >
+                          Nearby Properties
+                        </Text>
+                      </View>
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          fontWeight: "600",
+                          color: isDark ? colors.textMuted : "#9ca3af",
+                          textTransform: "uppercase",
+                          letterSpacing: 0.5,
+                          marginTop: 2,
+                          marginLeft: 26,
+                        }}
+                      >
+                        Within 1 km of your current location
+                      </Text>
+                    </View>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={{
+                        paddingHorizontal: 12,
+                        gap: 10,
+                        paddingRight: 16,
+                      }}
+                    >
+                      {nearbyProperties
+                        .slice(0, MAX_DISPLAY_ITEMS)
+                        .map((item: any) => renderCard(item))}
+                      {nearbyProperties.length > MAX_DISPLAY_ITEMS &&
+                        renderSeeAllCard(nearbyProperties, () =>
+                          router.push("/(tabs)/allproperties" as any),
+                        )}
+                    </ScrollView>
+                  </View>
+                )}
+
+              {/* --- SECTION: Most Favorite Properties (matches web) --- */}
+              {guestFavorites.length > 0 && (
                 <View style={{ marginTop: 16 }}>
                   <View
                     style={{
@@ -5235,7 +6019,7 @@ export default function VisitorDashboard({ session, profile }: any) {
                         },
                       ]}
                     >
-                      Available in {userLocationCity}
+                      Most Favorite Properties
                     </Text>
                   </View>
                   <ScrollView
@@ -5247,64 +6031,43 @@ export default function VisitorDashboard({ session, profile }: any) {
                       paddingRight: 16,
                     }}
                   >
-                    {cityProperties
+                    {guestFavorites
                       .slice(0, MAX_DISPLAY_ITEMS)
                       .map((item: any) => renderCard(item))}
-                    {cityProperties.length > MAX_DISPLAY_ITEMS &&
-                      renderSeeAllCard(cityProperties, () =>
-                        router.push("/(tabs)/allproperties" as any),
+                    {guestFavorites.length > MAX_DISPLAY_ITEMS &&
+                      renderSeeAllCard(guestFavorites, () =>
+                        router.push({
+                          pathname: "/(tabs)/allproperties" as any,
+                          params: { filterMostFavorite: "true" },
+                        }),
                       )}
                   </ScrollView>
                 </View>
               )}
 
-            {/* --- SECTION: Nearby Properties (matches web) --- */}
-            {locationPermission === "granted" &&
-              nearbyProperties.length > 0 && (
+              {/* --- SECTION: Top Rated (matches web) --- */}
+              {topRated.length > 0 && (
                 <View style={{ marginTop: 16 }}>
                   <View
                     style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
                       paddingHorizontal: 16,
                       paddingBottom: 10,
                     }}
                   >
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 8,
-                      }}
-                    >
-                      <Ionicons
-                        name="navigate"
-                        size={18}
-                        color={isDark ? "#34d399" : "#059669"}
-                      />
-                      <Text
-                        style={[
-                          styles.sectionTitle,
-                          {
-                            fontSize: 30,
-                            color: isDark ? colors.text : "#111",
-                            textTransform: "none",
-                          },
-                        ]}
-                      >
-                        Nearby Properties
-                      </Text>
-                    </View>
                     <Text
-                      style={{
-                        fontSize: 11,
-                        fontWeight: "600",
-                        color: isDark ? colors.textMuted : "#9ca3af",
-                        textTransform: "uppercase",
-                        letterSpacing: 0.5,
-                        marginTop: 2,
-                        marginLeft: 26,
-                      }}
+                      style={[
+                        styles.sectionTitle,
+                        {
+                          fontSize: 30,
+                          color: isDark ? colors.text : "#111",
+                          textTransform: "none",
+                        },
+                      ]}
                     >
-                      Within 1 km of your current location
+                      Top Rated
                     </Text>
                   </View>
                   <ScrollView
@@ -5316,227 +6079,207 @@ export default function VisitorDashboard({ session, profile }: any) {
                       paddingRight: 16,
                     }}
                   >
-                    {nearbyProperties
+                    {topRated
                       .slice(0, MAX_DISPLAY_ITEMS)
                       .map((item: any) => renderCard(item))}
-                    {nearbyProperties.length > MAX_DISPLAY_ITEMS &&
-                      renderSeeAllCard(nearbyProperties, () =>
-                        router.push("/(tabs)/allproperties" as any),
+                    {topRated.length > MAX_DISPLAY_ITEMS &&
+                      renderSeeAllCard(topRated, () =>
+                        router.push({
+                          pathname: "/(tabs)/allproperties" as any,
+                          params: { minRating: "5" },
+                        }),
                       )}
                   </ScrollView>
                 </View>
               )}
 
-            {/* --- SECTION: Most Favorite Properties (matches web) --- */}
-            {guestFavorites.length > 0 && (
-              <View style={{ marginTop: 16 }}>
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 8,
-                    paddingHorizontal: 16,
-                    paddingBottom: 10,
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.sectionTitle,
-                      {
-                        fontSize: 30,
-                        color: isDark ? colors.text : "#111",
-                        textTransform: "none",
-                      },
-                    ]}
-                  >
-                    Most Favorite Properties
-                  </Text>
-                </View>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{
-                    paddingHorizontal: 12,
-                    gap: 10,
-                    paddingRight: 16,
-                  }}
-                >
-                  {guestFavorites
-                    .slice(0, MAX_DISPLAY_ITEMS)
-                    .map((item: any) => renderCard(item))}
-                  {guestFavorites.length > MAX_DISPLAY_ITEMS &&
-                    renderSeeAllCard(guestFavorites, () =>
-                      router.push({
-                        pathname: "/(tabs)/allproperties" as any,
-                        params: { filterMostFavorite: "true" },
-                      }),
-                    )}
-                </ScrollView>
-              </View>
-            )}
-
-            {/* --- SECTION: Top Rated (matches web) --- */}
-            {topRated.length > 0 && (
-              <View style={{ marginTop: 16 }}>
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 8,
-                    paddingHorizontal: 16,
-                    paddingBottom: 10,
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.sectionTitle,
-                      {
-                        fontSize: 30,
-                        color: isDark ? colors.text : "#111",
-                        textTransform: "none",
-                      },
-                    ]}
-                  >
-                    Top Rated
-                  </Text>
-                </View>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{
-                    paddingHorizontal: 12,
-                    gap: 10,
-                    paddingRight: 16,
-                  }}
-                >
-                  {topRated
-                    .slice(0, MAX_DISPLAY_ITEMS)
-                    .map((item: any) => renderCard(item))}
-                  {topRated.length > MAX_DISPLAY_ITEMS &&
-                    renderSeeAllCard(topRated, () =>
-                      router.push({
-                        pathname: "/(tabs)/allproperties" as any,
-                        params: { minRating: "5" },
-                      }),
-                    )}
-                </ScrollView>
-              </View>
-            )}
-
-            {/* Browse Filter Modal */}
-            <Modal
-              visible={showBrowseFilterModal}
-              animationType="slide"
-              transparent
-            >
-              <View
-                style={{
-                  flex: 1,
-                  backgroundColor: "rgba(0,0,0,0.4)",
-                  justifyContent: "flex-end",
-                }}
+              {/* Browse Filter Modal */}
+              <Modal
+                visible={showBrowseFilterModal}
+                animationType="slide"
+                transparent
               >
                 <View
                   style={{
-                    maxHeight: "80%",
-                    borderTopLeftRadius: 24,
-                    borderTopRightRadius: 24,
-                    backgroundColor: isDark ? colors.background : "white",
+                    flex: 1,
+                    backgroundColor: "rgba(0,0,0,0.4)",
+                    justifyContent: "flex-end",
                   }}
                 >
-                  {/* Header */}
                   <View
                     style={{
-                      padding: 20,
-                      flexDirection: "row",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      borderBottomWidth: 1,
-                      borderBottomColor: isDark ? colors.border : "#f3f4f6",
+                      maxHeight: "80%",
+                      borderTopLeftRadius: 24,
+                      borderTopRightRadius: 24,
+                      backgroundColor: isDark ? colors.background : "white",
                     }}
                   >
+                    {/* Header */}
                     <View
                       style={{
+                        padding: 20,
                         flexDirection: "row",
+                        justifyContent: "space-between",
                         alignItems: "center",
-                        gap: 10,
+                        borderBottomWidth: 1,
+                        borderBottomColor: isDark ? colors.border : "#f3f4f6",
                       }}
                     >
                       <View
                         style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 10,
+                        }}
+                      >
+                        <View
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: 10,
+                            backgroundColor: isDark ? colors.text : "#111",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Ionicons
+                            name="filter"
+                            size={18}
+                            color={isDark ? colors.background : "white"}
+                          />
+                        </View>
+                        <Text
+                          style={{
+                            fontSize: 18,
+                            fontWeight: "800",
+                            color: isDark ? colors.text : "#000",
+                          }}
+                        >
+                          Filters
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        onPress={() => setShowBrowseFilterModal(false)}
+                        style={{
                           width: 36,
                           height: 36,
-                          borderRadius: 10,
-                          backgroundColor: isDark ? colors.text : "#111",
+                          borderRadius: 18,
+                          backgroundColor: isDark ? colors.card : "#f3f4f6",
                           alignItems: "center",
                           justifyContent: "center",
                         }}
                       >
                         <Ionicons
-                          name="filter"
-                          size={18}
-                          color={isDark ? colors.background : "white"}
+                          name="close"
+                          size={20}
+                          color={isDark ? colors.text : "#666"}
                         />
-                      </View>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Body */}
+                    <ScrollView contentContainerStyle={{ padding: 20 }}>
+                      {/* Sort By */}
                       <Text
                         style={{
-                          fontSize: 18,
-                          fontWeight: "800",
-                          color: isDark ? colors.text : "#000",
+                          fontSize: 12,
+                          fontWeight: "700",
+                          color: isDark ? colors.textMuted : "#666",
+                          textTransform: "uppercase",
+                          marginBottom: 10,
+                          marginTop: 4,
+                          letterSpacing: 0.5,
                         }}
                       >
-                        Filters
+                        Sort By
                       </Text>
-                    </View>
-                    <TouchableOpacity
-                      onPress={() => setShowBrowseFilterModal(false)}
-                      style={{
-                        width: 36,
-                        height: 36,
-                        borderRadius: 18,
-                        backgroundColor: isDark ? colors.card : "#f3f4f6",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Ionicons
-                        name="close"
-                        size={20}
-                        color={isDark ? colors.text : "#666"}
-                      />
-                    </TouchableOpacity>
-                  </View>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          flexWrap: "wrap",
+                          gap: 8,
+                          marginBottom: 16,
+                        }}
+                      >
+                        {(
+                          [
+                            "newest",
+                            "price_asc",
+                            "price_desc",
+                            "rating",
+                          ] as const
+                        ).map((opt) => (
+                          <TouchableOpacity
+                            key={opt}
+                            onPress={() => setNoOccupancySortBy(opt)}
+                            style={[
+                              {
+                                paddingHorizontal: 16,
+                                paddingVertical: 10,
+                                borderRadius: 12,
+                                borderWidth: 1.5,
+                                flexDirection: "row",
+                                alignItems: "center",
+                                backgroundColor: isDark ? colors.card : "white",
+                                borderColor: isDark
+                                  ? colors.cardBorder
+                                  : "#e5e7eb",
+                              },
+                              noOccupancySortBy === opt && {
+                                backgroundColor: isDark ? colors.text : "#111",
+                                borderColor: isDark ? colors.text : "#111",
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                {
+                                  fontSize: 12,
+                                  fontWeight: "600",
+                                  color: isDark ? colors.text : "#333",
+                                },
+                                noOccupancySortBy === opt && {
+                                  color: isDark ? colors.background : "white",
+                                },
+                              ]}
+                            >
+                              {opt === "price_asc"
+                                ? "Price: Low to High"
+                                : opt === "price_desc"
+                                  ? "Price: High to Low"
+                                  : opt.charAt(0).toUpperCase() + opt.slice(1)}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
 
-                  {/* Body */}
-                  <ScrollView contentContainerStyle={{ padding: 20 }}>
-                    {/* Sort By */}
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        fontWeight: "700",
-                        color: isDark ? colors.textMuted : "#666",
-                        textTransform: "uppercase",
-                        marginBottom: 10,
-                        marginTop: 4,
-                        letterSpacing: 0.5,
-                      }}
-                    >
-                      Sort By
-                    </Text>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        flexWrap: "wrap",
-                        gap: 8,
-                        marginBottom: 16,
-                      }}
-                    >
-                      {(
-                        ["newest", "price_asc", "price_desc", "rating"] as const
-                      ).map((opt) => (
+                      {/* Special */}
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontWeight: "700",
+                          color: isDark ? colors.textMuted : "#666",
+                          textTransform: "uppercase",
+                          marginBottom: 10,
+                          letterSpacing: 0.5,
+                        }}
+                      >
+                        Special
+                      </Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          flexWrap: "wrap",
+                          gap: 8,
+                          marginBottom: 16,
+                        }}
+                      >
                         <TouchableOpacity
-                          key={opt}
-                          onPress={() => setNoOccupancySortBy(opt)}
+                          onPress={() =>
+                            setNoOccupancyFilterFavorites(
+                              !noOccupancyFilterFavorites,
+                            )
+                          }
                           style={[
                             {
                               paddingHorizontal: 16,
@@ -5550,12 +6293,26 @@ export default function VisitorDashboard({ session, profile }: any) {
                                 ? colors.cardBorder
                                 : "#e5e7eb",
                             },
-                            noOccupancySortBy === opt && {
+                            noOccupancyFilterFavorites && {
                               backgroundColor: isDark ? colors.text : "#111",
                               borderColor: isDark ? colors.text : "#111",
                             },
                           ]}
                         >
+                          <Ionicons
+                            name="heart"
+                            size={14}
+                            color={
+                              noOccupancyFilterFavorites
+                                ? isDark
+                                  ? colors.background
+                                  : "white"
+                                : isDark
+                                  ? colors.text
+                                  : "black"
+                            }
+                            style={{ marginRight: 4 }}
+                          />
                           <Text
                             style={[
                               {
@@ -5563,345 +6320,209 @@ export default function VisitorDashboard({ session, profile }: any) {
                                 fontWeight: "600",
                                 color: isDark ? colors.text : "#333",
                               },
-                              noOccupancySortBy === opt && {
+                              noOccupancyFilterFavorites && {
                                 color: isDark ? colors.background : "white",
                               },
                             ]}
                           >
-                            {opt === "price_asc"
-                              ? "Price: Low to High"
-                              : opt === "price_desc"
-                                ? "Price: High to Low"
-                                : opt.charAt(0).toUpperCase() + opt.slice(1)}
+                            Guest Favorites
                           </Text>
                         </TouchableOpacity>
-                      ))}
-                    </View>
+                      </View>
 
-                    {/* Special */}
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        fontWeight: "700",
-                        color: isDark ? colors.textMuted : "#666",
-                        textTransform: "uppercase",
-                        marginBottom: 10,
-                        letterSpacing: 0.5,
-                      }}
-                    >
-                      Special
-                    </Text>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        flexWrap: "wrap",
-                        gap: 8,
-                        marginBottom: 16,
-                      }}
-                    >
-                      <TouchableOpacity
-                        onPress={() =>
-                          setNoOccupancyFilterFavorites(
-                            !noOccupancyFilterFavorites,
-                          )
-                        }
-                        style={[
-                          {
-                            paddingHorizontal: 16,
-                            paddingVertical: 10,
-                            borderRadius: 12,
-                            borderWidth: 1.5,
-                            flexDirection: "row",
-                            alignItems: "center",
-                            backgroundColor: isDark ? colors.card : "white",
-                            borderColor: isDark ? colors.cardBorder : "#e5e7eb",
-                          },
-                          noOccupancyFilterFavorites && {
-                            backgroundColor: isDark ? colors.text : "#111",
-                            borderColor: isDark ? colors.text : "#111",
-                          },
-                        ]}
+                      {/* Minimum Rating */}
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontWeight: "700",
+                          color: isDark ? colors.textMuted : "#666",
+                          textTransform: "uppercase",
+                          marginBottom: 10,
+                          letterSpacing: 0.5,
+                        }}
                       >
-                        <Ionicons
-                          name="heart"
-                          size={14}
-                          color={
-                            noOccupancyFilterFavorites
-                              ? isDark
-                                ? colors.background
-                                : "white"
-                              : isDark
-                                ? colors.text
-                                : "black"
-                          }
-                          style={{ marginRight: 4 }}
-                        />
-                        <Text
-                          style={[
-                            {
-                              fontSize: 12,
-                              fontWeight: "600",
-                              color: isDark ? colors.text : "#333",
-                            },
-                            noOccupancyFilterFavorites && {
-                              color: isDark ? colors.background : "white",
-                            },
-                          ]}
-                        >
-                          Guest Favorites
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-
-                    {/* Minimum Rating */}
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        fontWeight: "700",
-                        color: isDark ? colors.textMuted : "#666",
-                        textTransform: "uppercase",
-                        marginBottom: 10,
-                        letterSpacing: 0.5,
-                      }}
-                    >
-                      Minimum Rating
-                    </Text>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        flexWrap: "wrap",
-                        gap: 8,
-                        marginBottom: 16,
-                      }}
-                    >
-                      {[0, 3, 4, 4.5].map((r) => (
-                        <TouchableOpacity
-                          key={r}
-                          onPress={() => setNoOccupancyMinRating(r)}
-                          style={[
-                            {
-                              paddingHorizontal: 16,
-                              paddingVertical: 10,
-                              borderRadius: 12,
-                              borderWidth: 1.5,
-                              backgroundColor: isDark ? colors.card : "white",
-                              borderColor: isDark
-                                ? colors.cardBorder
-                                : "#e5e7eb",
-                            },
-                            noOccupancyMinRating === r && {
-                              backgroundColor: isDark ? colors.text : "#111",
-                              borderColor: isDark ? colors.text : "#111",
-                            },
-                          ]}
-                        >
-                          <Text
+                        Minimum Rating
+                      </Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          flexWrap: "wrap",
+                          gap: 8,
+                          marginBottom: 16,
+                        }}
+                      >
+                        {[0, 3, 4, 4.5].map((r) => (
+                          <TouchableOpacity
+                            key={r}
+                            onPress={() => setNoOccupancyMinRating(r)}
                             style={[
                               {
-                                fontSize: 12,
-                                fontWeight: "600",
-                                color: isDark ? colors.text : "#333",
+                                paddingHorizontal: 16,
+                                paddingVertical: 10,
+                                borderRadius: 12,
+                                borderWidth: 1.5,
+                                backgroundColor: isDark ? colors.card : "white",
+                                borderColor: isDark
+                                  ? colors.cardBorder
+                                  : "#e5e7eb",
                               },
                               noOccupancyMinRating === r && {
-                                color: isDark ? colors.background : "white",
+                                backgroundColor: isDark ? colors.text : "#111",
+                                borderColor: isDark ? colors.text : "#111",
                               },
                             ]}
                           >
-                            {r === 0 ? "Any" : `${r}+ Stars`}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
+                            <Text
+                              style={[
+                                {
+                                  fontSize: 12,
+                                  fontWeight: "600",
+                                  color: isDark ? colors.text : "#333",
+                                },
+                                noOccupancyMinRating === r && {
+                                  color: isDark ? colors.background : "white",
+                                },
+                              ]}
+                            >
+                              {r === 0 ? "Any" : `${r}+ Stars`}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
 
-                    {/* Price Range */}
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        fontWeight: "700",
-                        color: isDark ? colors.textMuted : "#666",
-                        textTransform: "uppercase",
-                        marginBottom: 10,
-                        letterSpacing: 0.5,
-                      }}
-                    >
-                      Price Range (₱)
-                    </Text>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        gap: 10,
-                        marginBottom: 20,
-                      }}
-                    >
-                      <TextInput
+                      {/* Price Range */}
+                      <Text
                         style={{
-                          flex: 1,
-                          borderWidth: 1.5,
-                          borderColor: isDark ? colors.cardBorder : "#e5e7eb",
-                          padding: 14,
-                          borderRadius: 14,
-                          backgroundColor: isDark ? colors.card : "#fafafa",
-                          fontSize: 14,
-                          color: isDark ? colors.text : "#000",
+                          fontSize: 12,
+                          fontWeight: "700",
+                          color: isDark ? colors.textMuted : "#666",
+                          textTransform: "uppercase",
+                          marginBottom: 10,
+                          letterSpacing: 0.5,
                         }}
-                        placeholder="Min price e.g. 5000"
-                        placeholderTextColor={
-                          isDark ? colors.textMuted : "#c4c4c4"
-                        }
-                        keyboardType="numeric"
-                        value={noOccupancyPriceRange.min}
-                        onChangeText={(t) =>
-                          setNoOccupancyPriceRange((p) => ({ ...p, min: t }))
-                        }
-                      />
-                      <TextInput
+                      >
+                        Price Range (₱)
+                      </Text>
+                      <View
                         style={{
-                          flex: 1,
-                          borderWidth: 1.5,
-                          borderColor: isDark ? colors.cardBorder : "#e5e7eb",
-                          padding: 14,
-                          borderRadius: 14,
-                          backgroundColor: isDark ? colors.card : "#fafafa",
-                          fontSize: 14,
-                          color: isDark ? colors.text : "#000",
+                          flexDirection: "row",
+                          gap: 10,
+                          marginBottom: 20,
                         }}
-                        placeholder="Max price e.g. 30000"
-                        placeholderTextColor={
-                          isDark ? colors.textMuted : "#c4c4c4"
-                        }
-                        keyboardType="numeric"
-                        value={noOccupancyPriceRange.max}
-                        onChangeText={(t) =>
-                          setNoOccupancyPriceRange((p) => ({ ...p, max: t }))
-                        }
-                      />
-                    </View>
+                      >
+                        <TextInput
+                          style={{
+                            flex: 1,
+                            borderWidth: 1.5,
+                            borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                            padding: 14,
+                            borderRadius: 14,
+                            backgroundColor: isDark ? colors.card : "#fafafa",
+                            fontSize: 14,
+                            color: isDark ? colors.text : "#000",
+                          }}
+                          placeholder="Min price e.g. 5000"
+                          placeholderTextColor={
+                            isDark ? colors.textMuted : "#c4c4c4"
+                          }
+                          keyboardType="numeric"
+                          value={noOccupancyPriceRange.min}
+                          onChangeText={(t) =>
+                            setNoOccupancyPriceRange((p) => ({ ...p, min: t }))
+                          }
+                        />
+                        <TextInput
+                          style={{
+                            flex: 1,
+                            borderWidth: 1.5,
+                            borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                            padding: 14,
+                            borderRadius: 14,
+                            backgroundColor: isDark ? colors.card : "#fafafa",
+                            fontSize: 14,
+                            color: isDark ? colors.text : "#000",
+                          }}
+                          placeholder="Max price e.g. 30000"
+                          placeholderTextColor={
+                            isDark ? colors.textMuted : "#c4c4c4"
+                          }
+                          keyboardType="numeric"
+                          value={noOccupancyPriceRange.max}
+                          onChangeText={(t) =>
+                            setNoOccupancyPriceRange((p) => ({ ...p, max: t }))
+                          }
+                        />
+                      </View>
 
-                    {/* Amenities */}
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        fontWeight: "700",
-                        color: isDark ? colors.textMuted : "#666",
-                        textTransform: "uppercase",
-                        marginBottom: 10,
-                        letterSpacing: 0.5,
-                      }}
-                    >
-                      Amenities
-                    </Text>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        flexWrap: "wrap",
-                        gap: 8,
-                        marginBottom: 16,
-                      }}
-                    >
-                      {browseAvailableAmenities.map((a) => (
-                        <TouchableOpacity
-                          key={a}
-                          onPress={() => browseToggleAmenity(a)}
-                          style={[
-                            {
-                              paddingHorizontal: 16,
-                              paddingVertical: 10,
-                              borderRadius: 12,
-                              borderWidth: 1.5,
-                              backgroundColor: isDark ? colors.card : "white",
-                              borderColor: isDark
-                                ? colors.cardBorder
-                                : "#e5e7eb",
-                            },
-                            noOccupancySelectedAmenities.includes(a) && {
-                              backgroundColor: isDark ? colors.text : "#111",
-                              borderColor: isDark ? colors.text : "#111",
-                            },
-                          ]}
-                        >
-                          <Text
+                      {/* Amenities */}
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontWeight: "700",
+                          color: isDark ? colors.textMuted : "#666",
+                          textTransform: "uppercase",
+                          marginBottom: 10,
+                          letterSpacing: 0.5,
+                        }}
+                      >
+                        Amenities
+                      </Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          flexWrap: "wrap",
+                          gap: 8,
+                          marginBottom: 16,
+                        }}
+                      >
+                        {browseAvailableAmenities.map((a) => (
+                          <TouchableOpacity
+                            key={a}
+                            onPress={() => browseToggleAmenity(a)}
                             style={[
                               {
-                                fontSize: 12,
-                                fontWeight: "600",
-                                color: isDark ? colors.text : "#333",
+                                paddingHorizontal: 16,
+                                paddingVertical: 10,
+                                borderRadius: 12,
+                                borderWidth: 1.5,
+                                backgroundColor: isDark ? colors.card : "white",
+                                borderColor: isDark
+                                  ? colors.cardBorder
+                                  : "#e5e7eb",
                               },
                               noOccupancySelectedAmenities.includes(a) && {
-                                color: isDark ? colors.background : "white",
+                                backgroundColor: isDark ? colors.text : "#111",
+                                borderColor: isDark ? colors.text : "#111",
                               },
                             ]}
                           >
-                            {a}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
+                            <Text
+                              style={[
+                                {
+                                  fontSize: 12,
+                                  fontWeight: "600",
+                                  color: isDark ? colors.text : "#333",
+                                },
+                                noOccupancySelectedAmenities.includes(a) && {
+                                  color: isDark ? colors.background : "white",
+                                },
+                              ]}
+                            >
+                              {a}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
 
-                    <View style={{ height: 50 }} />
-                  </ScrollView>
-
-                  {/* Footer */}
-                  <View
-                    style={{
-                      padding: 20,
-                      borderTopWidth: 1,
-                      borderTopColor: isDark ? colors.border : "#f3f4f6",
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      backgroundColor: isDark ? colors.surface : "white",
-                    }}
-                  >
-                    <TouchableOpacity
-                      onPress={browseClearFilters}
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        padding: 14,
-                      }}
-                    >
-                      <Ionicons
-                        name="refresh"
-                        size={16}
-                        color={isDark ? colors.textSecondary : "#666"}
-                      />
-                      <Text
-                        style={{
-                          fontWeight: "600",
-                          color: isDark ? colors.textSecondary : "#666",
-                          marginLeft: 4,
-                        }}
-                      >
-                        Clear
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => setShowBrowseFilterModal(false)}
-                      style={{
-                        backgroundColor: isDark ? colors.text : "#111",
-                        paddingHorizontal: 28,
-                        paddingVertical: 14,
-                        borderRadius: 14,
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: isDark ? colors.background : "white",
-                          fontWeight: "bold",
-                        }}
-                      >
-                        Show Results
-                      </Text>
-                    </TouchableOpacity>
+                      <View style={{ height: 50 }} />
+                    </ScrollView>
                   </View>
                 </View>
-              </View>
-            </Modal>
-          </View>
-        )}
-      </ScrollView>
-    )}
-
+              </Modal>
+            </View>
+          )}
+        </ScrollView>
+      )}
 
       {/* Compare Button */}
       {comparisonList.length > 0 && (
@@ -6102,8 +6723,8 @@ export default function VisitorDashboard({ session, profile }: any) {
                               s <= cleanlinessRating
                                 ? "#eab308"
                                 : isDark
-                                ? colors.textMuted
-                                : "#d1d5db"
+                                  ? colors.textMuted
+                                  : "#d1d5db"
                             }
                           />
                         </TouchableOpacity>
@@ -6134,8 +6755,8 @@ export default function VisitorDashboard({ session, profile }: any) {
                               s <= communicationRating
                                 ? "#eab308"
                                 : isDark
-                                ? colors.textMuted
-                                : "#d1d5db"
+                                  ? colors.textMuted
+                                  : "#d1d5db"
                             }
                           />
                         </TouchableOpacity>
@@ -6164,8 +6785,8 @@ export default function VisitorDashboard({ session, profile }: any) {
                               s <= locationRating
                                 ? "#eab308"
                                 : isDark
-                                ? colors.textMuted
-                                : "#d1d5db"
+                                  ? colors.textMuted
+                                  : "#d1d5db"
                             }
                           />
                         </TouchableOpacity>
@@ -6240,8 +6861,8 @@ export default function VisitorDashboard({ session, profile }: any) {
                               s <= reviewRating
                                 ? "#eab308"
                                 : isDark
-                                ? colors.textMuted
-                                : "#d1d5db"
+                                  ? colors.textMuted
+                                  : "#d1d5db"
                             }
                           />
                         </TouchableOpacity>
@@ -6310,9 +6931,7 @@ export default function VisitorDashboard({ session, profile }: any) {
                 disabled={submittingReview}
               >
                 {submittingReview ? (
-                  <ActivityIndicator
-                    color={isDark ? "#000" : "white"}
-                  />
+                  <ActivityIndicator color={isDark ? "#000" : "white"} />
                 ) : (
                   <Text
                     style={[
@@ -6407,17 +7026,36 @@ export default function VisitorDashboard({ session, profile }: any) {
       </Modal>
 
       {/* Auth Prompt Modal */}
-      <Modal visible={showAuthModal && !session} transparent animationType="slide">
+      <Modal
+        visible={showAuthModal && !session}
+        transparent
+        animationType="slide"
+      >
         <TouchableWithoutFeedback onPress={dismissAuthModal}>
           <View style={styles.authModalBackdrop}>
             <TouchableWithoutFeedback>
-              <View style={[styles.authModalContent, isDark && { backgroundColor: colors.card }]}>
-                <View style={[styles.authModalHandle, isDark && { backgroundColor: '#374151' }]} />
-                <Text style={[styles.authModalTitle, isDark && { color: colors.text }]}>
+              <View
+                style={[
+                  styles.authModalContent,
+                  isDark && { backgroundColor: colors.card },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.authModalHandle,
+                    isDark && { backgroundColor: "#374151" },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.authModalTitle,
+                    isDark && { color: colors.text },
+                  ]}
+                >
                   Welcome to Abalay
                 </Text>
-                
-                <TouchableOpacity 
+
+                <TouchableOpacity
                   style={styles.authModalPrimaryBtn}
                   onPress={() => {
                     dismissAuthModal();
@@ -6427,23 +7065,37 @@ export default function VisitorDashboard({ session, profile }: any) {
                   <Text style={styles.authModalPrimaryBtnText}>Log In</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity 
-                  style={[styles.authModalSecondaryBtn, isDark && { borderColor: colors.border }]}
+                <TouchableOpacity
+                  style={[
+                    styles.authModalSecondaryBtn,
+                    isDark && { borderColor: colors.border },
+                  ]}
                   onPress={() => {
                     dismissAuthModal();
                     router.push("/login?tab=signup");
                   }}
                 >
-                  <Text style={[styles.authModalSecondaryBtnText, isDark && { color: colors.text }]}>
+                  <Text
+                    style={[
+                      styles.authModalSecondaryBtnText,
+                      isDark && { color: colors.text },
+                    ]}
+                  >
                     Create Account
                   </Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={{ marginTop: 20 }}
                   onPress={dismissAuthModal}
                 >
-                  <Text style={{ color: '#6b7280', fontSize: 14, fontWeight: '600' }}>
+                  <Text
+                    style={{
+                      color: "#6b7280",
+                      fontSize: 14,
+                      fontWeight: "600",
+                    }}
+                  >
                     Continue as Guest
                   </Text>
                 </TouchableOpacity>
@@ -6455,654 +7107,3 @@ export default function VisitorDashboard({ session, profile }: any) {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f9fafb" },
-  section: { marginTop: 24 },
-  sectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    marginBottom: 12,
-    alignItems: "center",
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: "900",
-    color: "#111",
-    textTransform: "uppercase",
-  },
-  seeMore: { fontSize: 14, color: "#333", fontWeight: "600" },
-  listContainer: { paddingHorizontal: 20, paddingBottom: 10 },
-
-  // Header
-  dashboardContent: { padding: 20 },
-  headerRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-end",
-    marginBottom: 20,
-  },
-  headerTitle: { fontSize: 26, fontWeight: "bold", color: "#111" },
-  headerSubtitle: { fontSize: 13, color: "#666", marginTop: 4 },
-  seeMoreLink: { fontSize: 12, fontWeight: "bold", color: "#666" },
-
-  // Active Card
-  activeCard: {
-    backgroundColor: "white",
-    borderRadius: 24,
-    padding: 0,
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 5,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "#eee",
-  },
-  activeImageContainer: { height: 220, position: "relative" },
-  activeImage: { width: "100%", height: "100%" },
-  activeGradient: {
-    position: "absolute",
-    bottom: 0,
-    width: "100%",
-    height: 100,
-  },
-  activeBadge: {
-    position: "absolute",
-    top: 12,
-    left: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#ecfdf5",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "#d1fae5",
-  },
-  statusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
-  activeBadgeText: {
-    fontSize: 10,
-    fontWeight: "bold",
-    color: "#047857",
-    textTransform: "uppercase",
-  },
-  activeInfoOverlay: { position: "absolute", bottom: 12, left: 16, right: 16 },
-  activeTitle: {
-    fontSize: 22,
-    fontWeight: "bold",
-    color: "white",
-    textShadowColor: "rgba(0,0,0,0.5)",
-    textShadowRadius: 4,
-  },
-  activeAddress: { fontSize: 12, color: "rgba(255,255,255,0.9)", marginTop: 2 },
-  sliderDots: {
-    position: "absolute",
-    top: 16,
-    right: 16,
-    flexDirection: "row",
-    gap: 4,
-  },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "rgba(255,255,255,0.4)",
-  },
-  dotActive: { width: 12, backgroundColor: "white" },
-
-  activeContent: { padding: 16 },
-  leaseRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
-    paddingBottom: 12,
-  },
-  leaseItem: {},
-  leaseLabel: {
-    fontSize: 10,
-    color: "#9ca3af",
-    fontWeight: "bold",
-    marginBottom: 4,
-  },
-  leaseValue: { fontSize: 13, fontWeight: "bold", color: "#111" },
-  gridActions: { flexDirection: "row", gap: 10 },
-  gridBtn: {
-    flex: 1,
-    height: 40,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-  },
-  btnGray: { backgroundColor: "#f3f4f6" },
-  btnBlack: { backgroundColor: "#000" },
-  btnOutline: {
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    backgroundColor: "white",
-  },
-  btnOutlineRed: {
-    borderWidth: 1,
-    borderColor: "#fecaca",
-    backgroundColor: "#fef2f2",
-  },
-  btnDisabled: { backgroundColor: "#f3f4f6" },
-  btnTextGray: { fontWeight: "bold", fontSize: 12, color: "#374151" },
-  btnTextWhite: { fontWeight: "bold", fontSize: 12, color: "white" },
-  btnTextBlack: { fontWeight: "bold", fontSize: 12, color: "#111" },
-  btnTextRed: { fontWeight: "bold", fontSize: 12, color: "#dc2626" },
-  btnTextDisabled: { fontWeight: "bold", fontSize: 12, color: "#9ca3af" },
-
-  // Info Cards
-  infoCard: {
-    backgroundColor: "white",
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "#f3f4f6",
-  },
-  cardHeaderSmall: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 16,
-  },
-  iconCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#f3f4f6",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cardTitleSmall: { fontSize: 14, fontWeight: "bold", color: "#111" },
-  rowBetween: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 6,
-  },
-  textLabel: { fontSize: 12, color: "#6b7280" },
-  textLabelBold: { fontSize: 13, color: "#374151", fontWeight: "bold" },
-  textValueBlack: { fontSize: 13, fontWeight: "bold", color: "#000" },
-  textValueGray: { fontSize: 13, fontWeight: "bold", color: "#6b7280" },
-  textValueBig: { fontSize: 18, fontWeight: "900", color: "#111" },
-  borderTop: { borderTopWidth: 1, borderTopColor: "#f3f4f6" },
-  tipBox: {
-    marginTop: 10,
-    backgroundColor: "#f9fafb",
-    padding: 8,
-    borderRadius: 8,
-  },
-  tipText: { fontSize: 10, color: "#4b5563" },
-  centerBox: { alignItems: "center", paddingVertical: 10 },
-
-  utilityItem: { flexDirection: "row", gap: 12, alignItems: "center" },
-  utilIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  utilTitle: { fontSize: 13, fontWeight: "bold", color: "#1f2937" },
-  utilSub: { fontSize: 11, color: "#6b7280" },
-
-  badgeRed: {
-    backgroundColor: "#fef2f2",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#fee2e2",
-  },
-  badgeRedText: { fontSize: 10, color: "#ea580c", fontWeight: "bold" },
-  seeAllText: { fontSize: 12, fontWeight: "bold", color: "#666" },
-
-  billRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 12,
-    backgroundColor: "#f8fafc",
-    borderRadius: 12,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#f1f5f9",
-  },
-  billIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    backgroundColor: "white",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-  },
-  billTitle: { fontSize: 13, fontWeight: "bold", color: "#334155" },
-  billDate: { fontSize: 10, color: "#64748b" },
-  billAmount: { fontSize: 14, fontWeight: "900", color: "#0f172a" },
-  payBtnSmall: {
-    marginTop: 4,
-    backgroundColor: "black",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  payBtnText: { color: "white", fontSize: 10, fontWeight: "bold" },
-  emptyStateBox: {
-    alignItems: "center",
-    padding: 20,
-    backgroundColor: "#f8fafc",
-    borderRadius: 12,
-    borderStyle: "dashed",
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-  },
-  emptyStateText: {
-    marginTop: 8,
-    fontSize: 13,
-    color: "#64748b",
-    fontWeight: "500",
-  },
-  noteText: {
-    fontSize: 10,
-    color: "#94a3b8",
-    marginTop: 10,
-    textAlign: "center",
-  },
-
-  // Payment Overview
-  borderCard: {
-    backgroundColor: "white",
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 80,
-    borderWidth: 1,
-    borderColor: "#f3f4f6",
-  },
-  overviewRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 12,
-  },
-  ovLabel: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#9ca3af",
-    marginBottom: 4,
-  },
-  ovSub: { fontSize: 11, color: "#4b5563", fontWeight: "500" },
-  ovValue: { fontSize: 18, fontWeight: "900" },
-  ovBox: {
-    flex: 1,
-    backgroundColor: "#f9fafb",
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#f3f4f6",
-  },
-  ovDate: { fontSize: 13, fontWeight: "bold", color: "#111" },
-  ovDateGray: { fontSize: 13, fontWeight: "bold", color: "#6b7280" },
-
-  historySection: { marginTop: 20 },
-  historyGrid: { flexDirection: "row", flexWrap: "wrap" },
-  monthCol: { width: "16.66%", alignItems: "center", marginBottom: 12 },
-  monthText: {
-    fontSize: 10,
-    fontWeight: "bold",
-    marginBottom: 4,
-    textTransform: "uppercase",
-  },
-  dotPaid: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: "#86efac",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  dotCurrent: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 2,
-    borderColor: "#000",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  dotEmpty: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-  },
-
-  // Browse grid (no-occupancy)
-  browseSearchBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#f3f4f6",
-    paddingHorizontal: 14,
-    height: 46,
-    borderRadius: 14,
-    gap: 8,
-    marginHorizontal: 16,
-    marginTop: 14,
-    marginBottom: 4,
-  },
-  browseSearchInput: { flex: 1, fontSize: 14, color: "#111" },
-  cityChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: "#f3f4f6",
-  },
-  cityChipText: { fontSize: 12, fontWeight: "700" },
-  browseGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingBottom: 10,
-  },
-  gridCard: {
-    width: "48.5%",
-    backgroundColor: "white",
-    borderRadius: 14,
-    marginBottom: 12,
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 3,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "#f3f4f6",
-  },
-  gridCardImage: { height: 120, position: "relative" },
-
-  // Existing Card & Modal Styles preserved...
-  card: {
-    width: CARD_WIDTH,
-    marginRight: 12,
-    backgroundColor: "white",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    overflow: "hidden",
-  },
-  cardImageContainer: { height: 120, width: "100%", position: "relative" },
-  cardImage: { width: "100%", height: "100%" },
-  cardGradient: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 60,
-  },
-  cardHeader: {
-    position: "absolute",
-    top: 10,
-    left: 10,
-    alignItems: "flex-start",
-  },
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    marginBottom: 4,
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  badgeAvailable: { backgroundColor: "white" },
-  badgeOccupied: { backgroundColor: "rgba(0,0,0,0.8)" },
-  badgeFav: { backgroundColor: "#f43f5e", borderWidth: 0 },
-  badgeText: { fontSize: 10, fontWeight: "bold", textTransform: "uppercase" },
-  textDark: { color: "black" },
-  textWhite: { color: "white" },
-  cardActions: { position: "absolute", top: 8, right: 8 },
-  actionBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.9)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  actionBtnActive: { backgroundColor: "#111" },
-  priceOverlay: { position: "absolute", bottom: 8, left: 10 },
-  priceText: {
-    color: "white",
-    fontSize: 15,
-    fontWeight: "bold",
-    textShadowColor: "rgba(0,0,0,0.5)",
-    textShadowRadius: 4,
-  },
-  priceSub: {
-    color: "rgba(255,255,255,0.9)",
-    fontSize: 9,
-    fontWeight: "600",
-    textTransform: "uppercase",
-  },
-  cardContent: { padding: 8 },
-  cardLocation: { fontSize: 10, color: "#6b7280", marginBottom: 6 },
-  cardTitle: {
-    fontSize: 12,
-    fontWeight: "bold",
-    color: "#111",
-    marginBottom: 2,
-  },
-  featureRow: { flexDirection: "row", alignItems: "center" },
-  featureItem: { flexDirection: "row", alignItems: "center", gap: 4 },
-  featureText: { fontSize: 10, color: "#4b5563", fontWeight: "500" },
-  divider: {
-    width: 3,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: "#d1d5db",
-    marginHorizontal: 6,
-  },
-  compareBtn: {
-    position: "absolute",
-    bottom: 30,
-    alignSelf: "center",
-    backgroundColor: "#111",
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: 30,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  compareText: {
-    color: "white",
-    fontWeight: "bold",
-    fontSize: 13,
-    letterSpacing: 0.5,
-  },
-  compareBadge: {
-    position: "absolute",
-    top: -6,
-    right: -6,
-    backgroundColor: "#ef4444",
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#111",
-  },
-  compareBadgeText: { color: "white", fontSize: 10, fontWeight: "bold" },
-
-  // Modals
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "flex-end",
-  },
-  modalContent: {
-    backgroundColor: "white",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
-    minHeight: 400,
-  },
-  modalIconContainer: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 16,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#111",
-    marginBottom: 8,
-  },
-  modalSubtitle: { fontSize: 14, color: "#666", marginBottom: 20 },
-  input: {
-    backgroundColor: "#f9fafb",
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 14,
-    marginBottom: 16,
-  },
-  inputLabel: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#374151",
-    marginBottom: 6,
-  },
-  modalActions: { flexDirection: "row", gap: 12, marginTop: 10 },
-  cancelBtn: {
-    flex: 1,
-    backgroundColor: "#f3f4f6",
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  cancelBtnText: { fontWeight: "bold", color: "#374151" },
-  confirmBtn: {
-    flex: 1,
-    backgroundColor: "#111",
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  confirmBtnText: { fontWeight: "bold", color: "white" },
-
-  // Review Modal Styles
-  ratingCard: {
-    backgroundColor: "#f9fafb",
-    padding: 16,
-    borderRadius: 16,
-    marginBottom: 16,
-  },
-  ratingRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  ratingLabel: { fontSize: 13, fontWeight: "700", color: "#374151" },
-  starsRow: { flexDirection: "row", gap: 6 },
-  textArea: {
-    backgroundColor: "#f9fafb",
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 12,
-    padding: 14,
-    height: 100,
-    fontSize: 14,
-    marginBottom: 16,
-    textAlignVertical: "top",
-  },
-  checkboxContainer: { marginBottom: 20 },
-  authModalBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "flex-end",
-  },
-  authModalContent: {
-    backgroundColor: "white",
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    padding: 24,
-    paddingBottom: Platform.OS === "ios" ? 40 : 30,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 20,
-  },
-  authModalHandle: {
-    width: 40,
-    height: 4,
-    backgroundColor: "#e5e7eb",
-    borderRadius: 2,
-    marginBottom: 24,
-  },
-  authModalTitle: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#111827",
-    marginBottom: 12,
-    textAlign: "center",
-  },
-  authModalSubtitle: {
-    fontSize: 15,
-    color: "#6b7280",
-    textAlign: "center",
-    marginBottom: 32,
-    lineHeight: 22,
-    paddingHorizontal: 20,
-  },
-  authModalPrimaryBtn: {
-    width: "100%",
-    backgroundColor: "#111827",
-    paddingVertical: 16,
-    borderRadius: 16,
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  authModalPrimaryBtnText: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  authModalSecondaryBtn: {
-    width: "100%",
-    backgroundColor: "transparent",
-    paddingVertical: 16,
-    borderRadius: 16,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-  },
-  authModalSecondaryBtnText: {
-    color: "#111827",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-});

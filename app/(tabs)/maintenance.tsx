@@ -28,6 +28,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRealtime } from "../../hooks/useRealtime";
 import { createNotification } from "../../lib/notifications";
 import { supabase } from "../../lib/supabase";
+import { downloadExcel } from "../../lib/exportExcel";
 import { useTheme } from "../../lib/theme";
 
 const isVideoUrl = (url: string) => /\.(mp4|mov|webm)(\?.*)?$/i.test(url);
@@ -2216,7 +2217,50 @@ export default function MaintenanceScreen() {
               : "Report issues and track resolution status."}
           </Text>
         </View>
-        {profile?.role === "tenant" && (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          {isActorLandlord && requests.length > 0 && (
+            <TouchableOpacity
+              onPress={() => {
+                const rows = requests.map((r) => ({
+                  ID: r.id || "-",
+                  Title: r.title || "-",
+                  Property: r.properties?.title || "-",
+                  Tenant: r.tenant_profile
+                    ? `${r.tenant_profile.first_name || ""} ${r.tenant_profile.last_name || ""}`.trim()
+                    : "-",
+                  Priority: r.priority || "-",
+                  Status: (r.status || "").replace(/_/g, " "),
+                  Description: r.description || "-",
+                  Cost: r.maintenance_cost || 0,
+                  Created: r.created_at
+                    ? new Date(r.created_at).toLocaleDateString()
+                    : "-",
+                  Resolved: r.resolved_at
+                    ? new Date(r.resolved_at).toLocaleDateString()
+                    : "-",
+                }));
+                downloadExcel(
+                  rows,
+                  "Maintenance",
+                  `maintenance_${new Date().toISOString().slice(0, 10)}`,
+                );
+              }}
+              style={[
+                styles.exportBtn,
+                {
+                  borderColor: isDark ? colors.border : "#d1d5db",
+                  backgroundColor: isDark ? colors.card : "white",
+                },
+              ]}
+            >
+              <Ionicons
+                name="download-outline"
+                size={18}
+                color={isDark ? colors.text : "#374151"}
+              />
+            </TouchableOpacity>
+          )}
+          {profile?.role === "tenant" && (
           <TouchableOpacity
             onPress={openCreateRequestModal}
             disabled={isCreateRequestDisabled}
@@ -2228,6 +2272,7 @@ export default function MaintenanceScreen() {
             <Ionicons name="add" size={22} color="white" />
           </TouchableOpacity>
         )}
+        </View>
       </View>
 
       {/* Filters */}
@@ -3525,6 +3570,14 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
+  },
+  exportBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
   },
 
   // Filters
