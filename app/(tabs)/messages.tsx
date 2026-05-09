@@ -101,6 +101,36 @@ function SkeletonBlock({
   );
 }
 
+const AvatarImage = React.memo(({ uri, size, fallbackInitial }: { uri: string; size: number; fallbackInitial: string }) => {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [uri]);
+
+  if (failed) {
+    return (
+      <View
+        style={[
+          styles.avatarCircle,
+          { width: size, height: size, borderRadius: size / 2 },
+        ]}
+      >
+        <Text style={[styles.avatarLetter, { fontSize: size * 0.4 }]}>
+          {fallbackInitial}
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <Image
+      source={{ uri }}
+      style={{ width: size, height: size, borderRadius: size / 2 }}
+      onError={() => setFailed(true)}
+    />
+  );
+});
+
 export default function Messages() {
   const navigation = useNavigation<any>();
   const { isDark, colors } = useTheme();
@@ -647,8 +677,14 @@ export default function Messages() {
           };
         });
 
-      const { data: visibleGroupRows, error: visibleGroupsError } =
-        await supabase.from("group_conversations").select("*");
+      // Start group-related queries early, in parallel with direct thread building
+      const visibleGroupRowsPromise = supabase.from("group_conversations").select("*");
+      const myMembershipRowsPromise = supabase
+        .from("group_conversation_members")
+        .select("group_conversation_id, user_id, role")
+        .eq("user_id", userId);
+
+      const [{ data: visibleGroupRows, error: visibleGroupsError }, { data: myMembershipRows, error: membershipError }] = await Promise.all([visibleGroupRowsPromise, myMembershipRowsPromise]);
 
       if (visibleGroupsError) {
         console.log(
@@ -656,11 +692,6 @@ export default function Messages() {
           visibleGroupsError,
         );
       }
-
-      const { data: myMembershipRows, error: membershipError } = await supabase
-        .from("group_conversation_members")
-        .select("group_conversation_id, user_id, role")
-        .eq("user_id", userId);
 
       if (membershipError) {
         console.log(
@@ -812,23 +843,22 @@ export default function Messages() {
           if (p?.id) groupProfileMap[String(p.id)] = p;
         });
 
-        const { data: groupMessageRows, error: groupMessagesError } =
-          await supabase
-            .from("group_messages")
-            .select("*")
-            .in("group_conversation_id", groupConversationIds)
-            .order("created_at", { ascending: false });
-
-        if (groupMessagesError) {
-          console.log("group_messages list query error:", groupMessagesError);
-        }
-
+        // Fetch only the latest message per group (not ALL messages)
         const groupLastMessageMap: Record<string, any> = {};
-        (groupMessageRows || []).forEach((msg: any) => {
-          if (!groupLastMessageMap[msg.group_conversation_id]) {
-            groupLastMessageMap[msg.group_conversation_id] = msg;
-          }
-        });
+        if (groupConversationIds.length) {
+          const lastMsgPromises = groupConversationIds.map((gId) =>
+            supabase
+              .from("group_messages")
+              .select("*")
+              .eq("group_conversation_id", gId)
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .then(({ data }) => {
+                if (data && data.length) groupLastMessageMap[gId] = data[0];
+              })
+          );
+          await Promise.all(lastMsgPromises);
+        }
 
         const membersByGroupId: Record<string, any[]> = {};
         groupMembers.forEach((member: any) => {
@@ -969,27 +999,21 @@ export default function Messages() {
             }
           });
 
-          const { data: legacyMessageRows, error: legacyMessagesError } =
-            await supabase
-              .from("messages")
-              .select("*")
-              .in("conversation_id", legacyGroupIds)
-              .order("created_at", { ascending: false });
-
-          if (legacyMessagesError) {
-            console.log(
-              "legacy group message query error:",
-              legacyMessagesError,
-            );
-          }
-
           const legacyLastMessageMap: Record<string, any> = {};
-          (legacyMessageRows || []).forEach((row: any) => {
-            const convId = String(row?.conversation_id || "");
-            if (convId && !legacyLastMessageMap[convId]) {
-              legacyLastMessageMap[convId] = row;
-            }
-          });
+          if (legacyGroupIds.length) {
+            const legacyMsgPromises = legacyGroupIds.map((convId: string) =>
+              supabase
+                .from("messages")
+                .select("*")
+                .eq("conversation_id", convId)
+                .order("created_at", { ascending: false })
+                .limit(1)
+                .then(({ data }) => {
+                  if (data && data.length) legacyLastMessageMap[convId] = data[0];
+                })
+            );
+            await Promise.all(legacyMsgPromises);
+          }
 
           legacyGroupThreads = legacyGroupConversationRows.map((row: any) => {
             const convId = String(row?.id || "");
@@ -1201,6 +1225,37 @@ export default function Messages() {
           senderMap[String(member.user_id)] = member.profile;
         }
       });
+
+      // Also fetch profiles for message senders not in current members
+      // (e.g. users who left the group but still have messages)
+      const isLegacy = isLegacyGroupConversation(conversation);
+      const tableName = isLegacy ? "messages" : "group_messages";
+      const convKey = isLegacy ? "conversation_id" : "group_conversation_id";
+      const { data: recentMsgs } = await supabase
+        .from(tableName)
+        .select("sender_id")
+        .eq(convKey, conversation.id)
+        .order("created_at", { ascending: false })
+        .limit(50);
+
+      const missingSenderIds = Array.from(
+        new Set(
+          (recentMsgs || [])
+            .map((m: any) => String(m?.sender_id || ""))
+            .filter((id: string) => id && !senderMap[id])
+        )
+      );
+
+      if (missingSenderIds.length) {
+        const { data: missingProfiles } = await supabase
+          .from("profiles")
+          .select("id, first_name, last_name, avatar_url")
+          .in("id", missingSenderIds);
+        (missingProfiles || []).forEach((p: any) => {
+          if (p?.id) senderMap[String(p.id)] = p;
+        });
+      }
+
       if (isMounted) {
         setGroupSenderProfiles(senderMap);
       }
@@ -1260,6 +1315,29 @@ export default function Messages() {
                 });
                 requestAutoScrollToBottom(true);
                 void markGroupAsRead(selectedConv.id, [incoming]);
+
+                // Fetch profile for unknown sender
+                const senderId = String(incoming?.sender_id || "");
+                if (senderId && senderId !== session.user.id) {
+                  setGroupSenderProfiles((prev) => {
+                    if (prev[senderId]) return prev;
+                    // Fire async fetch, will update state when done
+                    supabase
+                      .from("profiles")
+                      .select("id, first_name, last_name, avatar_url")
+                      .eq("id", senderId)
+                      .single()
+                      .then(({ data }) => {
+                        if (data?.id) {
+                          setGroupSenderProfiles((current) => ({
+                            ...current,
+                            [String(data.id)]: data,
+                          }));
+                        }
+                      });
+                    return prev;
+                  });
+                }
               },
             )
             .subscribe()
@@ -1581,6 +1659,10 @@ export default function Messages() {
   };
 
   const pickImage = async () => {
+    if (!selectedConv?.id || !session?.user?.id) {
+      Alert.alert("Error", "No active conversation or session.");
+      return;
+    }
     const res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
       base64: true,
@@ -1589,18 +1671,33 @@ export default function Messages() {
     if (!res.canceled && res.assets[0]) {
       const file = res.assets[0];
       const ext = file.uri.split(".").pop()?.toLowerCase() || "jpg";
-      const path = `${session.user.id}/${Date.now()}.${ext}`;
-      await supabase.storage
-        .from("chat-attachments")
-        .upload(path, decode(file.base64!), { contentType: `image/${ext}` });
+      const mime = ext === "png" ? "image/png" : ext === "gif" ? "image/gif" : ext === "webp" ? "image/webp" : "image/jpeg";
+      const fileName = `${Date.now()}.${ext}`;
+      const path = `${session.user.id}/${selectedConv.id}/${fileName}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from("message-attachments")
+        .upload(path, decode(file.base64!), { contentType: mime });
+      
+      if (uploadError) {
+        console.error("Image upload error:", uploadError);
+        Alert.alert("Upload Failed", "Could not upload image. Please try again.");
+        return;
+      }
+
       const { data } = supabase.storage
-        .from("chat-attachments")
+        .from("message-attachments")
         .getPublicUrl(path);
-      sendMessage(data.publicUrl, "image");
+      
+      sendMessage(data.publicUrl, mime, fileName);
     }
   };
 
   const pickFile = async () => {
+    if (!selectedConv?.id || !session?.user?.id) {
+      Alert.alert("Error", "No active conversation or session.");
+      return;
+    }
     try {
       const res = await DocumentPicker.getDocumentAsync({
         copyToCacheDirectory: true,
@@ -1619,16 +1716,24 @@ export default function Messages() {
         const base64 = await FileSystem.readAsStringAsync(fileUri, {
           encoding: FileSystem.EncodingType.Base64,
         });
-        const path = `${session.user.id}/${Date.now()}_${fileName}`;
+        const path = `${session.user.id}/${selectedConv.id}/${Date.now()}_${fileName}`;
         const contentType = file.mimeType || "application/octet-stream";
 
-        await supabase.storage
-          .from("chat-attachments")
+        const { error: uploadError } = await supabase.storage
+          .from("message-attachments")
           .upload(path, decode(base64), { contentType });
+
+        if (uploadError) {
+          console.error("File upload error:", uploadError);
+          Alert.alert("Upload Failed", "Could not upload file. Please try again.");
+          return;
+        }
+
         const { data } = supabase.storage
-          .from("chat-attachments")
+          .from("message-attachments")
           .getPublicUrl(path);
-        sendMessage(data.publicUrl, "file", fileName);
+        
+        sendMessage(data.publicUrl, contentType, fileName);
       }
     } catch (err) {
       console.error("File pick error:", err);
@@ -2518,12 +2623,19 @@ export default function Messages() {
     if (!dateStr) return "";
     const now = new Date();
     const d = new Date(dateStr);
-    const diff = Math.floor((now.getTime() - d.getTime()) / 1000);
-    if (diff < 60) return "Just now";
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
-    return d.toLocaleDateString();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const dayDiff = Math.floor((today.getTime() - msgDay.getTime()) / 86400000);
+
+    if (dayDiff === 0) {
+      // Today — show time
+      return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    }
+    if (dayDiff === 1) return "Yesterday";
+    if (dayDiff < 7) {
+      return d.toLocaleDateString("en-US", { weekday: "short" });
+    }
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   };
 
   const getMessagePreview = (conv: any) => {
@@ -2544,17 +2656,19 @@ export default function Messages() {
     return msg.message || "";
   };
 
+
+
   const renderAvatar = (
     user: any,
     size: number = 48,
     fallbackLabel?: string,
   ) => {
+    const initial = user?.first_name?.[0]?.toUpperCase() ||
+      fallbackLabel?.[0]?.toUpperCase() ||
+      "?";
     if (user?.avatar_url) {
       return (
-        <Image
-          source={{ uri: user.avatar_url }}
-          style={{ width: size, height: size, borderRadius: size / 2 }}
-        />
+        <AvatarImage uri={user.avatar_url} size={size} fallbackInitial={initial} />
       );
     }
     return (
@@ -2565,9 +2679,7 @@ export default function Messages() {
         ]}
       >
         <Text style={[styles.avatarLetter, { fontSize: size * 0.4 }]}>
-          {user?.first_name?.[0]?.toUpperCase() ||
-            fallbackLabel?.[0]?.toUpperCase() ||
-            "?"}
+          {initial}
         </Text>
       </View>
     );
@@ -2577,9 +2689,10 @@ export default function Messages() {
     if (conversation?.kind === "group") {
       if (conversation?.groupAvatarUrl) {
         return (
-          <Image
-            source={{ uri: conversation.groupAvatarUrl }}
-            style={{ width: size, height: size, borderRadius: size / 2 }}
+          <AvatarImage
+            uri={conversation.groupAvatarUrl}
+            size={size}
+            fallbackInitial="G"
           />
         );
       }
@@ -2848,6 +2961,17 @@ export default function Messages() {
                 new Date(item.created_at).toDateString() !==
                   new Date(messages[index - 1]?.created_at).toDateString();
 
+              const formatDateLabel = (dateStr: string) => {
+                const d = new Date(dateStr);
+                const now = new Date();
+                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                const msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+                const dayDiff = Math.floor((today.getTime() - msgDay.getTime()) / 86400000);
+                if (dayDiff === 0) return "Today";
+                if (dayDiff === 1) return "Yesterday";
+                return d.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+              };
+
               const systemEventText = getGroupSystemEventText(item);
 
               if (systemEventText) {
@@ -2857,13 +2981,7 @@ export default function Messages() {
                       <View style={styles.dateSeparator}>
                         <View style={styles.dateLine} />
                         <Text style={styles.dateText}>
-                          {new Date(item.created_at).toLocaleDateString(
-                            "en-US",
-                            {
-                              month: "short",
-                              day: "numeric",
-                            },
-                          )}
+                          {formatDateLabel(item.created_at)}
                         </Text>
                         <View style={styles.dateLine} />
                       </View>
@@ -2888,10 +3006,7 @@ export default function Messages() {
                     <View style={styles.dateSeparator}>
                       <View style={styles.dateLine} />
                       <Text style={styles.dateText}>
-                        {new Date(item.created_at).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                        })}
+                        {formatDateLabel(item.created_at)}
                       </Text>
                       <View style={styles.dateLine} />
                     </View>

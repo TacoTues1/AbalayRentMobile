@@ -252,18 +252,52 @@ export default function PropertyDetail() {
     }
   };
 
+  const getPropertyLocationParts = (value: any) => {
+    const parts: string[] = [];
+    const seen = new Set<string>();
+    const addPart = (part: unknown) => {
+      const text = String(part || "").trim();
+      if (!text) return;
+      const key = text.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      parts.push(text);
+    };
+
+    const hasSpecificLocation = [
+      value?.building_no,
+      value?.street,
+      value?.barangay,
+      value?.address,
+      value?.city,
+      value?.state_province,
+      value?.zip,
+    ].some((part) => String(part || "").trim().length > 0);
+
+    addPart(value?.building_no);
+    addPart(value?.street);
+    addPart(value?.barangay);
+    addPart(value?.address);
+    addPart(value?.city);
+    addPart(value?.state_province);
+    addPart(value?.zip);
+    if (hasSpecificLocation || value?.country) {
+      addPart(value?.country || "Philippines");
+    }
+
+    return parts;
+  };
+
+  const getPropertyLocationText = (value: any) =>
+    getPropertyLocationParts(value).join(", ");
+
   useEffect(() => {
     if (property?.landlord) {
       loadTimeSlots(property.landlord);
     }
 
     if (property && !property.latitude && !property.location_link) {
-      const addressParts = [
-        property.barangay,
-        property.city,
-        property.state_province,
-        property.country || "Philippines",
-      ].filter(Boolean);
+      const addressParts = getPropertyLocationParts(property);
 
       if (addressParts.length > 0) {
         Location.geocodeAsync(addressParts.join(", "))
@@ -1066,9 +1100,7 @@ export default function PropertyDetail() {
     router.push({
       pathname: "/getDirections",
       params: {
-        to:
-          fullLocation ||
-          [property.address, cityWithState].filter(Boolean).join(", "),
+        to: fullLocation || getPropertyLocationText(property),
         lat: lat.toString(),
         lng: lng.toString(),
         auto: useCurrent ? "true" : "false",
@@ -1139,16 +1171,7 @@ export default function PropertyDetail() {
     !isOwner &&
     !isLandlordRole &&
     !activeOccupancyCheck(hasActiveOccupancy, occupiedPropertyTitle);
-  const cityWithState = [property.city, property.state_province]
-    .filter(Boolean)
-    .join(", ");
-  const fullLocation = [
-    property.address,
-    cityWithState,
-    property.country,
-  ]
-    .filter(Boolean)
-    .join(", ");
+  const fullLocation = getPropertyLocationText(property);
 
   // Stats calculation
   const avgRating =
@@ -2278,7 +2301,7 @@ export default function PropertyDetail() {
                     </View>
                   )}
                   {/* Location Logic */}
-                  {(property.address || property.city) && (
+                  {fullLocation && (
                     <View style={styles.contactRow}>
                       <View
                         style={[

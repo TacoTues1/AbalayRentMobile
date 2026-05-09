@@ -571,7 +571,7 @@ export default function AssignTenantScreen() {
         .update({ status: "occupied" })
         .eq("id", activeProperty.id);
 
-      // 3. Create Move-In Bill
+      // 3. Create Move-In Bills
       if (hasPendingMoveInAmount) {
         // Tenant hasn't paid yet — create a pending bill
         await supabase.from("payment_requests").insert({
@@ -591,9 +591,11 @@ export default function AssignTenantScreen() {
           status: "pending",
           is_move_in_payment: true,
         });
-      } else {
+      }
+      
+      if (hasPaidOfflineMoveInAmount) {
         // Tenant already paid offline — record as paid so the next due date
-        // advances correctly (otherwise dashboard falls back to start_date)
+        // advances correctly and reflects on the dashboard
         await supabase.from("payment_requests").insert({
           landlord: session.user.id,
           tenant: selectedTenant.tenant,

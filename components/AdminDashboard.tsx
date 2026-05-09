@@ -12,6 +12,7 @@ import {
     View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
+import { useRealtime } from "../hooks/useRealtime";
 
 type AdminTab = "overview" | "users" | "properties" | "bookings" | "payments";
 
@@ -30,8 +31,6 @@ const paymentTotal = (payment: any) => {
   if (totalAmount > 0) return totalAmount;
   return (
     toNumber(payment?.rent_amount) +
-    toNumber(payment?.water_bill) +
-    toNumber(payment?.electrical_bill) +
     toNumber(payment?.other_bills)
   );
 };
@@ -50,6 +49,8 @@ export default function AdminDashboard() {
 
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [editingProperty, setEditingProperty] = useState<any | null>(null);
+  const [addingSlotForUserId, setAddingSlotForUserId] = useState<string | null>(null);
+  const [addingPropertySlotForUserId, setAddingPropertySlotForUserId] = useState<string | null>(null);
 
   const [userForm, setUserForm] = useState({
     first_name: "",
@@ -104,8 +105,8 @@ export default function AdminDashboard() {
     };
   }, [users, properties, bookings, payments]);
 
-  const loadAllData = async () => {
-    setLoading(true);
+  const loadAllData = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [usersRes, propsRes, bookingsRes, paymentsRes] = await Promise.all([
         supabase
@@ -119,6 +120,7 @@ export default function AdminDashboard() {
           .select(
             "id, title, city, address, price, status, bedrooms, bathrooms, landlord, created_at",
           )
+          .eq("is_deleted", false)
           .order("created_at", { ascending: false }),
         supabase
           .from("bookings")
@@ -127,7 +129,7 @@ export default function AdminDashboard() {
         supabase
           .from("payment_requests")
           .select(
-            "id, property_id, tenant, landlord, status, due_date, total_amount, rent_amount, water_bill, electrical_bill, other_bills, created_at",
+            "id, property_id, tenant, landlord, status, due_date, total_amount, rent_amount, other_bills, created_at",
           )
           .order("created_at", { ascending: false }),
       ]);
@@ -150,6 +152,100 @@ export default function AdminDashboard() {
     } finally {
       setLoading(false);
     }
+  };
+
+  useRealtime(
+    ["profiles", "properties", "bookings", "payment_requests", "landlord_subscriptions", "subscriptions"],
+    () => {
+      console.log("Simpler Admin Dashboard Realtime update triggered");
+      loadAllData(true);
+    },
+    true
+  );
+
+  const addFamilySlot = async (userId: string) => {
+    setAddingSlotForUserId(userId);
+    try {
+      // Get or create subscription
+      let { data: sub } = await supabase
+        .from("subscriptions")
+        .select("id, total_slots, paid_slots")
+        .eq("tenant_id", userId)
+        .maybeSingle();
+
+      if (!sub) {
+        const { data: newSub, error: createErr } = await supabase
+          .from("subscriptions")
+          .insert({ tenant_id: userId, plan_type: "free", total_slots: 1, paid_slots: 0 })
+          .select()
+          .single();
+        if (createErr) throw createErr;
+        sub = newSub;
+      }
+      if (!sub) return;
+
+
+      if ((sub.total_slots || 1) >= 4) {
+        Alert.alert("Limit Reached", "This tenant already has the maximum 4 family slots.");
+        setAddingSlotForUserId(null);
+        return;
+      }
+
+      const newPaidSlots = (sub.paid_slots || 0) + 1;
+      const newTotalSlots = Math.min(4, 1 + newPaidSlots);
+
+      await supabase
+        .from("subscriptions")
+        .update({ paid_slots: newPaidSlots, total_slots: newTotalSlots, plan_type: "paid" })
+        .eq("id", sub.id);
+
+      Alert.alert("Success", `Family slot added. Now ${newTotalSlots}/4 slots.`);
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Failed to add family slot.");
+    }
+    setAddingSlotForUserId(null);
+  };
+
+  const addPropertySlot = async (userId: string) => {
+    setAddingPropertySlotForUserId(userId);
+    try {
+      let { data: sub } = await supabase
+        .from("landlord_subscriptions")
+        .select("id, total_slots, paid_slots")
+        .eq("landlord_id", userId)
+        .maybeSingle();
+
+      if (!sub) {
+        const { data: newSub, error: createErr } = await supabase
+          .from("landlord_subscriptions")
+          .insert({ landlord_id: userId, plan_type: "free", total_slots: 3, paid_slots: 0 })
+          .select()
+          .single();
+        if (createErr) throw createErr;
+        sub = newSub;
+      }
+      if (!sub) return;
+
+
+      if ((sub.total_slots || 3) >= 10) {
+        Alert.alert("Limit Reached", "This landlord already has the maximum 10 property slots.");
+        setAddingPropertySlotForUserId(null);
+        return;
+      }
+
+      const newPaidSlots = (sub.paid_slots || 0) + 1;
+      const newTotalSlots = Math.min(10, 3 + newPaidSlots);
+
+      await supabase
+        .from("landlord_subscriptions")
+        .update({ paid_slots: newPaidSlots, total_slots: newTotalSlots, plan_type: "paid", updated_at: new Date().toISOString() })
+        .eq("id", sub.id);
+
+      Alert.alert("Success", `Property slot added. Now ${newTotalSlots}/10 slots.`);
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Failed to add property slot.");
+    }
+    setAddingPropertySlotForUserId(null);
   };
 
   const openUserEditor = (user: any) => {
@@ -279,7 +375,7 @@ export default function AdminDashboard() {
       <View style={styles.revenueCard}>
         <Text style={styles.revenueLabel}>All-Time Payment Total</Text>
         <Text style={styles.revenueValue}>{formatCurrency(stats.revenue)}</Text>
-        <TouchableOpacity style={styles.refreshButton} onPress={loadAllData}>
+        <TouchableOpacity style={styles.refreshButton} onPress={() => loadAllData()}>
           <Ionicons name="refresh" size={16} color="#fff" />
           <Text style={styles.refreshButtonText}>Reload Admin Data</Text>
         </TouchableOpacity>
@@ -302,12 +398,48 @@ export default function AdminDashboard() {
               Phone: {user.phone || "No phone"}
             </Text>
           </View>
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={() => openUserEditor(user)}
-          >
-            <Ionicons name="create-outline" size={18} color="#111" />
-          </TouchableOpacity>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            {(user.role || "").toLowerCase() === "tenant" && (
+              <TouchableOpacity
+                style={{
+                  backgroundColor: "#111827",
+                  paddingHorizontal: 10,
+                  paddingVertical: 7,
+                  borderRadius: 10,
+                  opacity: addingSlotForUserId === user.id ? 0.5 : 1,
+                }}
+                onPress={() => addFamilySlot(user.id)}
+                disabled={addingSlotForUserId === user.id}
+              >
+                <Text style={{ color: "#fff", fontSize: 10, fontWeight: "800" }}>
+                  {addingSlotForUserId === user.id ? "Adding..." : "+ Family Slot"}
+                </Text>
+              </TouchableOpacity>
+            )}
+            {(user.role || "").toLowerCase() === "landlord" && (
+              <TouchableOpacity
+                style={{
+                  backgroundColor: "#111827",
+                  paddingHorizontal: 10,
+                  paddingVertical: 7,
+                  borderRadius: 10,
+                  opacity: addingPropertySlotForUserId === user.id ? 0.5 : 1,
+                }}
+                onPress={() => addPropertySlot(user.id)}
+                disabled={addingPropertySlotForUserId === user.id}
+              >
+                <Text style={{ color: "#fff", fontSize: 10, fontWeight: "800" }}>
+                  {addingPropertySlotForUserId === user.id ? "Adding..." : "+ Property Slot"}
+                </Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={() => openUserEditor(user)}
+            >
+              <Ionicons name="create-outline" size={18} color="#111" />
+            </TouchableOpacity>
+          </View>
         </View>
       ))}
     </View>

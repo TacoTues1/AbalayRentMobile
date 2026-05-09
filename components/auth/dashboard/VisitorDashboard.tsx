@@ -1,33 +1,36 @@
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Location from "expo-location";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Dimensions,
-  Easing,
-  Image,
-  Keyboard,
-  KeyboardAvoidingView,
-  Linking,
-  Modal,
-  Platform,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Dimensions,
+    Easing,
+    Image,
+    Keyboard,
+    KeyboardAvoidingView,
+    Linking,
+    Modal,
+    Platform,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    TouchableWithoutFeedback,
+    View,
 } from "react-native";
 import CalendarPicker from "../../../components/ui/CalendarPicker";
 import { useRealtime } from "../../../hooks/useRealtime";
 import { createNotification } from "../../../lib/notifications";
+import {
+    addDismissedReviewId,
+    getDismissedReviewIds,
+} from "../../../lib/reviewDismissals";
 import { supabase } from "../../../lib/supabase";
 import { useTheme } from "../../../lib/theme";
 
@@ -452,11 +455,12 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     flexDirection: "row",
     alignItems: "center",
+    alignSelf: "flex-start",
   },
   badgeAvailable: { backgroundColor: "white" },
   badgeOccupied: { backgroundColor: "rgba(0,0,0,0.8)" },
   badgeFav: { backgroundColor: "#f43f5e", borderWidth: 0 },
-  badgeText: { fontSize: 10, fontWeight: "bold", textTransform: "uppercase" },
+  badgeText: { fontSize: 8, fontWeight: "bold", textTransform: "uppercase" },
   textDark: { color: "black" },
   textWhite: { color: "white" },
   cardActions: { position: "absolute", top: 8, right: 8 },
@@ -665,18 +669,23 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   authModalTitle: {
-    fontSize: 24,
-    fontWeight: "800",
+    fontSize: 22,
+    fontWeight: "700",
     color: "#111827",
-    marginBottom: 12,
+    marginBottom: 8,
     textAlign: "center",
   },
+  authModalBrand: {
+    fontFamily: "Pacifico_400Regular",
+    fontSize: 28,
+    fontWeight: "400",
+  },
   authModalSubtitle: {
-    fontSize: 15,
-    color: "#6b7280",
+    fontSize: 14,
+    color: "#747476ff",
     textAlign: "center",
-    marginBottom: 32,
-    lineHeight: 22,
+    marginBottom: 24,
+    fontWeight: "600",
     paddingHorizontal: 20,
   },
   authModalPrimaryBtn: {
@@ -1041,6 +1050,7 @@ export default function VisitorDashboard({ session, profile }: any) {
 
   // Reviews & End Request
   const [reviewModalVisible, setReviewModalVisible] = useState(false);
+  const reviewModalVisibleRef = useRef(false);
   const [reviewTarget, setReviewTarget] = useState<any>(null);
   const [reviewRating, setReviewRating] = useState(0); // Optional landlord rating (0 = skipped)
   const [reviewComment, setReviewComment] = useState("");
@@ -1049,6 +1059,7 @@ export default function VisitorDashboard({ session, profile }: any) {
   const [communicationRating, setCommunicationRating] = useState(5);
   const [locationRating, setLocationRating] = useState(5);
   const [dontShowAgain, setDontShowAgain] = useState(false);
+  const dontShowAgainRef = useRef(false);
 
   const [endRequestModalVisible, setEndRequestModalVisible] = useState(false);
   const [endRequestDate, setEndRequestDate] = useState("");
@@ -1057,6 +1068,17 @@ export default function VisitorDashboard({ session, profile }: any) {
 
   // Track if user already skipped the review modal this session
   const reviewSkippedThisSession = useRef(false);
+
+  const toggleDontShowAgain = () => {
+    const next = !dontShowAgainRef.current;
+    dontShowAgainRef.current = next;
+    setDontShowAgain(next);
+  };
+
+  const updateReviewModalVisible = (visible: boolean) => {
+    reviewModalVisibleRef.current = visible;
+    setReviewModalVisible(visible);
+  };
 
   // --- INITIAL LOAD ---
   useEffect(() => {
@@ -1174,12 +1196,34 @@ export default function VisitorDashboard({ session, profile }: any) {
         )
         .eq("is_deleted", false);
 
-      const availableProps = (allProps || []).filter((p: any) => {
-        const status = String(p?.status || "available")
-          .trim()
-          .toLowerCase();
-        return status === "available";
-      });
+      // Fetch upcoming availability dates securely via Edge Function (bypasses RLS)
+      const occupiedPropertyIds = (allProps || [])
+        .filter((p: any) => String(p?.status || "").toLowerCase() === "occupied")
+        .map((p: any) => p.id)
+        .filter(Boolean);
+
+      let availabilityMap: Record<string, string> = {};
+      if (occupiedPropertyIds.length > 0) {
+        try {
+          const { data, error } = await supabase.functions.invoke("property-availability", {
+            body: { propertyIds: occupiedPropertyIds },
+          });
+          if (!error && data?.availability) {
+            availabilityMap = data.availability;
+          }
+        } catch (err) {
+          console.error("Error fetching upcoming availability from Edge Function:", err);
+        }
+      }
+
+      const availableProps = (allProps || [])
+        .map((p: any) => {
+          if (String(p?.status || "").toLowerCase() === "available") return p;
+          const upcomingDate = availabilityMap[p.id];
+          if (!upcomingDate) return null;
+          return { ...p, upcoming_available_date: upcomingDate };
+        })
+        .filter(Boolean);
 
       const { data: stats } = await supabase.from("property_stats").select("*");
       const statsMap: any = {};
@@ -3062,7 +3106,7 @@ export default function VisitorDashboard({ session, profile }: any) {
       setSecurityDepositProcessing(false);
       setNextPaymentDate("N/A");
       setDaysUntilContractEnd(null);
-      setReviewModalVisible(false);
+      updateReviewModalVisible(false);
       setReviewTarget(null);
       setReviewComment("");
       setReviewRating(0);
@@ -3128,7 +3172,7 @@ export default function VisitorDashboard({ session, profile }: any) {
       if ((pendingPaymentCount || 0) > 0) {
         Alert.alert(
           "Pending Payment Found",
-          "You cannot end your stay while there are pending payments. Please settle all pending bills first.",
+          "You cannot end your contract while you have pending payments. Please settle all outstanding bills first.",
         );
         setSubmittingEndRequest(false);
         return;
@@ -3234,7 +3278,9 @@ export default function VisitorDashboard({ session, profile }: any) {
     if (!session?.user) return;
     if (!allowForPrimary && isFamilyMember) return;
     // Don't show review modal again if user already skipped it this session
-    if (reviewSkippedThisSession.current) return;
+    if (reviewSkippedThisSession.current || reviewModalVisibleRef.current) {
+      return;
+    }
     try {
       const { data: ended } = await supabase
         .from("tenant_occupancies")
@@ -3260,27 +3306,35 @@ export default function VisitorDashboard({ session, profile }: any) {
         );
       }
 
-      const reviewedIds = reviews?.map((r: any) => r.occupancy_id) || [];
+      const reviewedIds =
+        reviews?.map((r: any) => String(r.occupancy_id)) || [];
       const landlordRatedIds =
-        landlordRatings?.map((r: any) => r.occupancy_id) || [];
+        landlordRatings?.map((r: any) => String(r.occupancy_id)) || [];
+      const dismissedStrings = await getDismissedReviewIds();
 
-      const dismissedStr = await AsyncStorage.getItem("dismissedReviews");
-      const dismissedReviews = dismissedStr ? JSON.parse(dismissedStr) : [];
-      const dismissedStrings = dismissedReviews.map((id: any) => String(id));
+      if (reviewSkippedThisSession.current || reviewModalVisibleRef.current) {
+        return;
+      }
 
       const unreviewed = ended?.find((o: any) => {
-        const needsPropertyReview = !reviewedIds.includes(o.id);
-        const needsLandlordReview = !landlordRatedIds.includes(o.id);
+        const occupancyId = String(o.id);
+        const needsPropertyReview = !reviewedIds.includes(occupancyId);
+        const needsLandlordReview = !landlordRatedIds.includes(occupancyId);
         const isDismissed =
-          dismissedStrings.includes(String(o.id)) ||
+          dismissedStrings.includes(occupancyId) ||
           dismissedStrings.includes(String(o.property_id));
 
         return (needsPropertyReview || needsLandlordReview) && !isDismissed;
       });
 
       if (unreviewed) {
-        const needsPropertyReview = !reviewedIds.includes(unreviewed.id);
-        const needsLandlordReview = !landlordRatedIds.includes(unreviewed.id);
+        if (reviewSkippedThisSession.current || reviewModalVisibleRef.current) {
+          return;
+        }
+
+        const occupancyId = String(unreviewed.id);
+        const needsPropertyReview = !reviewedIds.includes(occupancyId);
+        const needsLandlordReview = !landlordRatedIds.includes(occupancyId);
 
         setReviewTarget({
           ...unreviewed,
@@ -3292,8 +3346,9 @@ export default function VisitorDashboard({ session, profile }: any) {
         setCleanlinessRating(5);
         setCommunicationRating(5);
         setLocationRating(5);
+        dontShowAgainRef.current = false;
         setDontShowAgain(false);
-        setReviewModalVisible(true);
+        updateReviewModalVisible(true);
       }
     } catch (e) {
       console.error("Error checking pending reviews:", e);
@@ -3375,7 +3430,7 @@ export default function VisitorDashboard({ session, profile }: any) {
       }
 
       Alert.alert("Success", "Review submitted");
-      setReviewModalVisible(false);
+      updateReviewModalVisible(false);
       checkPendingReviews();
     } catch (error: any) {
       console.error("submitReview error:", error);
@@ -3388,28 +3443,23 @@ export default function VisitorDashboard({ session, profile }: any) {
   const handleSkipReview = async () => {
     // Always mark as skipped for this session so it won't reappear on realtime updates
     reviewSkippedThisSession.current = true;
+    const shouldDismissReview = dontShowAgainRef.current || dontShowAgain;
+    const targetId = reviewTarget?.id || reviewTarget?.property_id;
 
-    if (dontShowAgain && reviewTarget) {
+    updateReviewModalVisible(false);
+    setReviewTarget(null);
+    setReviewComment("");
+    setReviewRating(0);
+    dontShowAgainRef.current = false;
+    setDontShowAgain(false);
+
+    if (shouldDismissReview && targetId) {
       try {
-        const dismissedStr = await AsyncStorage.getItem("dismissedReviews");
-        const dismissed = dismissedStr ? JSON.parse(dismissedStr) : [];
-        // Ensure array of strings
-        const dismissedStrings = dismissed.map((id: any) => String(id));
-        const targetId = String(reviewTarget.id || reviewTarget.property_id);
-
-        if (!dismissedStrings.includes(targetId)) {
-          const newDismissed = [...dismissedStrings, targetId];
-          await AsyncStorage.setItem(
-            "dismissedReviews",
-            JSON.stringify(newDismissed),
-          );
-          console.log("Saved dismissed review:", targetId, newDismissed);
-        }
+        await addDismissedReviewId(targetId);
       } catch (e) {
         console.error("Failed to save dismissed review preference", e);
       }
     }
-    setReviewModalVisible(false);
   };
 
   // --- RENDERS ---
@@ -3469,7 +3519,7 @@ export default function VisitorDashboard({ session, profile }: any) {
             <View
               style={[
                 styles.badge,
-                item.status === "available"
+                String(item.status).toLowerCase() === "available"
                   ? styles.badgeAvailable
                   : styles.badgeOccupied,
               ]}
@@ -3477,12 +3527,31 @@ export default function VisitorDashboard({ session, profile }: any) {
               <Text
                 style={[
                   styles.badgeText,
-                  item.status === "available"
+                  String(item.status).toLowerCase() === "available"
                     ? styles.textDark
                     : styles.textWhite,
                 ]}
               >
-                {item.status === "available" ? "Available" : "Occupied"}
+                {(() => {
+                  const status = String(item.status).toLowerCase();
+                  if (status === "available") return "Available";
+                  
+                  if (item.upcoming_available_date) {
+                    const endDate = new Date(item.upcoming_available_date);
+                    endDate.setHours(0, 0, 0, 0);
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const diffDays = Math.max(0, Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+
+                    if (diffDays > 0) {
+                      const dayLabel = diffDays === 1 ? "day" : "days";
+                      return `Will be available in ${diffDays} ${dayLabel}`;
+                    } else {
+                      return "Available today";
+                    }
+                  }
+                  return "Occupied";
+                })()}
               </Text>
             </View>
             {stats.favorite_count >= 1 && (
@@ -5124,8 +5193,6 @@ export default function VisitorDashboard({ session, profile }: any) {
                     pendingPayments.map((bill, i) => {
                       const total =
                         (Number(bill.rent_amount) || 0) +
-                        (Number(bill.water_bill) || 0) +
-                        (Number(bill.electrical_bill) || 0) +
                         (Number(bill.other_bills) || 0) +
                         (Number(bill.security_deposit_amount) || 0) +
                         (Number(bill.advance_amount) || 0);
@@ -5266,7 +5333,7 @@ export default function VisitorDashboard({ session, profile }: any) {
                         color="#10b981"
                       />
                       <Text style={styles.emptyStateText}>
-                        You're all caught up!
+                        {"You're all caught up!"}
                       </Text>
                     </View>
                   )}
@@ -5785,7 +5852,7 @@ export default function VisitorDashboard({ session, profile }: any) {
                             fontWeight: "500",
                           }}
                         >
-                          No properties found for "{noOccupancySearch}"
+                          {`No properties found for "${noOccupancySearch}"`}
                         </Text>
                       </View>
                     )}
@@ -6886,7 +6953,7 @@ export default function VisitorDashboard({ session, profile }: any) {
 
             <View style={styles.checkboxContainer}>
               <TouchableOpacity
-                onPress={() => setDontShowAgain(!dontShowAgain)}
+                onPress={toggleDontShowAgain}
                 style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
               >
                 <Ionicons
@@ -6900,7 +6967,7 @@ export default function VisitorDashboard({ session, profile }: any) {
                     color: isDark ? colors.textSecondary : "#666",
                   }}
                 >
-                  Don't show again for this stay
+                  {"Don't show again for this stay"}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -7052,7 +7119,10 @@ export default function VisitorDashboard({ session, profile }: any) {
                     isDark && { color: colors.text },
                   ]}
                 >
-                  Welcome to Abalay
+                  Welcome to <Text style={styles.authModalBrand}>Abalay</Text>
+                </Text>
+                <Text style={styles.authModalSubtitle}>
+                  Live at your comfort
                 </Text>
 
                 <TouchableOpacity

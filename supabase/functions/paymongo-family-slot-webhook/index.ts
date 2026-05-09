@@ -1,6 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+type SupabaseAdminClient = any;
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -95,6 +97,182 @@ const isMissingSchemaError = (error: any) => {
     message.includes("schema cache") ||
     details.includes("failed to parse")
   );
+};
+
+const getMissingColumnName = (error: any) => {
+  const text = [
+    error?.message,
+    error?.details,
+    error?.hint,
+    error?.code,
+  ]
+    .map((value) => String(value || ""))
+    .join(" ");
+
+  const patterns = [
+    /Could not find the '([^']+)' column/i,
+    /Could not find the column '([^']+)'/i,
+    /column "([^"]+)" of relation "[^"]+" does not exist/i,
+    /column "([^"]+)" does not exist/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+
+  return "";
+};
+
+const hasAnyKey = (payload: Record<string, unknown>, keys: string[]) =>
+  keys.length === 0 ||
+  keys.some((key) => Object.prototype.hasOwnProperty.call(payload, key));
+
+const removeMissingOptionalColumn = ({
+  payload,
+  error,
+  requiredKeys,
+}: {
+  payload: Record<string, unknown>;
+  error: any;
+  requiredKeys: string[];
+}) => {
+  const missingColumn = getMissingColumnName(error);
+  if (!missingColumn) return null;
+  if (requiredKeys.includes(missingColumn)) return null;
+  if (!Object.prototype.hasOwnProperty.call(payload, missingColumn)) {
+    return null;
+  }
+
+  const nextPayload = { ...payload };
+  delete nextPayload[missingColumn];
+  return nextPayload;
+};
+
+const insertCompatibleRow = async ({
+  supabaseAdmin,
+  tableName,
+  payload,
+  requiredKeys = [],
+  oneOfKeys = [],
+}: {
+  supabaseAdmin: SupabaseAdminClient;
+  tableName: string;
+  payload: Record<string, unknown>;
+  requiredKeys?: string[];
+  oneOfKeys?: string[];
+}) => {
+  let nextPayload = { ...payload };
+
+  for (let attempt = 0; attempt <= Object.keys(payload).length; attempt += 1) {
+    if (!requiredKeys.every((key) => key in nextPayload)) {
+      return { ok: false, data: null, error: { message: "Missing required column" } };
+    }
+
+    if (!hasAnyKey(nextPayload, oneOfKeys)) {
+      return { ok: false, data: null, error: { message: "Missing required slot column" } };
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from(tableName)
+      .insert(nextPayload)
+      .select("*")
+      .maybeSingle();
+
+    if (!error) return { ok: true, data, error: null };
+
+    const strippedPayload = removeMissingOptionalColumn({
+      payload: nextPayload,
+      error,
+      requiredKeys,
+    });
+
+    if (!strippedPayload) return { ok: false, data: null, error };
+    nextPayload = strippedPayload;
+  }
+
+  return { ok: false, data: null, error: { message: "Unable to match table columns" } };
+};
+
+const updateCompatibleRowById = async ({
+  supabaseAdmin,
+  tableName,
+  id,
+  payload,
+}: {
+  supabaseAdmin: SupabaseAdminClient;
+  tableName: string;
+  id: unknown;
+  payload: Record<string, unknown>;
+}) => {
+  let nextPayload = { ...payload };
+
+  for (let attempt = 0; attempt <= Object.keys(payload).length; attempt += 1) {
+    const { data, error } = await supabaseAdmin
+      .from(tableName)
+      .update(nextPayload)
+      .eq("id", id)
+      .select("*")
+      .maybeSingle();
+
+    if (!error) return { ok: true, data, error: null };
+
+    const strippedPayload = removeMissingOptionalColumn({
+      payload: nextPayload,
+      error,
+      requiredKeys: [],
+    });
+
+    if (!strippedPayload) return { ok: false, data: null, error };
+    nextPayload = strippedPayload;
+  }
+
+  return { ok: false, data: null, error: { message: "Unable to match table columns" } };
+};
+
+const upsertCompatibleRow = async ({
+  supabaseAdmin,
+  tableName,
+  payload,
+  requiredKeys = [],
+  oneOfKeys = [],
+}: {
+  supabaseAdmin: SupabaseAdminClient;
+  tableName: string;
+  payload: Record<string, unknown>;
+  requiredKeys?: string[];
+  oneOfKeys?: string[];
+}) => {
+  let nextPayload = { ...payload };
+
+  for (let attempt = 0; attempt <= Object.keys(payload).length; attempt += 1) {
+    if (!requiredKeys.every((key) => key in nextPayload)) {
+      return { ok: false, data: null, error: { message: "Missing required column" } };
+    }
+
+    if (!hasAnyKey(nextPayload, oneOfKeys)) {
+      return { ok: false, data: null, error: { message: "Missing required slot column" } };
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from(tableName)
+      .upsert(nextPayload)
+      .select("*")
+      .maybeSingle();
+
+    if (!error) return { ok: true, data, error: null };
+
+    const strippedPayload = removeMissingOptionalColumn({
+      payload: nextPayload,
+      error,
+      requiredKeys,
+    });
+
+    if (!strippedPayload) return { ok: false, data: null, error };
+    nextPayload = strippedPayload;
+  }
+
+  return { ok: false, data: null, error: { message: "Unable to match table columns" } };
 };
 
 const mergeMetadata = (...sources: unknown[]) =>
@@ -235,7 +413,7 @@ const processPaidFamilySlot = async ({
   paymentReference,
   paidAt,
 }: {
-  supabaseAdmin: ReturnType<typeof createClient>;
+  supabaseAdmin: SupabaseAdminClient;
   ownerUserId: string;
   slots: number;
   amount: number;
@@ -266,7 +444,7 @@ const processPaidFamilySlot = async ({
     const { data: existingPayment, error: existingPaymentError } =
       await supabaseAdmin
         .from("subscription_payments")
-        .select("id, subscription_id")
+        .select("*")
         .eq("payment_reference", paymentReference)
         .limit(1)
         .maybeSingle();
@@ -291,7 +469,7 @@ const processPaidFamilySlot = async ({
           try {
             const { data, error } = await supabaseAdmin
               .from(tableName)
-              .select("id")
+              .select("*")
               .eq(column, target.value)
               .limit(1);
 
@@ -314,10 +492,9 @@ const processPaidFamilySlot = async ({
     const { data: existingSubscription, error: existingSubscriptionError } =
       await supabaseAdmin
         .from("subscriptions")
-        .select("id, total_slots, paid_slots")
+        .select("*")
         .eq("tenant_id", ownerUserId)
         .eq("plan_type", FAMILY_SLOT_PLAN_TYPE)
-        .order("updated_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
@@ -339,39 +516,42 @@ const processPaidFamilySlot = async ({
       );
 
       if (existingSubscription?.id) {
-        const { error: updateSubscriptionError } = await supabaseAdmin
-          .from("subscriptions")
-          .update({
+        const updatedSubscription = await updateCompatibleRowById({
+          supabaseAdmin,
+          tableName: "subscriptions",
+          id: existingSubscription.id,
+          payload: {
             total_slots: nextTotalSlotsBase(),
             paid_slots: nextPaidSlotsBase(),
             status: "active",
             updated_at: now,
-          })
-          .eq("id", existingSubscription.id);
+          },
+        });
 
-        if (!updateSubscriptionError) {
+        if (updatedSubscription.ok) {
           planStored = true;
           canonicalSubscriptionId = firstString(existingSubscription.id);
         }
       } else {
-        const { data: insertedSubscription, error: insertSubscriptionError } =
-          await supabaseAdmin
-            .from("subscriptions")
-            .insert({
-              tenant_id: ownerUserId,
-              plan_type: FAMILY_SLOT_PLAN_TYPE,
-              total_slots: nextTotalSlotsBase(),
-              paid_slots: nextPaidSlotsBase(),
-              status: "active",
-              created_at: now,
-              updated_at: now,
-            })
-            .select("id")
-            .single();
+        const insertedSubscription = await insertCompatibleRow({
+          supabaseAdmin,
+          tableName: "subscriptions",
+          payload: {
+            tenant_id: ownerUserId,
+            plan_type: FAMILY_SLOT_PLAN_TYPE,
+            total_slots: nextTotalSlotsBase(),
+            paid_slots: nextPaidSlotsBase(),
+            status: "active",
+            created_at: now,
+            updated_at: now,
+          },
+          requiredKeys: ["tenant_id"],
+          oneOfKeys: ["total_slots", "paid_slots"],
+        });
 
-        if (!insertSubscriptionError) {
+        if (insertedSubscription.ok) {
           planStored = true;
-          canonicalSubscriptionId = firstString(insertedSubscription?.id);
+          canonicalSubscriptionId = firstString(insertedSubscription.data?.id);
         }
       }
     }
@@ -429,23 +609,36 @@ const processPaidFamilySlot = async ({
     for (const tableName of SUBSCRIPTION_PAYMENT_TABLE_CANDIDATES) {
       let storedInTable = false;
       for (const payload of basePaymentPayloadVariants) {
-        const payloadVariants = USER_COLUMN_CANDIDATES.map((userColumn) => ({
-          ...payload,
-          [userColumn]: ownerUserId,
-        }));
+        for (const userColumn of USER_COLUMN_CANDIDATES) {
+          const paymentPayload = {
+            ...payload,
+            [userColumn]: ownerUserId,
+          };
 
-        for (const paymentPayload of payloadVariants) {
           try {
-            const { error } = await supabaseAdmin
-              .from(tableName)
-              .insert(paymentPayload);
-            if (!error) {
+            const insertedPayment = await insertCompatibleRow({
+              supabaseAdmin,
+              tableName,
+              payload: paymentPayload,
+              requiredKeys: [userColumn],
+              oneOfKeys: [
+                "slots",
+                "slot_count",
+                "quantity",
+                "additional_slots",
+                "amount",
+                "amount_paid",
+                "total_amount",
+              ],
+            });
+
+            if (insertedPayment.ok) {
               paymentStored = true;
               storedInTable = true;
               break;
             }
 
-            if (!isMissingSchemaError(error)) {
+            if (!isMissingSchemaError(insertedPayment.error)) {
               // Preserve non-schema failures only if every shape fails.
             }
           } catch {
@@ -483,26 +676,48 @@ const processPaidFamilySlot = async ({
     for (const tableName of SUBSCRIPTION_TABLE_CANDIDATES) {
       let storedInTable = false;
       for (const payload of baseSubscriptionPayloadVariants) {
-        const payloadVariants = USER_COLUMN_CANDIDATES.map((userColumn) => ({
-          ...payload,
-          [userColumn]: ownerUserId,
-        }));
+        for (const userColumn of USER_COLUMN_CANDIDATES) {
+          const subscriptionPayload = {
+            ...payload,
+            [userColumn]: ownerUserId,
+          };
 
-        for (const subscriptionPayload of payloadVariants) {
           try {
-            const { error: upsertError } = await supabaseAdmin
-              .from(tableName)
-              .upsert(subscriptionPayload);
-            if (!upsertError) {
+            const upsertedSubscription = await upsertCompatibleRow({
+              supabaseAdmin,
+              tableName,
+              payload: subscriptionPayload,
+              requiredKeys: [userColumn],
+              oneOfKeys: [
+                "total_slots",
+                "paid_slots",
+                "additional_slots",
+                "slot_count",
+                "_paid_slots",
+              ],
+            });
+
+            if (upsertedSubscription.ok) {
               planStored = true;
               storedInTable = true;
               break;
             }
 
-            const { error: insertError } = await supabaseAdmin
-              .from(tableName)
-              .insert(subscriptionPayload);
-            if (!insertError) {
+            const insertedSubscription = await insertCompatibleRow({
+              supabaseAdmin,
+              tableName,
+              payload: subscriptionPayload,
+              requiredKeys: [userColumn],
+              oneOfKeys: [
+                "total_slots",
+                "paid_slots",
+                "additional_slots",
+                "slot_count",
+                "_paid_slots",
+              ],
+            });
+
+            if (insertedSubscription.ok) {
               planStored = true;
               storedInTable = true;
               break;

@@ -6,22 +6,22 @@ import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    Image,
-    Linking,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  Image,
+  Linking,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import {
-    getCountryOptions,
-    getStateOptionsForCountry,
+  getCountryOptions,
+  getStateOptionsForCountry,
 } from "../../lib/locationData";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
@@ -205,7 +205,7 @@ export default function NewProperty() {
       // Role guard: allow landlord and admin
       const { data: profile } = await supabase
         .from("profiles")
-        .select("role")
+        .select("role, phone, email")
         .eq("id", session.user.id)
         .single();
 
@@ -218,7 +218,17 @@ export default function NewProperty() {
           "Only landlords and admins can add properties.",
         );
         router.back();
+        return;
       }
+
+      // Pre-fill contact fields with the landlord's own info
+      const userEmail = profile?.email || session.user.email || "";
+      const userPhone = profile?.phone || "";
+      setForm((prev) => ({
+        ...prev,
+        owner_phone: prev.owner_phone || userPhone,
+        owner_email: prev.owner_email || userEmail,
+      }));
     });
   }, []);
 
@@ -322,11 +332,78 @@ export default function NewProperty() {
   const handleSubmit = async () => {
     if (!validateAllRequiredFields()) return;
 
+    // Check property slot availability for landlords
+    if (profileRole === "landlord") {
+      try {
+        const API_URL = process.env.EXPO_PUBLIC_API_URL || "";
+        if (API_URL) {
+          const cleanUrl = API_URL.replace(/\/+$/, "");
+          const slotRes = await fetch(
+            `${cleanUrl}/api/payments/landlord-subscriptions`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "check-can-add",
+                landlord_id: session.user.id,
+              }),
+            },
+          );
+          const slotData = await slotRes.json();
+          if (!slotData.can_add) {
+            if (slotData.max_reached) {
+              Alert.alert(
+                "Limit Reached",
+                `You've reached the maximum of ${slotData.max_slots} property slots.`,
+              );
+            } else {
+              Alert.alert(
+                "No Slots Available",
+                `All ${slotData.total_slots} property slots are used. Please purchase an additional slot from your Properties page.`,
+              );
+            }
+            return;
+          }
+        } else {
+          // Fallback: query Supabase directly
+          const { data: subscription } = await supabase
+            .from("landlord_subscriptions")
+            .select("total_slots")
+            .eq("landlord_id", session.user.id)
+            .maybeSingle();
+
+          const totalSlots = subscription?.total_slots || 3;
+
+          const { count: propertyCount } = await supabase
+            .from("properties")
+            .select("id", { count: "exact", head: true })
+            .eq("landlord", session.user.id)
+            .eq("is_deleted", false);
+
+          if ((propertyCount || 0) >= totalSlots) {
+            Alert.alert(
+              "No Slots Available",
+              `All ${totalSlots} property slots are used. Please purchase an additional slot from your Properties page.`,
+            );
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("Error checking property slots:", err);
+      }
+    }
+
     setLoading(true);
     const sanitize = (val: string) => (val === "" ? 0 : parseFloat(val));
 
-    const { deposit_same_as_rent, advance_same_as_rent, ...cleanedFormData } =
-      form;
+    const {
+      deposit_same_as_rent,
+      advance_same_as_rent,
+      bed_type,
+      is_no_limit,
+      property_type,
+      ...cleanedFormData
+    } = form;
 
     const payload = {
       ...cleanedFormData,
@@ -427,17 +504,8 @@ export default function NewProperty() {
     }
 
     if (step === 3) {
-      if (
-        isBlank(form.price) ||
-        isBlank(form.bedrooms) ||
-        isBlank(form.bathrooms) ||
-        isBlank(form.area_sqft) ||
-        isBlank(form.status)
-      ) {
-        Alert.alert(
-          "Required Field",
-          "Monthly price, beds, baths, sqft, and status are required.",
-        );
+      if (isBlank(form.price)) {
+        Alert.alert("Required Field", "Monthly price is required.");
         return false;
       }
     }
@@ -458,17 +526,6 @@ export default function NewProperty() {
         isBlank(form.advance_amount)
       ) {
         Alert.alert("Required Field", "Advance amount is required.");
-        return false;
-      }
-
-      const hasUtilitySelection = utilityAmenities.some((amenity) =>
-        form.amenities.includes(amenity),
-      );
-      if (!hasUtilitySelection) {
-        Alert.alert(
-          "Required Field",
-          "Please select at least one utility as Free in Utilities.",
-        );
         return false;
       }
     }
@@ -538,7 +595,7 @@ export default function NewProperty() {
                 fontWeight: "600",
               }}
             >
-              Step {currentStep} of 7
+              Step {currentStep} of 6
             </Text>
           </View>
           <Text
@@ -1166,10 +1223,7 @@ export default function NewProperty() {
 
               <View style={styles.row}>
                 <View
-                  style={[
-                    styles.fieldGroup,
-                    { flex: 1, position: "relative" },
-                  ]}
+                  style={[styles.fieldGroup, { flex: 1, position: "relative" }]}
                 >
                   <Text
                     style={[

@@ -5,6 +5,7 @@ import {
     Animated,
     Easing,
     Image,
+    Modal,
     RefreshControl,
     SafeAreaView,
     ScrollView,
@@ -103,6 +104,16 @@ export default function LandlordsSearchScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [landlords, setLandlords] = useState<LandlordCard[]>([]);
+  const [ratingFilter, setRatingFilter] = useState(0);
+  const [showRatingMenu, setShowRatingMenu] = useState(false);
+
+  const ratingOptions = [
+    { label: "All landlords", value: 0 },
+    { label: "4.0 and up", value: 4 },
+    { label: "3.0 and up", value: 3 },
+    { label: "2.0 and up", value: 2 },
+    { label: "1.0 and up", value: 1 },
+  ];
 
   const loadLandlords = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -212,31 +223,41 @@ export default function LandlordsSearchScreen() {
   }, []);
 
   const filteredLandlords = useMemo(() => {
+    let filtered = landlords;
     const query = search.trim().toLowerCase();
-    if (!query) return landlords;
 
-    return landlords.filter((landlord) => {
-      const fullName =
-        `${landlord.first_name || ""} ${landlord.last_name || ""}`.trim();
-      const searchableProperties = landlord.properties
-        .map(
-          (property) =>
-            `${property.title || ""} ${property.city || ""} ${property.state_province || ""}`,
-        )
-        .join(" ");
+    if (query) {
+      filtered = filtered.filter((landlord) => {
+        const fullName =
+          `${landlord.first_name || ""} ${landlord.last_name || ""}`.trim();
+        const searchableProperties = landlord.properties
+          .map(
+            (property) =>
+              `${property.title || ""} ${property.city || ""} ${property.state_province || ""}`,
+          )
+          .join(" ");
 
-      const text = [
-        fullName,
-        landlord.business_name || "",
-        landlord.cityPreview || "",
-        searchableProperties,
-      ]
-        .join(" ")
-        .toLowerCase();
+        const text = [
+          fullName,
+          landlord.business_name || "",
+          landlord.cityPreview || "",
+          searchableProperties,
+        ]
+          .join(" ")
+          .toLowerCase();
 
-      return text.includes(query);
-    });
-  }, [landlords, search]);
+        return text.includes(query);
+      });
+    }
+
+    if (ratingFilter > 0) {
+      filtered = filtered.filter(
+        (landlord) => landlord.ratingAverage >= ratingFilter,
+      );
+    }
+
+    return filtered;
+  }, [landlords, search, ratingFilter]);
 
   const renderLandlordSkeletonCard = (cardKey: string) => (
     <View
@@ -317,21 +338,39 @@ export default function LandlordsSearchScreen() {
           <View style={{ width: 36 }} />
         </View>
 
-        <View
-          style={[
-            styles.searchBox,
-            {
-              backgroundColor: isDark ? colors.card : "#fff",
-              borderColor: isDark ? colors.border : "#e5e7eb",
-            },
-          ]}
-        >
-          <SkeletonBlock
-            width="100%"
-            height={16}
-            borderRadius={8}
-            backgroundColor={skeletonColor}
-          />
+        <View style={styles.searchRow}>
+          <View
+            style={[
+              styles.searchBox,
+              {
+                backgroundColor: isDark ? colors.card : "#fff",
+                borderColor: isDark ? colors.border : "#e5e7eb",
+              },
+            ]}
+          >
+            <SkeletonBlock
+              width="100%"
+              height={16}
+              borderRadius={8}
+              backgroundColor={skeletonColor}
+            />
+          </View>
+          <View
+            style={[
+              styles.ratingDropdown,
+              {
+                backgroundColor: isDark ? colors.card : "#fff",
+                borderColor: isDark ? colors.border : "#e5e7eb",
+              },
+            ]}
+          >
+            <SkeletonBlock
+              width={90}
+              height={12}
+              borderRadius={6}
+              backgroundColor={skeletonColor}
+            />
+          </View>
         </View>
 
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
@@ -373,28 +412,106 @@ export default function LandlordsSearchScreen() {
         <View style={{ width: 36 }} />
       </View>
 
-      <View
-        style={[
-          styles.searchBox,
-          {
-            backgroundColor: isDark ? colors.card : "#fff",
-            borderColor: isDark ? colors.border : "#e5e7eb",
-          },
-        ]}
-      >
-        <Ionicons
-          name="search-outline"
-          size={18}
-          color={isDark ? colors.textMuted : "#6b7280"}
-        />
-        <TextInput
-          value={search}
-          onChangeText={setSearch}
-          placeholder="Search by name, business, city, or property"
-          placeholderTextColor={isDark ? colors.textMuted : "#9ca3af"}
-          style={[styles.searchInput, { color: isDark ? colors.text : "#111" }]}
-        />
+      <View style={styles.searchRow}>
+        <View
+          style={[
+            styles.searchBox,
+            {
+              backgroundColor: isDark ? colors.card : "#fff",
+              borderColor: isDark ? colors.border : "#e5e7eb",
+            },
+          ]}
+        >
+          <Ionicons
+            name="search-outline"
+            size={18}
+            color={isDark ? colors.textMuted : "#6b7280"}
+          />
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search by name, business, city, or property"
+            placeholderTextColor={isDark ? colors.textMuted : "#9ca3af"}
+            style={[
+              styles.searchInput,
+              { color: isDark ? colors.text : "#111" },
+            ]}
+          />
+        </View>
+        <TouchableOpacity
+          style={[
+            styles.ratingDropdown,
+            {
+              backgroundColor: isDark ? colors.card : "#fff",
+              borderColor: isDark ? colors.border : "#e5e7eb",
+            },
+          ]}
+          onPress={() => setShowRatingMenu(true)}
+        >
+          <Text
+            style={[
+              styles.ratingDropdownText,
+              { color: isDark ? colors.text : "#111" },
+            ]}
+          >
+            {ratingOptions.find((o) => o.value === ratingFilter)?.label}
+          </Text>
+          <Ionicons
+            name="chevron-down"
+            size={16}
+            color={isDark ? colors.textMuted : "#6b7280"}
+          />
+        </TouchableOpacity>
       </View>
+
+      <Modal
+        visible={showRatingMenu}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowRatingMenu(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowRatingMenu(false)}
+        >
+          <View
+            style={[
+              styles.dropdownMenu,
+              { backgroundColor: isDark ? colors.card : "#fff" },
+            ]}
+          >
+            {ratingOptions.map((opt) => (
+              <TouchableOpacity
+                key={opt.value}
+                style={[
+                  styles.dropdownItem,
+                  ratingFilter === opt.value && {
+                    backgroundColor: isDark ? "#374151" : "#eff6ff",
+                  },
+                ]}
+                onPress={() => {
+                  setRatingFilter(opt.value);
+                  setShowRatingMenu(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.dropdownItemText,
+                    { color: isDark ? colors.text : "#111" },
+                    ratingFilter === opt.value && {
+                      color: isDark ? colors.text : "#2563eb",
+                      fontWeight: "700",
+                    },
+                  ]}
+                >
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       <ScrollView
         contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
@@ -574,10 +691,16 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "700",
   },
-  searchBox: {
-    marginHorizontal: 16,
+  searchRow: {
+    paddingHorizontal: 16,
     marginTop: 8,
     marginBottom: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  searchBox: {
+    flex: 1,
     borderWidth: 1,
     borderRadius: 12,
     paddingHorizontal: 12,
@@ -636,5 +759,46 @@ const styles = StyleSheet.create({
   },
   metaText: {
     fontSize: 12,
+  },
+  ratingDropdown: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    minWidth: 140,
+    minHeight: 44,
+  },
+  ratingDropdownText: {
+    fontSize: 14,
+    fontWeight: "600",
+    marginRight: 8,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  dropdownMenu: {
+    width: "80%",
+    borderRadius: 12,
+    padding: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  dropdownItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  dropdownItemText: {
+    fontSize: 15,
+    fontWeight: "500",
   },
 });

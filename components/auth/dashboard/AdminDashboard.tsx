@@ -7,6 +7,7 @@ import {
   Alert,
   Image,
   Modal,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,9 +19,94 @@ import {
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
+import Svg, { Circle, G } from "react-native-svg";
 import CalendarPicker from "../../../components/ui/CalendarPicker";
 import { useRealtime } from "../../../hooks/useRealtime";
 import { supabase } from "../../../lib/supabase";
+
+function DonutChart({ segments, title }: { segments: { label: string, value: number, color: string }[], title: string }) {
+  const total = segments.reduce((acc, curr) => acc + curr.value, 0);
+  const radius = 32;
+  const strokeWidth = 16;
+  const center = radius + strokeWidth;
+  const circumference = 2 * Math.PI * radius;
+  let currentOffset = 0;
+
+  return (
+    <View
+      style={{
+        backgroundColor: "#fff",
+        borderRadius: 12,
+        padding: 16,
+        borderWidth: 1,
+        borderColor: "#f3f4f6",
+        flexGrow: 1,
+        minWidth: 160,
+        alignItems: "center",
+      }}
+    >
+      <Text style={{ fontSize: 13, fontWeight: "800", color: "#111827", marginBottom: 12 }}>
+        {title}
+      </Text>
+      <View style={{ width: center * 2, height: center * 2, marginBottom: 12 }}>
+        <Svg width={center * 2} height={center * 2}>
+          <G rotation="-90" origin={`${center}, ${center}`}>
+            {total === 0 ? (
+              <Circle
+                cx={center}
+                cy={center}
+                r={radius}
+                stroke="#e5e7eb"
+                strokeWidth={strokeWidth}
+                fill="transparent"
+              />
+            ) : (
+              segments.map((s, i) => {
+                if (s.value === 0) return null;
+                const percentage = (s.value / total) * 100;
+                const strokeDasharray = `${(percentage / 100) * circumference} ${circumference}`;
+                const strokeDashoffset = -currentOffset;
+                currentOffset += (percentage / 100) * circumference;
+                return (
+                  <Circle
+                    key={i}
+                    cx={center}
+                    cy={center}
+                    r={radius}
+                    stroke={s.color}
+                    strokeWidth={strokeWidth}
+                    strokeDasharray={strokeDasharray}
+                    strokeDashoffset={strokeDashoffset}
+                    fill="transparent"
+                  />
+                );
+              })
+            )}
+          </G>
+        </Svg>
+      </View>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 8 }}>
+        {segments.map((s, i) => (
+          <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: s.color }} />
+            <Text style={{ fontSize: 11, color: "#4b5563", fontWeight: "700" }}>{s.label}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+
+function StatCard({ label, value, icon }: any) {
+  return (
+    <View style={styles.statCard}>
+      <Ionicons name={icon} size={20} color="#111" />
+      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}
 
 type AdminTab =
   | "Overview"
@@ -31,7 +117,8 @@ type AdminTab =
   | "Occupancies"
   | "Schedules"
   | "Maintenance"
-  | "Leave Monitoring";
+  | "Leave Monitoring"
+  | "Pending Tickets";
 
 const NON_EDITABLE_FIELDS = new Set(["id", "created_at", "updated_at"]);
 const USER_EDIT_FIELDS = [
@@ -46,7 +133,7 @@ const USER_EDIT_FIELDS = [
   "business_name",
   "avatar_url",
   "phone_verified",
-  "accepted_payment",
+  "accepted_payments",
   "is_subscribed_family_plan",
   "family_slots",
   "new_password",
@@ -95,9 +182,6 @@ const NUMERIC_FIELD_HINTS = new Set([
   "security_deposit_amount",
   "advance_amount",
   "rent_amount",
-  "water_bill",
-  "electrical_bill",
-  "wifi_bill",
   "other_bills",
 ]);
 const BOOLEAN_FIELD_HINTS = new Set([
@@ -127,10 +211,7 @@ const paymentTotal = (payment: any) => {
 
   return (
     toNumber(payment?.rent_amount) +
-    toNumber(payment?.water_bill) +
-    toNumber(payment?.electrical_bill) +
     toNumber(payment?.other_bills) +
-    toNumber(payment?.wifi_bill) +
     toNumber(payment?.security_deposit_amount) +
     toNumber(payment?.advance_amount)
   );
@@ -296,6 +377,7 @@ export default function AdminDashboard() {
   const [bookings, setBookings] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [occupancies, setOccupancies] = useState<any[]>([]);
+  const [bugReports, setBugReports] = useState<any[]>([]);
 
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [editingProperty, setEditingProperty] = useState<any | null>(null);
@@ -340,6 +422,11 @@ export default function AdminDashboard() {
   const [maintenanceSearch, setMaintenanceSearch] = useState("");
   const [leaveRequests, setLeaveRequests] = useState<any[]>([]);
   const [leaveSearch, setLeaveSearch] = useState("");
+  const [bugSearch, setBugSearch] = useState("");
+  const [selectedTicket, setSelectedTicket] = useState<any | null>(null);
+  const [ticketComments, setTicketComments] = useState<any[]>([]);
+  const [commentBody, setCommentBody] = useState("");
+  const [commenting, setCommenting] = useState(false);
 
   const [remindersActive, setRemindersActive] = useState(true);
   const [sendingMonthly, setSendingMonthly] = useState(false);
@@ -438,12 +525,25 @@ export default function AdminDashboard() {
   const stats = useMemo(() => {
     return {
       users: users.length,
+      usersAdmin: users.filter(u => (u.role || "tenant").toLowerCase() === 'admin').length,
+      usersLandlord: users.filter(u => (u.role || "tenant").toLowerCase() === 'landlord').length,
+      usersTenant: users.filter(u => (u.role || "tenant").toLowerCase() === 'tenant').length,
       properties: properties.length,
+      propertiesAvailable: properties.filter(p => p.status === 'available').length,
+      propertiesOccupied: properties.filter(p => p.status === 'occupied').length,
       bookings: bookings.length,
+      bookingsCompleted: bookings.filter(b => b.status === 'completed' || b.status === 'approved').length,
       payments: payments.length,
       schedules: schedules.length,
       maintenance: maintenanceRequests.length,
+      maintenanceClosed: maintenanceRequests.filter(m => m.status === 'resolved' || m.status === 'closed').length,
       leaves: leaveRequests.length,
+      leavesApproved: leaveRequests.filter(l => l.end_request_status === 'approved').length,
+      bugReports: bugReports.length,
+      bugReportsClosed: bugReports.filter(b => b.status === 'resolved' || b.status === 'closed').length,
+      occupancies: occupancies.length,
+      occupanciesActive: occupancies.filter(o => o.status === 'active').length,
+      occupanciesEnded: occupancies.filter(o => o.status === 'ended').length,
     };
   }, [
     users,
@@ -453,6 +553,8 @@ export default function AdminDashboard() {
     schedules,
     maintenanceRequests,
     leaveRequests,
+    bugReports,
+    occupancies,
   ]);
 
   const filteredMaintenance = useMemo(() => {
@@ -521,6 +623,22 @@ export default function AdminDashboard() {
     });
   }, [properties, propertySearch]);
 
+  const filteredBugReports = useMemo(() => {
+    const query = bugSearch.trim().toLowerCase();
+    if (!query) return bugReports;
+    return bugReports.filter(
+      (b) =>
+        includesQuery(b.id, query) ||
+        includesQuery(b.subject, query) ||
+        includesQuery(b.description, query) ||
+        includesQuery(b.issue, query) ||
+        includesQuery(b.requester?.first_name, query) ||
+        includesQuery(b.requester?.last_name, query) ||
+        includesQuery(b.requester?.email, query) ||
+        includesQuery(b.status, query),
+    );
+  }, [bugReports, bugSearch]);
+
   const filteredBookings = useMemo(() => {
     const query = bookingSearch.trim().toLowerCase();
     if (!query) return bookings;
@@ -558,7 +676,7 @@ export default function AdminDashboard() {
     const query = occupancySearch.trim().toLowerCase();
     if (!query) return occupancies;
 
-    return occupancies.filter((occ) => {
+    return occupancies.filter((occ: any) => {
       const property = occ.property;
       const tenant = occ.tenant;
       return (
@@ -611,9 +729,12 @@ export default function AdminDashboard() {
         paymentsRes,
         occupanciesRes,
         subscriptionsRes,
+        landlordSubsRes,
         schedulesRes,
         maintenanceRes,
         leavesRes,
+        familyMembersRes,
+        bugReportsRes,
       ] = await Promise.all([
         supabase
           .from("profiles")
@@ -622,6 +743,7 @@ export default function AdminDashboard() {
         supabase
           .from("properties")
           .select("*")
+          .eq("is_deleted", false)
           .order("created_at", { ascending: false }),
         supabase
           .from("bookings")
@@ -643,6 +765,9 @@ export default function AdminDashboard() {
           .select("tenant_id, total_slots")
           .eq("plan_type", "family_slot_plan"),
         supabase
+          .from("landlord_subscriptions")
+          .select("landlord_id, total_slots, paid_slots"),
+        supabase
           .from("available_time_slots")
           .select("*")
           .order("start_time", { ascending: false }),
@@ -656,6 +781,11 @@ export default function AdminDashboard() {
             "*, property:properties(title), tenant:profiles!tenant_occupancies_tenant_id_fkey(first_name, last_name)",
           )
           .not("end_request_status", "is", null)
+          .order("created_at", { ascending: false }),
+        supabase.from("family_members").select("id, tenant_id"),
+        supabase
+          .from("support_tickets")
+          .select("*, requester:profiles!support_tickets_requester_id_fkey(first_name, last_name, email), claimed_by_profile:profiles!support_tickets_claimed_by_fkey(first_name, last_name, email)")
           .order("created_at", { ascending: false }),
       ]);
 
@@ -673,10 +803,49 @@ export default function AdminDashboard() {
         subsMap[sub.tenant_id] = sub;
       });
 
-      const usersWithSubs = (usersRes.data || []).map((u: any) => ({
-        ...u,
-        subscription: subsMap[u.id],
-      }));
+      const landlordSubsMap: any = {};
+      (landlordSubsRes?.data || []).forEach((sub: any) => {
+        landlordSubsMap[sub.landlord_id] = sub;
+      });
+
+      const familyMembers = familyMembersRes?.data || [];
+      const propertiesList = propsRes?.data || [];
+
+      const usersWithSubs = (usersRes.data || []).map((u: any) => {
+        // Calculate usage even if no sub record exists yet
+        const familyUsed = familyMembers.filter(
+          (m: any) => m.tenant_id === u.id,
+        ).length;
+        const propertiesUsed = propertiesList.filter(
+          (p: any) => p.landlord === u.id,
+        ).length;
+        const propertiesOccupied = propertiesList.filter(
+          (p: any) => p.landlord === u.id && p.status === "occupied",
+        ).length;
+
+        const sub = subsMap[u.id] || {
+          tenant_id: u.id,
+          total_slots: 1,
+          paid_slots: 0,
+          plan_type: "free",
+        };
+        const lSub = landlordSubsMap[u.id] || {
+          landlord_id: u.id,
+          total_slots: 3,
+          paid_slots: 0,
+          plan_type: "free",
+        };
+
+        sub.used = familyUsed;
+        lSub.used = propertiesUsed;
+        lSub.occupied = propertiesOccupied;
+
+        return {
+          ...u,
+          subscription: sub,
+          landlordSubscription: lSub,
+        };
+      });
 
       setUsers(usersWithSubs);
       setProperties(propsRes.data || []);
@@ -686,6 +855,7 @@ export default function AdminDashboard() {
       setSchedules(schedulesRes.data || []);
       setMaintenanceRequests(maintenanceRes.data || []);
       setLeaveRequests(leavesRes.data || []);
+      setBugReports(bugReportsRes?.data || []);
     } catch (error: any) {
       console.error(error);
       Alert.alert(
@@ -707,7 +877,9 @@ export default function AdminDashboard() {
       "available_time_slots",
       "maintenance_requests",
       "subscriptions",
+      "landlord_subscriptions",
       "family_members",
+      "support_tickets",
     ],
     () => {
       console.log("Admin Realtime update triggered");
@@ -720,13 +892,38 @@ export default function AdminDashboard() {
     setEditingUser(user);
     const form = serializeEditableForm(user, USER_EDIT_FIELDS);
     form["new_password"] = "";
-    form["accepted_payment"] = serializeValue(user.accepted_payment || false);
+
+    // Handle accepted_payments (JSON to CSV for UI)
+    let paymentsCSV = "";
+    if (user.accepted_payments) {
+      if (typeof user.accepted_payments === "object") {
+        const p = user.accepted_payments;
+        const active = [];
+        if (p.cash) active.push("Cash");
+        if (p.qr_code) active.push("QR Code");
+        if (p.paymongo) active.push("PayMongo");
+        if (p.stripe) active.push("Stripe");
+        paymentsCSV = active.join(",");
+      } else if (typeof user.accepted_payments === "string") {
+        paymentsCSV = user.accepted_payments;
+      }
+    }
+    form["accepted_payments"] = paymentsCSV;
+
     form["phone_verified"] = serializeValue(user.phone_verified || false);
     form["avatar_url"] = serializeValue(user.avatar_url || "");
 
     // Family slot subscription logic
     form["is_subscribed_family_plan"] = serializeValue(!!user.subscription);
     form["family_slots"] = serializeValue(user.subscription?.total_slots || 1);
+
+    // Landlord property slot logic
+    form["property_paid_slots"] = serializeValue(
+      user.landlordSubscription?.paid_slots || 0,
+    );
+    form["property_total_slots"] = serializeValue(
+      user.landlordSubscription?.total_slots || 3,
+    );
 
     setUserForm(form);
   };
@@ -759,6 +956,21 @@ export default function AdminDashboard() {
       delete payload.new_password;
       delete payload.is_subscribed_family_plan;
       delete payload.family_slots;
+      delete payload.property_paid_slots;
+      delete payload.property_total_slots;
+
+      // Handle accepted_payments (CSV to JSON for DB)
+      if (userForm.accepted_payments !== undefined) {
+        const methods = (userForm.accepted_payments || "")
+          .split(",")
+          .filter(Boolean);
+        payload.accepted_payments = {
+          cash: methods.includes("Cash"),
+          qr_code: methods.includes("QR Code"),
+          paymongo: methods.includes("PayMongo"),
+          stripe: methods.includes("Stripe"),
+        };
+      }
 
       // Update basic fields
       const { error } = await supabase
@@ -802,6 +1014,26 @@ export default function AdminDashboard() {
           .delete()
           .eq("tenant_id", editingUser.id)
           .eq("plan_type", "family_slot_plan");
+      }
+
+      // Update landlord property slots if applicable
+      if ((editingUser.role || "").toLowerCase() === "landlord") {
+        const propPaidSlots = Number(userForm.property_paid_slots) || 0;
+        const propTotalSlots = Number(userForm.property_total_slots) || 3;
+
+        delete payload.property_paid_slots;
+        delete payload.property_total_slots;
+
+        await supabase.from("landlord_subscriptions").upsert(
+          {
+            landlord_id: editingUser.id,
+            paid_slots: propPaidSlots,
+            total_slots: propTotalSlots,
+            plan_type: propPaidSlots > 0 ? "paid" : "free",
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "landlord_id" },
+        );
       }
 
       // Refresh everything to reflect correct state
@@ -1132,8 +1364,6 @@ export default function AdminDashboard() {
       status: payment.status,
       due_date: payment.due_date,
       rent_amount: String(payment.rent_amount || "0"),
-      water_bill: String(payment.water_bill || "0"),
-      electrical_bill: String(payment.electrical_bill || "0"),
     });
   };
 
@@ -1153,8 +1383,6 @@ export default function AdminDashboard() {
       status: "pending",
       due_date: new Date().toISOString().split("T")[0],
       rent_amount: "0",
-      water_bill: "0",
-      electrical_bill: "0",
       property_id: "",
       tenant: "",
       landlord: "",
@@ -1277,23 +1505,70 @@ export default function AdminDashboard() {
 
   const renderOverview = () => (
     <View style={styles.sectionWrap}>
-      <Text style={styles.sectionTitle}>Admin Overview</Text>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <View style={{ backgroundColor: "#111827", padding: 6, borderRadius: 8 }}>
+            <Ionicons name="pie-chart" size={16} color="#fff" />
+          </View>
+          <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Analytics Overview</Text>
+        </View>
+        <TouchableOpacity
+          style={{ backgroundColor: "#111827", paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 }}
+          onPress={() => setBulkEmailModal(true)}
+        >
+          <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Send Email</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Monitoring Section */}
 
-      <View style={styles.statsGrid}>
-        <StatCard label="Users" value={stats.users} icon="people-outline" />
-        <StatCard
-          label="Properties"
-          value={stats.properties}
-          icon="business-outline"
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+        <DonutChart
+          title="Total Users"
+          segments={[
+            { label: "Admin", value: stats.usersAdmin, color: "#9ca3af" },
+            { label: "Landlord", value: stats.usersLandlord, color: "#4b5563" },
+            { label: "Tenant", value: stats.usersTenant, color: "#111827" },
+          ]}
         />
-        <StatCard
-          label="Bookings"
-          value={stats.bookings}
-          icon="calendar-outline"
+        <DonutChart
+          title="Bookings"
+          segments={[
+            { label: "Completed", value: stats.bookingsCompleted, color: "#111827" },
+          ]}
         />
-        <StatCard label="Payments" value={stats.payments} icon="card-outline" />
+        <DonutChart
+          title="Properties"
+          segments={[
+            { label: "Available", value: stats.propertiesAvailable, color: "#111827" },
+            { label: "Occupied", value: stats.propertiesOccupied, color: "#4b5563" },
+          ]}
+        />
+        <DonutChart
+          title="Maintenance"
+          segments={[
+            { label: "Closed", value: stats.maintenanceClosed, color: "#111827" },
+          ]}
+        />
+        <DonutChart
+          title="Pending Tickets"
+          segments={[
+            { label: "Closed", value: stats.bugReportsClosed, color: "#111827" },
+          ]}
+        />
+        <DonutChart
+          title="Leave Pending"
+          segments={[
+            { label: "Approved", value: stats.leavesApproved, color: "#111827" },
+          ]}
+        />
+        <DonutChart
+          title="Active Occupancy"
+          segments={[
+            { label: "Active", value: stats.occupanciesActive, color: "#111827" },
+            { label: "Ended", value: stats.occupanciesEnded, color: "#4b5563" },
+          ]}
+        />
       </View>
 
       <View
@@ -1460,131 +1735,6 @@ export default function AdminDashboard() {
               </View>
             ))}
           </View>
-        </View>
-
-        {/* Payment Reminders Box */}
-        <View
-          style={{
-            backgroundColor: "#f9fafb",
-            borderRadius: 12,
-            padding: 16,
-            marginBottom: 12,
-            borderWidth: 1,
-            borderColor: "#f3f4f6",
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <View style={{ flex: 1, paddingRight: 10 }}>
-            <Text style={{ fontSize: 16, fontWeight: "800", color: "#111827" }}>
-              Payment Reminders
-            </Text>
-            <Text style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>
-              Automatically email/SMS tenants about upcoming due dates.
-            </Text>
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                marginTop: 8,
-              }}
-            >
-              <View
-                style={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: 5,
-                  backgroundColor: remindersActive ? "#10b981" : "#9ca3af",
-                  marginRight: 6,
-                }}
-              />
-              <Text
-                style={{
-                  fontSize: 12,
-                  fontWeight: "800",
-                  color: remindersActive ? "#047857" : "#6b7280",
-                }}
-              >
-                {remindersActive ? "ACTIVE" : "INACTIVE"}
-              </Text>
-            </View>
-          </View>
-          <TouchableOpacity
-            style={{
-              backgroundColor: remindersActive ? "#fef2f2" : "#ecfdf5",
-              borderWidth: 1,
-              borderColor: remindersActive ? "#fecaca" : "#a7f3d0",
-              paddingHorizontal: 16,
-              paddingVertical: 10,
-              borderRadius: 8,
-            }}
-            onPress={() => setRemindersActive(!remindersActive)}
-          >
-            <Text
-              style={{
-                color: remindersActive ? "#dc2626" : "#059669",
-                fontWeight: "800",
-                fontSize: 13,
-              }}
-            >
-              {remindersActive ? "Stop Reminders" : "Start Reminders"}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Bulk Email Box */}
-        <View
-          style={{
-            backgroundColor: "#f9fafb",
-            borderRadius: 12,
-            padding: 16,
-            borderWidth: 1,
-            borderColor: "#f3f4f6",
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <View style={{ flex: 1, paddingRight: 10 }}>
-            <Text style={{ fontSize: 16, fontWeight: "800", color: "#111827" }}>
-              Bulk Email
-            </Text>
-            <Text style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>
-              Compose and send one message to multiple email recipients.
-            </Text>
-            <View
-              style={{
-                backgroundColor: "#fff",
-                alignSelf: "flex-start",
-                paddingHorizontal: 10,
-                paddingVertical: 6,
-                borderRadius: 8,
-                marginTop: 10,
-                borderWidth: 1,
-                borderColor: "#e5e7eb",
-              }}
-            >
-              <Text
-                style={{ fontSize: 11, color: "#6b7280", fontWeight: "600" }}
-              >
-                Add recipients separated by comma, semicolon, or new line
-              </Text>
-            </View>
-          </View>
-          <TouchableOpacity
-            style={{
-              backgroundColor: "#111827",
-              paddingHorizontal: 16,
-              paddingVertical: 10,
-              borderRadius: 8,
-            }}
-            onPress={() => setBulkEmailModal(true)}
-          >
-            <Text style={{ color: "#fff", fontWeight: "800", fontSize: 13 }}>
-              Compose Bulk Email
-            </Text>
-          </TouchableOpacity>
         </View>
 
         {bulkEmailModal && (
@@ -2108,6 +2258,303 @@ export default function AdminDashboard() {
     </View>
   );
 
+  const deleteBug = (id: string) => {
+    Alert.alert("Confirm", "Delete this ticket?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const { error } = await supabase
+              .from("support_tickets")
+              .delete()
+              .eq("id", id);
+            if (error) throw error;
+            loadAllData(true);
+          } catch (err: any) {
+            Alert.alert("Error", err.message);
+          }
+        },
+      },
+    ]);
+  };
+
+  const updateBugStatus = async (id: string, newStatus: string) => {
+    try {
+      const { error } = await supabase
+        .from("support_tickets")
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq("id", id);
+      if (error) throw error;
+      loadAllData(true);
+    } catch (err: any) {
+      Alert.alert("Error", err.message);
+    }
+  };
+
+  const claimTicket = async (id: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+      if (!userId) throw new Error("Not authenticated");
+      const { error } = await supabase
+        .from("support_tickets")
+        .update({ 
+          claimed_by: userId, 
+          claimed_at: new Date().toISOString(), 
+          status: 'in_progress',
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", id);
+      if (error) throw error;
+      loadAllData(true);
+      if (selectedTicket && selectedTicket.id === id) {
+        setSelectedTicket({ ...selectedTicket, claimed_by: userId, status: 'in_progress' });
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err.message);
+    }
+  };
+
+  const openTicketModal = async (ticket: any) => {
+    setSelectedTicket(ticket);
+    setTicketComments([]);
+    try {
+      const { data, error } = await supabase
+        .from("support_ticket_comments")
+        .select("*, author:profiles!support_ticket_comments_author_id_fkey(first_name, last_name, role)")
+        .eq("ticket_id", ticket.id)
+        .order("created_at", { ascending: true });
+      if (!error && data) {
+        setTicketComments(data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const submitTicketComment = async () => {
+    if (!commentBody.trim() || !selectedTicket) return;
+    setCommenting(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+      if (!userId) throw new Error("Not authenticated");
+      const { error } = await supabase
+        .from("support_ticket_comments")
+        .insert({
+          ticket_id: selectedTicket.id,
+          author_id: userId,
+          body: commentBody.trim()
+        });
+      if (error) throw error;
+      setCommentBody("");
+      openTicketModal(selectedTicket);
+    } catch (err: any) {
+      Alert.alert("Error", err.message);
+    } finally {
+      setCommenting(false);
+    }
+  };
+
+  const renderPendingTickets = () => (
+    <View style={styles.sectionWrap}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <View>
+          <Text style={{ fontSize: 24, fontWeight: "900", color: "#111827" }}>Pending Tickets</Text>
+          <Text style={{ fontSize: 14, color: "#6b7280", marginTop: 4 }}>Review, claim, and resolve Help Center requests.</Text>
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <TextInput
+            style={{ borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 8, paddingHorizontal: 16, paddingVertical: 10, minWidth: 200, backgroundColor: "#fff" }}
+            value={bugSearch}
+            onChangeText={(text) => {
+              setBugSearch(text);
+              setCurrentPage(1);
+            }}
+            placeholder="Search request..."
+            placeholderTextColor="#9ca3af"
+          />
+          <View style={{ borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 8, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: "#f9fafb" }}>
+            <Text style={{ fontSize: 14, color: "#111827", fontWeight: "600" }}>All Status</Text>
+          </View>
+        </View>
+      </View>
+
+      {filteredBugReports.length === 0 && (
+        <Text style={styles.emptyText}>No pending tickets found.</Text>
+      )}
+
+      {filteredBugReports.length > 0 && (
+        <View style={{ marginTop: 8 }}>
+          {filteredBugReports
+            .slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE)
+            .map((bug) => (
+              <TouchableOpacity
+                key={bug.id}
+                style={styles.listItem}
+                onPress={() => openTicketModal(bug)}
+              >
+                <View style={styles.itemMain}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <Text style={[styles.itemTitle, { flex: 1, marginRight: 8 }]} numberOfLines={2}>{bug.subject || "Request"}</Text>
+                    <View
+                      style={{
+                        backgroundColor: bug.status === 'resolved' || bug.status === 'closed' ? '#dcfce7' : bug.status === 'in_progress' ? '#fef9c3' : '#fee2e2',
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        borderRadius: 6,
+                      }}
+                    >
+                      <Text style={{ fontSize: 10, fontWeight: "bold", color: bug.status === 'resolved' || bug.status === 'closed' ? '#166534' : bug.status === 'in_progress' ? '#854d0e' : '#991b1b' }}>
+                        {bug.status === 'resolved' || bug.status === 'closed' ? 'Closed' : (bug.status || "PENDING").toUpperCase().replace('_', ' ')}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.itemSubtitle}>
+                    {bug.requester ? `${bug.requester.first_name || ''} ${bug.requester.last_name || ''}`.trim() : "Unknown User"} • {bug.request_type || bug.issue || "Support"}
+                  </Text>
+                  <Text style={[styles.itemMeta, { marginTop: 4, color: "#4b5563" }]} numberOfLines={2}>
+                    {bug.description}
+                  </Text>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 12 }}>
+                    <Text style={[styles.itemMeta, { fontSize: 11 }]}>
+                      Claimed: {bug.claimed_by_profile ? `${bug.claimed_by_profile.first_name || ''} ${bug.claimed_by_profile.last_name || ''}`.trim() : "No"}
+                    </Text>
+                    <Text style={[styles.itemMeta, { fontSize: 11 }]}>
+                      {new Date(bug.created_at).toLocaleDateString()}
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))}
+        </View>
+      )}
+
+      <Modal visible={!!selectedTicket} transparent animationType="slide">
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
+          <View style={{ backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: "90%" }}>
+            {selectedTicket && (
+              <>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                  <View style={{ flex: 1, paddingRight: 16 }}>
+                    <Text style={{ fontSize: 20, fontWeight: "900", color: "#111827", marginBottom: 4 }}>{selectedTicket.subject}</Text>
+                    <Text style={{ fontSize: 12, color: "#6b7280", fontFamily: "monospace" }}>#{selectedTicket.id.substring(0, 8).toUpperCase()}</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => setSelectedTicket(null)} style={{ padding: 8, backgroundColor: "#f3f4f6", borderRadius: 20 }}>
+                    <Ionicons name="close" size={20} color="#4b5563" />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+                  <View style={{ backgroundColor: "#f9fafb", borderRadius: 16, padding: 16, marginBottom: 16 }}>
+                    <Text style={{ fontSize: 14, color: "#374151", lineHeight: 22 }}>{selectedTicket.description}</Text>
+                  </View>
+
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12, marginBottom: 24 }}>
+                    <View style={{ backgroundColor: "#f3f4f6", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
+                      <Text style={{ fontSize: 10, fontWeight: "700", color: "#6b7280", marginBottom: 2 }}>REQUESTER</Text>
+                      <Text style={{ fontSize: 13, fontWeight: "700", color: "#111827" }}>{selectedTicket.requester ? `${selectedTicket.requester.first_name || ''} ${selectedTicket.requester.last_name || ''}`.trim() : "Unknown"}</Text>
+                    </View>
+                    <View style={{ backgroundColor: "#f3f4f6", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
+                      <Text style={{ fontSize: 10, fontWeight: "700", color: "#6b7280", marginBottom: 2 }}>TYPE</Text>
+                      <Text style={{ fontSize: 13, fontWeight: "700", color: "#111827" }}>{selectedTicket.request_type || selectedTicket.issue || "Support"}</Text>
+                    </View>
+                    <View style={{ backgroundColor: "#f3f4f6", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
+                      <Text style={{ fontSize: 10, fontWeight: "700", color: "#6b7280", marginBottom: 2 }}>CREATED</Text>
+                      <Text style={{ fontSize: 13, fontWeight: "700", color: "#111827" }}>{new Date(selectedTicket.created_at).toLocaleDateString()}</Text>
+                    </View>
+                  </View>
+
+                  <View style={{ marginBottom: 24 }}>
+                    <Text style={{ fontSize: 14, fontWeight: "800", color: "#111827", marginBottom: 12 }}>Comments</Text>
+                    {ticketComments.length === 0 ? (
+                      <Text style={{ fontSize: 13, color: "#9ca3af", fontStyle: "italic" }}>No comments yet.</Text>
+                    ) : (
+                      ticketComments.map((comment, i) => (
+                        <View key={i} style={{ backgroundColor: "#f9fafb", padding: 12, borderRadius: 12, marginBottom: 8 }}>
+                          <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                            <Text style={{ fontSize: 12, fontWeight: "700", color: "#374151" }}>{comment.author ? `${comment.author.first_name || ''} ${comment.author.last_name || ''}`.trim() : "Someone"}</Text>
+                            <Text style={{ fontSize: 10, color: "#9ca3af" }}>{new Date(comment.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</Text>
+                          </View>
+                          <Text style={{ fontSize: 13, color: "#111827", lineHeight: 20 }}>{comment.body}</Text>
+                        </View>
+                      ))
+                    )}
+                  </View>
+
+                  {selectedTicket.status !== 'closed' && selectedTicket.status !== 'resolved' && (
+                    <View style={{ marginBottom: 24 }}>
+                      <TextInput
+                        style={{ backgroundColor: "#f9fafb", borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 12, padding: 16, fontSize: 14, minHeight: 100 }}
+                        placeholder="Write a reply..."
+                        multiline
+                        textAlignVertical="top"
+                        value={commentBody}
+                        onChangeText={setCommentBody}
+                      />
+                      <TouchableOpacity
+                        style={{ backgroundColor: "#111", paddingVertical: 12, borderRadius: 12, marginTop: 12, alignItems: "center" }}
+                        disabled={commenting || !commentBody.trim()}
+                        onPress={submitTicketComment}
+                      >
+                        <Text style={{ color: "#fff", fontSize: 14, fontWeight: "bold" }}>{commenting ? "Sending..." : "Send Reply"}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  <View style={{ borderTopWidth: 1, borderColor: "#e5e7eb", paddingTop: 24, gap: 12 }}>
+                    {!selectedTicket.claimed_by && (
+                      <TouchableOpacity
+                        style={{ backgroundColor: "#111", paddingVertical: 14, borderRadius: 12, alignItems: "center" }}
+                        onPress={() => claimTicket(selectedTicket.id)}
+                      >
+                        <Text style={{ color: "#fff", fontSize: 14, fontWeight: "bold" }}>Claim Ticket</Text>
+                      </TouchableOpacity>
+                    )}
+                    
+                    <View style={{ flexDirection: "row", gap: 12 }}>
+                      <TouchableOpacity
+                        style={{ flex: 1, backgroundColor: "#fef9c3", paddingVertical: 14, borderRadius: 12, alignItems: "center" }}
+                        onPress={() => {
+                          updateBugStatus(selectedTicket.id, "in_progress");
+                          setSelectedTicket({ ...selectedTicket, status: "in_progress" });
+                        }}
+                      >
+                        <Text style={{ color: "#854d0e", fontSize: 14, fontWeight: "bold" }}>Mark In Progress</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={{ flex: 1, backgroundColor: "#dcfce7", paddingVertical: 14, borderRadius: 12, alignItems: "center" }}
+                        onPress={() => {
+                          updateBugStatus(selectedTicket.id, "resolved");
+                          setSelectedTicket({ ...selectedTicket, status: "resolved" });
+                        }}
+                      >
+                        <Text style={{ color: "#166534", fontSize: 14, fontWeight: "bold" }}>Mark Resolved</Text>
+                      </TouchableOpacity>
+                    </View>
+                    
+                    <TouchableOpacity
+                      style={{ backgroundColor: "#fee2e2", paddingVertical: 14, borderRadius: 12, alignItems: "center", marginTop: 12 }}
+                      onPress={() => {
+                        setSelectedTicket(null);
+                        deleteBug(selectedTicket.id);
+                      }}
+                    >
+                      <Text style={{ color: "#991b1b", fontSize: 14, fontWeight: "bold" }}>Delete Ticket</Text>
+                    </TouchableOpacity>
+                  </View>
+                </ScrollView>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+      {renderPagination(filteredBugReports.length)}
+    </View>
+  );
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -2138,7 +2585,17 @@ export default function AdminDashboard() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.contentWrap}>
+      <ScrollView
+        contentContainerStyle={styles.contentWrap}
+        refreshControl={
+          <RefreshControl
+            refreshing={loading}
+            onRefresh={() => loadAllData()}
+            tintColor="#111"
+            colors={["#111"]}
+          />
+        }
+      >
         {activeTab === "Overview" && renderOverview()}
         {activeTab === "User" && renderUsers()}
         {activeTab === "Properties" && renderProperties()}
@@ -2148,6 +2605,7 @@ export default function AdminDashboard() {
         {activeTab === "Schedules" && renderSchedules()}
         {activeTab === "Maintenance" && renderMaintenance()}
         {activeTab === "Leave Monitoring" && renderLeaves()}
+        {activeTab === "Pending Tickets" && renderPendingTickets()}
       </ScrollView>
 
       <View
@@ -2172,6 +2630,7 @@ export default function AdminDashboard() {
               "Schedules",
               "Maintenance",
               "Leave Monitoring",
+              "Pending Tickets",
             ] as AdminTab[]
           ).map((tab) => (
             <TouchableOpacity
@@ -2310,7 +2769,7 @@ export default function AdminDashboard() {
                   }}
                 >
                   {["Cash", "QR Code", "PayMongo", "Stripe"].map((method) => {
-                    const checked = (userForm.accepted_payment || "").includes(
+                    const checked = (userForm.accepted_payments || "").includes(
                       method,
                     );
                     return (
@@ -2323,22 +2782,22 @@ export default function AdminDashboard() {
                           marginBottom: 10,
                         }}
                         onPress={() => {
-                          const currentArray = userForm.accepted_payment
-                            ? userForm.accepted_payment
+                          const currentArray = userForm.accepted_payments
+                            ? userForm.accepted_payments
                                 .split(",")
                                 .filter(Boolean)
                             : [];
                           if (currentArray.includes(method)) {
                             setUserForm((prev) => ({
                               ...prev,
-                              accepted_payment: currentArray
+                              accepted_payments: currentArray
                                 .filter((m) => m !== method)
                                 .join(","),
                             }));
                           } else {
                             setUserForm((prev) => ({
                               ...prev,
-                              accepted_payment: [...currentArray, method].join(
+                              accepted_payments: [...currentArray, method].join(
                                 ",",
                               ),
                             }));
@@ -2365,61 +2824,249 @@ export default function AdminDashboard() {
                 </View>
               </View>
 
-              <View style={{ marginBottom: 16 }}>
-                <Text style={[styles.fieldLabel, { fontSize: 13 }]}>
-                  Family Subscription
-                </Text>
-                <View
-                  style={{
-                    borderWidth: 1,
-                    borderColor: "#e5e7eb",
-                    borderRadius: 12,
-                    padding: 14,
-                    backgroundColor: "#f9fafb",
-                  }}
-                >
-                  <Text
-                    style={{ fontSize: 15, fontWeight: "800", color: "#111" }}
-                  >
-                    Subscribed
+              {(editingUser?.role || "").toLowerCase() === "tenant" && (
+                <View style={{ marginBottom: 16 }}>
+                  <Text style={[styles.fieldLabel, { fontSize: 13 }]}>
+                    Family Subscription
                   </Text>
-                  <Text
-                    style={{ color: "#4b5563", fontSize: 12, marginTop: 4 }}
-                  >
-                    Slots: {editingUser?.subscription?.used || 0}/
-                    {Number(userForm.family_slots) || 0} used
-                  </Text>
-                  <Text style={{ color: "#4b5563", fontSize: 12 }}>
-                    Available: {Number(userForm.family_slots) || 0}
-                  </Text>
-
-                  <TouchableOpacity
+                  <View
                     style={{
-                      backgroundColor: "#111",
-                      alignSelf: "flex-start",
-                      paddingHorizontal: 14,
-                      paddingVertical: 8,
-                      borderRadius: 8,
-                      marginTop: 12,
+                      borderWidth: 1,
+                      borderColor: "#e5e7eb",
+                      borderRadius: 12,
+                      padding: 14,
+                      backgroundColor: "#f9fafb",
                     }}
-                    onPress={() =>
-                      setUserForm((prev) => ({
-                        ...prev,
-                        is_subscribed_family_plan: "true",
-                        family_slots: String(
-                          (Number(prev.family_slots) || 0) + 1,
-                        ),
-                      }))
-                    }
                   >
                     <Text
-                      style={{ color: "#fff", fontWeight: "800", fontSize: 12 }}
+                      style={{ fontSize: 15, fontWeight: "800", color: "#111" }}
                     >
-                      Add Family Slot
+                      Subscribed
                     </Text>
-                  </TouchableOpacity>
+                    <Text
+                      style={{ color: "#4b5563", fontSize: 13, marginTop: 4 }}
+                    >
+                      Active Family: {editingUser?.subscription?.used || 0}
+                    </Text>
+                    <Text style={{ color: "#4b5563", fontSize: 13 }}>
+                      Total Slots: {Number(userForm.family_slots) || 1}
+                    </Text>
+                    <Text style={{ color: "#4b5563", fontSize: 13 }}>
+                      Available:{" "}
+                      {Math.max(
+                        0,
+                        (Number(userForm.family_slots) || 1) -
+                          (editingUser?.subscription?.used || 0),
+                      )}
+                    </Text>
+
+                    <View
+                      style={{ flexDirection: "row", gap: 8, marginTop: 12 }}
+                    >
+                      <TouchableOpacity
+                        style={{
+                          backgroundColor:
+                            (Number(userForm.family_slots) || 0) <= 1
+                              ? "#9ca3af"
+                              : "#dc2626",
+                          paddingHorizontal: 14,
+                          paddingVertical: 8,
+                          borderRadius: 8,
+                        }}
+                        disabled={(Number(userForm.family_slots) || 0) <= 1}
+                        onPress={() => {
+                          const currentSlots =
+                            Number(userForm.family_slots) || 0;
+                          const used = editingUser?.subscription?.used || 0;
+                          if (currentSlots - 1 < used) {
+                            Alert.alert(
+                              "Cannot Remove",
+                              `This tenant has ${used} active family members. You cannot reduce slots below this number.`,
+                            );
+                            return;
+                          }
+                          setUserForm((prev) => ({
+                            ...prev,
+                            family_slots: String(
+                              Math.max(1, (Number(prev.family_slots) || 0) - 1),
+                            ),
+                          }));
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: "#fff",
+                            fontWeight: "800",
+                            fontSize: 12,
+                          }}
+                        >
+                          − Remove Slot
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={{
+                          backgroundColor: "#111",
+                          paddingHorizontal: 14,
+                          paddingVertical: 8,
+                          borderRadius: 8,
+                        }}
+                        onPress={() =>
+                          setUserForm((prev) => ({
+                            ...prev,
+                            is_subscribed_family_plan: "true",
+                            family_slots: String(
+                              (Number(prev.family_slots) || 0) + 1,
+                            ),
+                          }))
+                        }
+                      >
+                        <Text
+                          style={{
+                            color: "#fff",
+                            fontWeight: "800",
+                            fontSize: 12,
+                          }}
+                        >
+                          + Add Slot
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
                 </View>
-              </View>
+              )}
+
+              {(editingUser?.role || "").toLowerCase() === "landlord" && (
+                <View style={{ marginBottom: 16 }}>
+                  <Text style={[styles.fieldLabel, { fontSize: 13 }]}>
+                    Property Slots
+                  </Text>
+                  <View
+                    style={{
+                      borderWidth: 1,
+                      borderColor: "#e5e7eb",
+                      borderRadius: 12,
+                      padding: 14,
+                      backgroundColor: "#f9fafb",
+                    }}
+                  >
+                    <Text
+                      style={{ fontSize: 15, fontWeight: "800", color: "#111" }}
+                    >
+                      {(Number(userForm.property_paid_slots) || 0) > 0
+                        ? "Paid Plan"
+                        : "Free Plan"}
+                    </Text>
+                    <Text
+                      style={{ color: "#4b5563", fontSize: 13, marginTop: 4 }}
+                    >
+                      Occupied:{" "}
+                      {editingUser?.landlordSubscription?.occupied || 0}
+                    </Text>
+                    <Text style={{ color: "#4b5563", fontSize: 13 }}>
+                      Total Properties:{" "}
+                      {editingUser?.landlordSubscription?.used || 0}
+                    </Text>
+                    <Text style={{ color: "#4b5563", fontSize: 13 }}>
+                      Total Slots: {Number(userForm.property_total_slots) || 3}
+                    </Text>
+                    <Text style={{ color: "#4b5563", fontSize: 13 }}>
+                      Available:{" "}
+                      {Math.max(
+                        0,
+                        (Number(userForm.property_total_slots) || 3) -
+                          (editingUser?.landlordSubscription?.used || 0),
+                      )}
+                    </Text>
+
+                    <View
+                      style={{ flexDirection: "row", gap: 8, marginTop: 12 }}
+                    >
+                      <TouchableOpacity
+                        style={{
+                          backgroundColor:
+                            (Number(userForm.property_total_slots) || 3) <= 3
+                              ? "#9ca3af"
+                              : "#dc2626",
+                          paddingHorizontal: 14,
+                          paddingVertical: 8,
+                          borderRadius: 8,
+                        }}
+                        disabled={
+                          (Number(userForm.property_total_slots) || 3) <= 3
+                        }
+                        onPress={() => {
+                          const currentSlots =
+                            Number(userForm.property_total_slots) || 3;
+                          const occupied =
+                            editingUser?.landlordSubscription?.occupied || 0;
+                          if (currentSlots - 1 < occupied) {
+                            Alert.alert(
+                              "Cannot Remove",
+                              `This landlord has ${occupied} OCCUPIED properties. You cannot reduce slots below the number of active tenants.`,
+                            );
+                            return;
+                          }
+                          setUserForm((prev) => {
+                            const newPaid = Math.max(
+                              0,
+                              (Number(prev.property_paid_slots) || 0) - 1,
+                            );
+                            return {
+                              ...prev,
+                              property_paid_slots: String(newPaid),
+                              property_total_slots: String(
+                                Math.max(3, 3 + newPaid),
+                              ),
+                            };
+                          });
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: "#fff",
+                            fontWeight: "800",
+                            fontSize: 12,
+                          }}
+                        >
+                          − Remove Slot
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={{
+                          backgroundColor: "#111",
+                          paddingHorizontal: 14,
+                          paddingVertical: 8,
+                          borderRadius: 8,
+                        }}
+                        onPress={() =>
+                          setUserForm((prev) => ({
+                            ...prev,
+                            property_paid_slots: String(
+                              (Number(prev.property_paid_slots) || 0) + 1,
+                            ),
+                            property_total_slots: String(
+                              Math.min(
+                                10,
+                                3 + (Number(prev.property_paid_slots) || 0) + 1,
+                              ),
+                            ),
+                          }))
+                        }
+                      >
+                        <Text
+                          style={{
+                            color: "#fff",
+                            fontWeight: "800",
+                            fontSize: 12,
+                          }}
+                        >
+                          + Add Slot
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+              )}
 
               <View style={{ flexDirection: "row", gap: 12, marginBottom: 16 }}>
                 <View style={{ flex: 1 }}>
@@ -2563,9 +3210,11 @@ export default function AdminDashboard() {
               {Object.keys(userForm).map((field) => {
                 if (
                   [
-                    "accepted_payment",
+                    "accepted_payments",
                     "is_subscribed_family_plan",
                     "family_slots",
+                    "property_paid_slots",
+                    "property_total_slots",
                     "birthday",
                     "gender",
                   ].includes(field)
@@ -3834,28 +4483,7 @@ export default function AdminDashboard() {
                   }
                 />
               </View>
-              <View style={styles.fieldWrap}>
-                <Text style={styles.fieldLabel}>Water Bill</Text>
-                <TextInput
-                  style={styles.input}
-                  value={paymentForm.water_bill}
-                  keyboardType="numeric"
-                  onChangeText={(v) =>
-                    setPaymentForm({ ...paymentForm, water_bill: v })
-                  }
-                />
-              </View>
-              <View style={styles.fieldWrap}>
-                <Text style={styles.fieldLabel}>Electrical Bill</Text>
-                <TextInput
-                  style={styles.input}
-                  value={paymentForm.electrical_bill}
-                  keyboardType="numeric"
-                  onChangeText={(v) =>
-                    setPaymentForm({ ...paymentForm, electrical_bill: v })
-                  }
-                />
-              </View>
+
               <View style={styles.fieldWrap}>
                 <Text style={styles.fieldLabel}>Status</Text>
                 <TextInput
@@ -4097,16 +4725,6 @@ export default function AdminDashboard() {
         </View>
       </Modal>
     </SafeAreaView>
-  );
-}
-
-function StatCard({ label, value, icon }: any) {
-  return (
-    <View style={styles.statCard}>
-      <Ionicons name={icon} size={20} color="#111" />
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
   );
 }
 

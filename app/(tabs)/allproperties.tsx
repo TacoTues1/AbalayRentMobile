@@ -21,6 +21,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+
 import { SafeAreaView } from "react-native-safe-area-context";
 import WebViewMap from "../../components/WebViewMap";
 import { supabase } from "../../lib/supabase";
@@ -29,6 +30,18 @@ import { useTheme } from "../../lib/theme";
 const { width } = Dimensions.get("window");
 const ALL_PROPERTIES_PAGE_SIZE = 6;
 const ALL_PROPERTIES_LOADING_SKELETON_COUNT = 6;
+
+const getApiBaseUrl = () => {
+  const raw = (process.env.EXPO_PUBLIC_API_URL || "").trim();
+  if (!raw) return "";
+
+  const withoutTrailingSlash = raw.endsWith("/") ? raw.slice(0, -1) : raw;
+  if (Platform.OS === "android" && withoutTrailingSlash.includes("localhost")) {
+    return withoutTrailingSlash.replace("localhost", "10.0.2.2");
+  }
+
+  return withoutTrailingSlash;
+};
 
 function SkeletonBlock({
   width = "100%",
@@ -356,11 +369,37 @@ export default function AllProperties() {
         )
         .eq("is_deleted", false);
 
-      // Always show available properties for browsing
-      query = query.eq("status", "available");
-
       const { data: props, error } = await query;
       if (error) throw error;
+
+      // Fetch upcoming availability dates securely via Edge Function (bypasses RLS)
+      const occupiedPropertyIds = (props || [])
+        .filter((p: any) => String(p?.status || "").toLowerCase() === "occupied")
+        .map((p: any) => p.id)
+        .filter(Boolean);
+
+      let availabilityMap: Record<string, string> = {};
+      if (occupiedPropertyIds.length > 0) {
+        try {
+          const { data, error } = await supabase.functions.invoke("property-availability", {
+            body: { propertyIds: occupiedPropertyIds },
+          });
+          if (!error && data?.availability) {
+            availabilityMap = data.availability;
+          }
+        } catch (err) {
+          console.error("Error fetching upcoming availability from Edge Function:", err);
+        }
+      }
+
+      const filteredProps = (props || [])
+        .map((p: any) => {
+          if (String(p?.status || "").toLowerCase() === "available") return p;
+          const upcomingDate = availabilityMap[p.id];
+          if (!upcomingDate) return null;
+          return { ...p, upcoming_available_date: upcomingDate };
+        })
+        .filter(Boolean);
 
       // 2. Fetch Stats (Ratings, Counts)
       const { data: stats } = await supabase.from("property_stats").select("*");
@@ -381,7 +420,7 @@ export default function AllProperties() {
         if (favs) setFavorites(favs.map((f: any) => f.property_id));
       }
 
-      setProperties(props || []);
+      setProperties(filteredProps);
     } catch (err: any) {
       console.error("Error loading properties:", err.message);
     } finally {
@@ -765,6 +804,46 @@ export default function AllProperties() {
             colors={["transparent", "rgba(0,0,0,0.7)"]}
             style={styles.gradient}
           />
+
+          <View style={styles.badgeContainer}>
+            <View
+              style={[
+                styles.badge,
+                item.status === "available"
+                  ? styles.badgeAvailable
+                  : styles.badgeOccupied,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.badgeText,
+                  item.status === "available"
+                    ? styles.textDark
+                    : styles.textWhite,
+                ]}
+              >
+                {(() => {
+                  if (item.status === "available") return "Available";
+
+                  if (item.upcoming_available_date) {
+                    const endDate = new Date(item.upcoming_available_date);
+                    endDate.setHours(0, 0, 0, 0);
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const diffDays = Math.max(0, Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+
+                    if (diffDays > 0) {
+                      const dayLabel = diffDays === 1 ? "day" : "days";
+                      return `Will be available in ${diffDays} ${dayLabel}`;
+                    } else {
+                      return "Available today";
+                    }
+                  }
+                  return "Occupied";
+                })()}
+              </Text>
+            </View>
+          </View>
 
           {/* Actions */}
           <View style={styles.actionsContainer}>
@@ -1716,19 +1795,24 @@ const styles = StyleSheet.create({
     left: 8,
     flexDirection: "column",
     gap: 4,
-    right: 40,
+    alignItems: "flex-start",
   },
   badge: {
-    paddingHorizontal: 6,
-    paddingVertical: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 6,
+    marginBottom: 4,
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.05)",
-    alignSelf: "flex-start",
+
   },
-  badgeText: { fontSize: 8, fontWeight: "bold" },
+  badgeText: { fontSize: 8, fontWeight: "bold", textTransform: "uppercase" },
+  textDark: { color: "black" },
+  textWhite: { color: "white" },
+  badgeAvailable: { backgroundColor: "white" },
+  badgeOccupied: { backgroundColor: "rgba(0,0,0,0.8)" },
 
   actionsContainer: {
     position: "absolute",

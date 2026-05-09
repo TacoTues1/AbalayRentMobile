@@ -692,9 +692,25 @@ export default function AddFamilyPage() {
             0,
           ),
         );
-        const totalSlots = getTotalFamilySlotCount(paidExtra);
+        const confirmedPurchases = await readConfirmedFamilySlotPurchases();
+        const localPaidExtra = normalizePaidExtraSlotCount(
+          confirmedPurchases
+            .filter(
+              (purchase: any) =>
+                String(purchase?.ownerUserId || "") === String(ownerUserId),
+            )
+            .reduce(
+              (sum: number, purchase: any) =>
+                sum + Math.max(0, Math.floor(Number(purchase?.slots) || 0)),
+              0,
+            ),
+        );
+        const mergedPaidExtra = normalizePaidExtraSlotCount(
+          Math.max(paidExtra, localPaidExtra),
+        );
+        const totalSlots = getTotalFamilySlotCount(mergedPaidExtra);
         let next = {
-          paidExtra,
+          paidExtra: mergedPaidExtra,
           total: totalSlots,
           remaining: Math.max(0, totalSlots - memberCount),
         };
@@ -716,7 +732,12 @@ export default function AddFamilyPage() {
         setLoadingSlots(false);
       }
     },
-    [fetchRowsByUserColumn, hasPaidStatus, toNumber],
+    [
+      fetchRowsByUserColumn,
+      hasPaidStatus,
+      readConfirmedFamilySlotPurchases,
+      toNumber,
+    ],
   );
 
   const applyFamilySlotPaidExtraTotal = useCallback(
@@ -1410,6 +1431,14 @@ export default function AddFamilyPage() {
         if (error) {
           const message = await extractEdgeFunctionErrorMessage(error);
           console.log("paymongo-family-slot-verify failed:", message);
+
+          if (
+            message
+              .toLowerCase()
+              .includes("could not save the paid family slot")
+          ) {
+            return "paid_save_failed";
+          }
         }
       } catch {
         // Function not deployed or temporarily unavailable.
@@ -1459,6 +1488,7 @@ export default function AddFamilyPage() {
         const completePendingCheckout = async (
           message: string,
           options?: {
+            forceLocalSlotCredit?: boolean;
             requireLocalRecord?: boolean;
           },
         ) => {
@@ -1476,7 +1506,7 @@ export default function AddFamilyPage() {
             }
           }
 
-          await persistConfirmedFamilySlotPurchase({
+          const localPaidExtraTotal = await persistConfirmedFamilySlotPurchase({
             ownerUserId: checkout.ownerUserId,
             slots: checkout.slots,
             amount: checkout.amount,
@@ -1491,10 +1521,16 @@ export default function AddFamilyPage() {
               checkout.ownerUserId,
               familyMembers.length,
             );
-          } catch (summaryError) {
-            if (options?.requireLocalRecord) {
+            if (options?.forceLocalSlotCredit) {
               applyFamilySlotPaidExtraTotal(
-                familySlotSummary.paidExtra + checkout.slots,
+                localPaidExtraTotal,
+                familyMembers.length,
+              );
+            }
+          } catch (summaryError) {
+            if (options?.requireLocalRecord || options?.forceLocalSlotCredit) {
+              applyFamilySlotPaidExtraTotal(
+                localPaidExtraTotal || familySlotSummary.paidExtra + checkout.slots,
                 familyMembers.length,
               );
             }
@@ -1528,7 +1564,10 @@ export default function AddFamilyPage() {
           if (serverProcessed) {
             const completed = await completePendingCheckout(
               "Family slot purchase completed.",
-              { requireLocalRecord: false },
+              {
+                forceLocalSlotCredit: serverProcessed === "paid_save_failed",
+                requireLocalRecord: false,
+              },
             );
             if (completed) return true;
           }
@@ -1830,7 +1869,7 @@ export default function AddFamilyPage() {
               return false;
             }
 
-            await persistConfirmedFamilySlotPurchase({
+            const localPaidExtraTotal = await persistConfirmedFamilySlotPurchase({
               ownerUserId,
               slots: normalizedSlots,
               amount,
@@ -1842,9 +1881,16 @@ export default function AddFamilyPage() {
 
             try {
               await loadFamilySlotSummary(ownerUserId, familyMembers.length);
+              if (serverProcessed === "paid_save_failed") {
+                applyFamilySlotPaidExtraTotal(
+                  localPaidExtraTotal,
+                  familyMembers.length,
+                );
+              }
             } catch (summaryError) {
               applyFamilySlotPaidExtraTotal(
-                familySlotSummary.paidExtra + normalizedSlots,
+                localPaidExtraTotal ||
+                  familySlotSummary.paidExtra + normalizedSlots,
                 familyMembers.length,
               );
               console.log(

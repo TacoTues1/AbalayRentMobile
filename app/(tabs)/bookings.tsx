@@ -2644,7 +2644,7 @@ export default function Bookings() {
           </Text>
         </View>
 
-        {profile?.role === "landlord" && allBookings.length > 0 && (
+        {allBookings.length > 0 && (
           <TouchableOpacity
             onPress={() => {
               const rows = allBookings
@@ -4444,7 +4444,7 @@ export default function Bookings() {
                     value={penaltyDetails}
                     onChangeText={setPenaltyDetails}
                     keyboardType="numeric"
-                    placeholder="e.g. 500 (defaults to 0)"
+                    placeholder="e.g. 500"
                     placeholderTextColor="#c4c4c4"
                   />
                   <Text

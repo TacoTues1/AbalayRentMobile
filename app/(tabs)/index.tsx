@@ -11,6 +11,7 @@ import {
     View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { waitForRestoredSession } from "../../lib/authSession";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
 
@@ -91,9 +92,7 @@ export default function Dashboard() {
 
   const checkUser = useCallback(async () => {
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const session = await waitForRestoredSession();
 
       if (!session) {
         setLoading(false);

@@ -177,10 +177,8 @@ export default function Payments() {
     property_id: "",
     tenant_id: "",
     occupancy_id: "",
-    water_bill: "",
     other_bills: "",
     bills_description: "",
-    water_due_date: "",
     other_due_date: "",
   });
 
@@ -451,8 +449,7 @@ export default function Payments() {
     if (!formData.tenant_id || !formData.property_id)
       return Alert.alert("Error", "Please select a tenant");
 
-    let water = 0,
-      other = 0;
+    let other = 0;
     let finalDueDate: string | null = null;
     let billTypeLabel = "";
 
@@ -464,7 +461,7 @@ export default function Payments() {
       billTypeLabel = "Other Bill";
     }
 
-    const total = water + other;
+    const total = other;
     if (!billReceiptImage)
       return Alert.alert("Error", "Please upload bill receipt");
 
@@ -508,15 +505,9 @@ export default function Payments() {
           property_id: formData.property_id,
           occupancy_id: formData.occupancy_id || null,
           rent_amount: 0,
-          water_bill: water,
-          electrical_bill: 0,
-          wifi_bill: 0,
           other_bills: other,
           bills_description: formData.bills_description || "No Message",
           due_date: finalDueDate ? new Date(finalDueDate).toISOString() : null,
-          water_due_date: formData.water_due_date
-            ? new Date(formData.water_due_date).toISOString()
-            : null,
           other_due_date: formData.other_due_date
             ? new Date(formData.other_due_date).toISOString()
             : null,
@@ -541,10 +532,8 @@ export default function Payments() {
         property_id: "",
         tenant_id: "",
         occupancy_id: "",
-        water_bill: "",
         other_bills: "",
         bills_description: "",
-        water_due_date: "",
         other_due_date: "",
       });
       setBillReceiptImage(null);
@@ -578,16 +567,12 @@ export default function Payments() {
     setEditFormData({
       id: bill.id,
       rent_amount: bill.rent_amount?.toString() || "",
-      water_bill: bill.water_bill?.toString() || "",
-      electrical_bill: bill.electrical_bill?.toString() || "",
       other_bills: bill.other_bills?.toString() || "",
       bills_description: bill.bills_description || "",
       due_date: bill.due_date
         ? new Date(bill.due_date).toISOString().split("T")[0]
         : "",
       _original_rent: parseFloat(bill.rent_amount || 0),
-      _original_water: parseFloat(bill.water_bill || 0),
-      _original_electrical: parseFloat(bill.electrical_bill || 0),
       _original_other: parseFloat(bill.other_bills || 0),
     });
     setShowEditModal(true);
@@ -599,8 +584,6 @@ export default function Payments() {
         .from("payment_requests")
         .update({
           rent_amount: parseFloat(editFormData.rent_amount) || 0,
-          water_bill: parseFloat(editFormData.water_bill) || 0,
-          electrical_bill: parseFloat(editFormData.electrical_bill) || 0,
           other_bills: parseFloat(editFormData.other_bills) || 0,
           bills_description: editFormData.bills_description,
           due_date: editFormData.due_date
@@ -651,8 +634,6 @@ export default function Payments() {
         parseFloat(request.rent_amount || 0) +
         parseFloat(request.security_deposit_amount || 0) +
         parseFloat(request.advance_amount || 0) +
-        parseFloat(request.water_bill || 0) +
-        parseFloat(request.electrical_bill || 0) +
         parseFloat(request.other_bills || 0);
 
       // 3. Extra Months for Advance
@@ -674,8 +655,6 @@ export default function Payments() {
           tenant: request.tenant,
           landlord: session.user.id,
           amount: billTotal,
-          water_bill: request.water_bill,
-          electrical_bill: request.electrical_bill,
           other_bills: request.other_bills,
           bills_description: request.bills_description,
           method: request.payment_method || "cash",
@@ -769,8 +748,6 @@ export default function Payments() {
             property_id: request.property_id,
             occupancy_id: request.occupancy_id,
             rent_amount: monthlyRent,
-            water_bill: 0,
-            electrical_bill: 0,
             other_bills: 0,
             bills_description: `Advance Payment (Month ${i + 1})`,
             due_date: fDate.toISOString(),
@@ -852,8 +829,6 @@ export default function Payments() {
       parseFloat(request.rent_amount || 0) +
       parseFloat(request.security_deposit_amount || 0) +
       parseFloat(request.advance_amount || 0) +
-      parseFloat(request.water_bill || 0) +
-      parseFloat(request.electrical_bill || 0) +
       parseFloat(request.other_bills || 0);
 
     Alert.alert(
@@ -940,9 +915,6 @@ export default function Payments() {
       parseFloat(request.rent_amount || 0) +
       parseFloat(request.security_deposit_amount || 0) +
       parseFloat(request.advance_amount || 0) +
-      parseFloat(request.water_bill || 0) +
-      parseFloat(request.electrical_bill || 0) +
-      parseFloat(request.wifi_bill || 0) +
       parseFloat(request.other_bills || 0);
 
     if (total <= 0) {
@@ -963,9 +935,6 @@ export default function Payments() {
     if (selectedBill) {
       const exactAmount =
         (parseFloat(selectedBill.rent_amount || 0) || 0) +
-        (parseFloat(selectedBill.water_bill || 0) || 0) +
-        (parseFloat(selectedBill.electrical_bill || 0) || 0) +
-        (parseFloat(selectedBill.wifi_bill || 0) || 0) +
         (parseFloat(selectedBill.other_bills || 0) || 0) +
         (parseFloat(selectedBill.security_deposit_amount || 0) || 0) +
         (parseFloat(selectedBill.advance_amount || 0) || 0);
@@ -1643,7 +1612,6 @@ export default function Payments() {
       const isMoveIn = selectedBill.is_move_in_payment;
       const oneTimeCharges =
         (parseFloat(selectedBill.security_deposit_amount) || 0) +
-        (parseFloat(selectedBill.water_bill) || 0) +
         (parseFloat(selectedBill.other_bills) || 0) +
         (isMoveIn ? parseFloat(selectedBill.advance_amount) || 0 : 0);
       const rentPortion = Math.max(0, amountVal - oneTimeCharges);
@@ -1744,9 +1712,6 @@ export default function Payments() {
   // --- RENDER ---
   const getTotal = (bill: any) =>
     (parseFloat(bill.rent_amount) || 0) +
-    (parseFloat(bill.water_bill) || 0) +
-    (parseFloat(bill.electrical_bill) || 0) +
-    (parseFloat(bill.wifi_bill) || 0) +
     (parseFloat(bill.other_bills) || 0) +
     (parseFloat(bill.security_deposit_amount) || 0) +
     (parseFloat(bill.advance_amount) || 0);
@@ -1754,13 +1719,7 @@ export default function Payments() {
   // Bill type detection (matching web version)
   const getBillType = (item: any) => {
     const rent = parseFloat(item.rent_amount) || 0;
-    const electric = parseFloat(item.electrical_bill) || 0;
-    const water = parseFloat(item.water_bill) || 0;
-    const wifi = parseFloat(item.wifi_bill) || 0;
     if (rent > 0) return "House Rent";
-    if (electric > 0) return "Electric Bill";
-    if (water > 0) return "Water Bill";
-    if (wifi > 0) return "Wifi Bill";
     return "Other Bill";
   };
 
@@ -1819,9 +1778,6 @@ export default function Payments() {
         parseFloat(p.rent_amount || 0) +
           parseFloat(p.security_deposit_amount || 0) +
           parseFloat(p.advance_amount || 0) +
-          parseFloat(p.water_bill || 0) +
-          parseFloat(p.electrical_bill || 0) +
-          parseFloat(p.wifi_bill || 0) +
           parseFloat(p.other_bills || 0);
       return sum + t;
     }, 0);
@@ -1879,8 +1835,6 @@ export default function Payments() {
     }
 
     const rent = parseFloat(item.rent_amount) || 0;
-    const water = parseFloat(item.water_bill) || 0;
-    const electric = parseFloat(item.electrical_bill) || 0;
     const securityDeposit = parseFloat(item.security_deposit_amount) || 0;
     const advance = parseFloat(item.advance_amount) || 0;
     const other = parseFloat(item.other_bills) || 0;
@@ -2196,60 +2150,7 @@ export default function Payments() {
               </Text>
             </View>
           )}
-          {water > 0 && (
-            <View
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                marginBottom: 3,
-              }}
-            >
-              <Text
-                style={{
-                  fontSize: 12,
-                  color: isDark ? colors.textMuted : "#888",
-                }}
-              >
-                Water
-              </Text>
-              <Text
-                style={{
-                  fontSize: 12,
-                  fontWeight: "600",
-                  color: isDark ? colors.text : "#000",
-                }}
-              >
-                ₱{water.toLocaleString()}
-              </Text>
-            </View>
-          )}
-          {electric > 0 && (
-            <View
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                marginBottom: 3,
-              }}
-            >
-              <Text
-                style={{
-                  fontSize: 12,
-                  color: isDark ? colors.textMuted : "#888",
-                }}
-              >
-                Electricity
-              </Text>
-              <Text
-                style={{
-                  fontSize: 12,
-                  fontWeight: "600",
-                  color: isDark ? colors.text : "#000",
-                }}
-              >
-                ₱{electric.toLocaleString()}
-              </Text>
-            </View>
-          )}
+
           {other > 0 && (
             <View
               style={{
@@ -2649,7 +2550,7 @@ export default function Payments() {
           </Text>
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          {profile?.role === "landlord" && filteredBills.length > 0 && (
+          {filteredBills.length > 0 && (
             <TouchableOpacity
               onPress={() => {
                 const rows = filteredBills.map((r) => ({
@@ -2658,15 +2559,9 @@ export default function Payments() {
                     ? `${r.tenant_profile.first_name || ""} ${r.tenant_profile.last_name || ""}`.trim()
                     : "-",
                   Rent: r.rent_amount || 0,
-                  Water: r.water_bill || 0,
-                  Electricity: r.electrical_bill || 0,
-                  Internet: r.wifi_bill || 0,
                   Other: r.other_bills || 0,
                   Total: (
                     parseFloat(r.rent_amount || 0) +
-                    parseFloat(r.water_bill || 0) +
-                    parseFloat(r.electrical_bill || 0) +
-                    parseFloat(r.wifi_bill || 0) +
                     parseFloat(r.other_bills || 0)
                   ).toFixed(2),
                   Status: (r.status || "").replace(/_/g, " "),
@@ -3244,33 +3139,7 @@ export default function Payments() {
               </>
             )}
 
-            {editFormData._original_water > 0 && (
-              <>
-                <Text style={styles.label}>WATER BILL</Text>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="numeric"
-                  value={editFormData.water_bill}
-                  onChangeText={(t) =>
-                    setEditFormData({ ...editFormData, water_bill: t })
-                  }
-                />
-              </>
-            )}
 
-            {editFormData._original_electrical > 0 && (
-              <>
-                <Text style={styles.label}>ELECTRICAL BILL</Text>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="numeric"
-                  value={editFormData.electrical_bill}
-                  onChangeText={(t) =>
-                    setEditFormData({ ...editFormData, electrical_bill: t })
-                  }
-                />
-              </>
-            )}
 
             {editFormData._original_other > 0 && (
               <>
@@ -3576,61 +3445,7 @@ export default function Payments() {
                       </Text>
                     </View>
                   )}
-                  {parseFloat(selectedBill.water_bill || 0) > 0 && (
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        justifyContent: "space-between",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          fontSize: 14,
-                          color: isDark ? colors.textMuted : "#6b7280",
-                        }}
-                      >
-                        Water Bill
-                      </Text>
-                      <Text
-                        style={{
-                          fontSize: 14,
-                          fontWeight: "600",
-                          color: isDark ? colors.text : "#374151",
-                        }}
-                      >
-                        ₱{parseFloat(selectedBill.water_bill).toLocaleString()}
-                      </Text>
-                    </View>
-                  )}
-                  {parseFloat(selectedBill.electrical_bill || 0) > 0 && (
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        justifyContent: "space-between",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          fontSize: 14,
-                          color: isDark ? colors.textMuted : "#6b7280",
-                        }}
-                      >
-                        Electric Bill
-                      </Text>
-                      <Text
-                        style={{
-                          fontSize: 14,
-                          fontWeight: "600",
-                          color: isDark ? colors.text : "#374151",
-                        }}
-                      >
-                        ₱
-                        {parseFloat(
-                          selectedBill.electrical_bill,
-                        ).toLocaleString()}
-                      </Text>
-                    </View>
-                  )}
+
                   {parseFloat(selectedBill.other_bills || 0) > 0 && (
                     <View
                       style={{

@@ -27,12 +27,26 @@ import GuestGuard from "../../components/auth/GuestGuard";
 import PrivacyView from "../../components/profile/PrivacyView";
 import TermsView from "../../components/profile/TermsView";
 import CalendarPicker from "../../components/ui/CalendarPicker";
+import {
+  FAMILY_SLOT_PRICE_PHP,
+  type FamilySubscriptionState,
+  loadFamilySubscriptionForUser,
+  MAX_FAMILY_SLOT_COUNT,
+} from "../../lib/familySubscription";
+import {
+  type LandlordSubscriptionState,
+  loadLandlordSubscriptionForUser,
+  buyPropertySlot,
+  MAX_PROPERTY_SLOT_COUNT,
+  PROPERTY_SLOT_PRICE_PHP,
+} from "../../lib/landlordSubscription";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || "";
+const API_URL = process.env.EXPO_PUBLIC_API_URL || "https://abalay-rent.me";
 const BREVO_API_KEY = process.env.EXPO_PUBLIC_BREVO_API_KEY || "";
-const BUG_REPORT_RECIPIENT = "alfonzperez92@gmail.com";
+const HELP_CENTER_URL = "https://www.abalay-rent.me/help-center";
+// Removed hardcoded BUG_REPORT_RECIPIENT as the backend now handles broadcasting to all admins.
 
 type EmergencyContact = {
   id: string;
@@ -188,7 +202,7 @@ const mergeEmergencyContacts = (cityContacts: EmergencyContact[]) => {
   return merged;
 };
 
-async function sendBugReportViaBrevo({
+async function sendBugReportFallback({
   reporterName,
   reporterEmail,
   description,
@@ -201,50 +215,25 @@ async function sendBugReportViaBrevo({
   source: "login" | "profile";
   attachments?: { name: string; content: string }[];
 }) {
-  if (!BREVO_API_KEY) {
-    throw new Error("Missing EXPO_PUBLIC_BREVO_API_KEY.");
-  }
-
-  const safe = (value: string) =>
-    value
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/\"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-
-  const htmlContent = `
-    <h2>New Bug Report</h2>
-    <p><strong>Source:</strong> ${safe(source)}</p>
-    <p><strong>Reported by:</strong> ${safe(reporterName)}</p>
-    <p><strong>User Email:</strong> ${safe(reporterEmail || "N/A")}</p>
-    <p><strong>Issue Description:</strong></p>
-    <pre style="white-space: pre-wrap; font-family: Arial, sans-serif;">${safe(description)}</pre>
-  `;
-
-  const body: Record<string, any> = {
-    sender: { name: "Abalay", email: "alfnzperez@gmail.com" },
-    to: [{ email: BUG_REPORT_RECIPIENT }],
-    subject: `Abalay Bug Report - ${reporterName}`,
-    htmlContent,
-  };
-
-  if (attachments && attachments.length > 0) {
-    body.attachment = attachments;
-  }
-
-  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+  const baseUrl = API_URL.replace(/\/+$/, "");
+  const response = await fetch(`${baseUrl}/api/report-bug`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "api-key": BREVO_API_KEY,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      name: reporterName,
+      email: reporterEmail,
+      description,
+      source: `Mobile App (${source})`,
+      attachmentName: attachments?.[0]?.name,
+      attachmentContent: attachments?.[0]?.content,
+    }),
   });
 
-  if (!response.ok && response.status !== 201) {
+  if (!response.ok) {
     const errText = await response.text();
-    throw new Error(errText || "Brevo send failed.");
+    throw new Error(errText || "Backup reporting failed.");
   }
 }
 
@@ -266,6 +255,8 @@ export default function Profile() {
     | "report_bug"
     | "delete_account"
     | "payment_methods"
+    | "family_subscription"
+    | "landlord_subscription"
   >("menu");
 
   // --- PROFILE STATE ---
@@ -369,6 +360,17 @@ export default function Profile() {
   const [uploadingQr, setUploadingQr] = useState<"gcash" | "maya" | null>(null);
 
   const [loginRecords, setLoginRecords] = useState<any[]>([]);
+  const [familySubscription, setFamilySubscription] =
+    useState<FamilySubscriptionState | null>(null);
+  const [loadingFamilySubscription, setLoadingFamilySubscription] =
+    useState(false);
+
+  // --- LANDLORD SUBSCRIPTION STATE ---
+  const [landlordSubscription, setLandlordSubscription] =
+    useState<LandlordSubscriptionState | null>(null);
+  const [loadingLandlordSubscription, setLoadingLandlordSubscription] =
+    useState(false);
+  const [buyingPropertySlot, setBuyingPropertySlot] = useState(false);
 
   // --- UI STATE ---
   const [showGenderModal, setShowGenderModal] = useState(false);
@@ -545,11 +547,69 @@ export default function Profile() {
     }
   };
 
+  const loadFamilySubscription = async () => {
+    if (!session?.user?.id) return;
+
+    setLoadingFamilySubscription(true);
+    try {
+      const summary = await loadFamilySubscriptionForUser(session.user.id);
+      setFamilySubscription(summary);
+    } catch (error) {
+      console.warn("loadFamilySubscription error:", error);
+      setFamilySubscription(null);
+    } finally {
+      setLoadingFamilySubscription(false);
+    }
+  };
+
   useEffect(() => {
     if (currentView === "Password" && session?.user?.id) {
       loadLoginRecords();
     }
   }, [currentView, session?.user?.id]);
+
+  useEffect(() => {
+    if (currentView === "family_subscription" && session?.user?.id) {
+      loadFamilySubscription();
+    }
+  }, [currentView, session?.user?.id]);
+
+  const loadLandlordSub = async () => {
+    if (!session?.user?.id) return;
+    setLoadingLandlordSubscription(true);
+    try {
+      const summary = await loadLandlordSubscriptionForUser(session.user.id);
+      setLandlordSubscription(summary);
+    } catch (error) {
+      console.warn("loadLandlordSubscription error:", error);
+      setLandlordSubscription(null);
+    } finally {
+      setLoadingLandlordSubscription(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentView === "landlord_subscription" && session?.user?.id) {
+      loadLandlordSub();
+    }
+  }, [currentView, session?.user?.id]);
+
+  const handleBuyPropertySlot = async () => {
+    if (!session?.user?.id) return;
+    setBuyingPropertySlot(true);
+    try {
+      const result = await buyPropertySlot(session.user.id);
+      if (result.checkoutUrl) {
+        Linking.openURL(result.checkoutUrl);
+      } else {
+        Alert.alert("Error", result.error || "Failed to create checkout");
+      }
+    } catch (error: any) {
+      Alert.alert("Error", error.message || "Failed to create checkout session");
+    } finally {
+      setBuyingPropertySlot(false);
+    }
+  };
 
   // --- AVATAR LOGIC ---
   const pickImage = async () => {
@@ -873,6 +933,12 @@ export default function Profile() {
     setCurrentView("report_bug");
   };
 
+  const handleOpenHelpCenter = () => {
+    Linking.openURL(HELP_CENTER_URL).catch(() => {
+      Alert.alert("Unable to open Help Center", "Please try again later.");
+    });
+  };
+
   const setDefaultEmergencyContacts = (reason: "denied" | "error" | "idle") => {
     const fallback = EMERGENCY_CONTACTS_BY_CITY[DEFAULT_EMERGENCY_CITY_KEY];
     setEmergencyContacts(mergeEmergencyContacts(fallback.contacts));
@@ -1043,7 +1109,7 @@ export default function Profile() {
       });
 
       if (error) {
-        await sendBugReportViaBrevo({
+        await sendBugReportFallback({
           reporterName,
           reporterEmail: session?.user?.email || null,
           description: bugReportDescription.trim(),
@@ -1463,6 +1529,11 @@ export default function Profile() {
                   onPress={() => setCurrentView("emergency_contacts")}
                 />
                 <MenuRow
+                  icon="help-circle-outline"
+                  label="Help Center"
+                  onPress={handleOpenHelpCenter}
+                />
+                <MenuRow
                   icon="bug-outline"
                   label="Report a Bug"
                   onPress={handleReportBug}
@@ -1552,9 +1623,23 @@ export default function Profile() {
               >
                 <MenuRow
                   icon="person-outline"
-                  label="Personal Details"
+                  label="Profile"
                   onPress={() => setCurrentView("personal")}
                 />
+                {profileRole === "tenant" && (
+                  <MenuRow
+                    icon="people-circle-outline"
+                    label="Subscription"
+                    onPress={() => setCurrentView("family_subscription")}
+                  />
+                )}
+                {profileRole === "landlord" && (
+                  <MenuRow
+                    icon="business-outline"
+                    label="Subscription"
+                    onPress={() => setCurrentView("landlord_subscription")}
+                  />
+                )}
                 <MenuRow
                   icon="lock-closed-outline"
                   label="Password & Security"
@@ -1714,6 +1799,11 @@ export default function Profile() {
                   onPress={() => setCurrentView("emergency_contacts")}
                 />
                 <MenuRow
+                  icon="help-circle-outline"
+                  label="Help Center"
+                  onPress={handleOpenHelpCenter}
+                />
+                <MenuRow
                   icon="bug-outline"
                   label="Report a Bug"
                   onPress={handleReportBug}
@@ -1798,7 +1888,7 @@ export default function Profile() {
         ]}
       >
         <SubHeader
-          title="Personal Details"
+          title="Profile"
           rightAction={() => (
             <TouchableOpacity
               onPress={handleUpdateProfile}
@@ -2716,6 +2806,725 @@ export default function Profile() {
             }}
           >
           </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  if (currentView === "family_subscription") {
+    if (!loading && !session) {
+      return (
+        <GuestGuard
+          message="Please log in to view your family member subscription."
+          onBack={() => setCurrentView("menu")}
+          returnTo="/(tabs)/profile"
+        />
+      );
+    }
+
+    const summary = familySubscription;
+    const totalSlots = summary?.total || 1;
+    const usedSlots = summary?.used || 0;
+    const availableSlots =
+      summary?.available ?? Math.max(0, totalSlots - usedSlots);
+    const paidExtra = summary?.paidExtra || 0;
+    const purchaseHistory = summary?.history || [];
+    const hasSavedSubscription = paidExtra > 0 || purchaseHistory.length > 0;
+    const shouldShowNoActiveProperty =
+      !summary?.occupancy && !hasSavedSubscription;
+    const maxSlots = summary?.max || MAX_FAMILY_SLOT_COUNT;
+    const atMaxSlots = totalSlots >= maxSlots;
+    const progressPercent = Math.min(
+      100,
+      Math.max(0, (usedSlots / Math.max(1, maxSlots)) * 100),
+    );
+    const canOpenBuyFlow = !!summary && !summary.isFamilyMember;
+
+    const openBuySlotFlow = () => {
+      if (summary?.isFamilyMember) {
+        Alert.alert(
+          "Primary tenant only",
+          "Only the primary tenant can purchase and manage family member slots.",
+        );
+        return;
+      }
+
+      router.push("/(tabs)/add-family");
+    };
+
+    return (
+      <SafeAreaView
+        style={[
+          styles.container,
+          { backgroundColor: isDark ? colors.background : "#f9fafb" },
+        ]}
+      >
+        <SubHeader
+          title="Subscription"
+          rightAction={() => (
+            <TouchableOpacity
+              onPress={loadFamilySubscription}
+              disabled={loadingFamilySubscription}
+              style={styles.subscriptionRefreshBtn}
+            >
+              {loadingFamilySubscription ? (
+                <ActivityIndicator
+                  size="small"
+                  color={isDark ? colors.text : "#111"}
+                />
+              ) : (
+                <Ionicons
+                  name="refresh"
+                  size={20}
+                  color={isDark ? colors.text : "#111"}
+                />
+              )}
+            </TouchableOpacity>
+          )}
+        />
+
+        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+          <Text
+            style={[
+              styles.sectionTitle,
+              { color: isDark ? colors.text : "#111", marginBottom: 8 },
+            ]}
+          >
+            Family Member Subscription
+          </Text>
+          <Text
+            style={{
+              fontSize: 13,
+              color: isDark ? colors.textMuted : "#6b7280",
+              marginBottom: 20,
+              lineHeight: 19,
+            }}
+          >
+            Manage your family member slots. Purchased slots are permanent and
+            carry over across properties.
+          </Text>
+
+          {loadingFamilySubscription && !summary ? (
+            <View
+              style={[
+                styles.subscriptionCard,
+                {
+                  backgroundColor: isDark ? colors.card : "white",
+                  borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                  alignItems: "center",
+                },
+              ]}
+            >
+              <ActivityIndicator color={isDark ? colors.text : "#111"} />
+            </View>
+          ) : !summary || shouldShowNoActiveProperty ? (
+            <View
+              style={[
+                styles.subscriptionCard,
+                {
+                  backgroundColor: isDark ? colors.card : "white",
+                  borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                },
+              ]}
+            >
+              <View style={styles.subscriptionEmptyIcon}>
+                <Ionicons name="home-outline" size={24} color="#6b7280" />
+              </View>
+              <Text
+                style={[
+                  styles.subscriptionCardTitle,
+                  { color: isDark ? colors.text : "#111827" },
+                ]}
+              >
+                No active property found
+              </Text>
+              <Text
+                style={[
+                  styles.subscriptionMuted,
+                  { color: isDark ? colors.textMuted : "#6b7280" },
+                ]}
+              >
+                Family member slots are available after you have an active
+                occupancy.
+              </Text>
+            </View>
+          ) : (
+            <>
+              <View
+                style={[
+                  styles.subscriptionPlanCard,
+                  {
+                    backgroundColor: isDark ? colors.card : "#ecfdf5",
+                    borderColor: paidExtra > 0 ? "#86efac" : "#e5e7eb",
+                  },
+                ]}
+              >
+                <View style={styles.subscriptionHeaderRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.subscriptionCardTitle,
+                        { color: isDark ? colors.text : "#111827" },
+                      ]}
+                    >
+                      {paidExtra > 0 ? "Paid Plan" : "Free Plan"}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.subscriptionMuted,
+                        { color: isDark ? colors.textMuted : "#6b7280" },
+                      ]}
+                    >
+                      {paidExtra > 0
+                        ? `${paidExtra} extra slot(s) purchased`
+                        : "1 free family member slot included"}
+                    </Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.subscriptionBadge,
+                      {
+                        backgroundColor: paidExtra > 0 ? "#d1fae5" : "#f3f4f6",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.subscriptionBadgeText,
+                        { color: paidExtra > 0 ? "#047857" : "#4b5563" },
+                      ]}
+                    >
+                      {paidExtra > 0 ? "Paid" : "Free"}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.subscriptionStatsGrid}>
+                  <View style={styles.subscriptionStatBox}>
+                    <Text style={styles.subscriptionStatValue}>{totalSlots}</Text>
+                    <Text style={styles.subscriptionStatLabel}>Total</Text>
+                  </View>
+                  <View style={styles.subscriptionStatBox}>
+                    <Text
+                      style={[
+                        styles.subscriptionStatValue,
+                        { color: "#2563eb" },
+                      ]}
+                    >
+                      {usedSlots}
+                    </Text>
+                    <Text style={styles.subscriptionStatLabel}>Used</Text>
+                  </View>
+                  <View style={styles.subscriptionStatBox}>
+                    <Text
+                      style={[
+                        styles.subscriptionStatValue,
+                        { color: "#059669" },
+                      ]}
+                    >
+                      {availableSlots}
+                    </Text>
+                    <Text style={styles.subscriptionStatLabel}>Available</Text>
+                  </View>
+                </View>
+
+                <View style={styles.subscriptionProgressMeta}>
+                  <Text style={styles.subscriptionProgressText}>
+                    {usedSlots} / {totalSlots} slots used
+                  </Text>
+                  <Text style={styles.subscriptionProgressText}>
+                    Max: {maxSlots}
+                  </Text>
+                </View>
+                <View style={styles.subscriptionProgressTrack}>
+                  <View
+                    style={[
+                      styles.subscriptionProgressFill,
+                      {
+                        width: `${progressPercent}%`,
+                        backgroundColor:
+                          usedSlots >= totalSlots ? "#ef4444" : "#10b981",
+                      },
+                    ]}
+                  />
+                </View>
+              </View>
+
+              {!summary.occupancy && (
+                <View style={styles.subscriptionInfoBox}>
+                  <Ionicons name="home-outline" size={18} color="#2563eb" />
+                  <Text style={styles.subscriptionInfoText}>
+                    You do not have an active property right now. Your purchased
+                    slots and purchase history are saved and will carry over to
+                    your next property.
+                  </Text>
+                </View>
+              )}
+
+              {!summary.isFamilyMember && !atMaxSlots && (
+                <View
+                  style={[
+                    styles.subscriptionBuyCard,
+                    { borderColor: isDark ? colors.border : "#d1d5db" },
+                  ]}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.subscriptionCardTitle,
+                        { color: isDark ? colors.text : "#111827" },
+                      ]}
+                    >
+                      Need more slots?
+                    </Text>
+                    <Text
+                      style={[
+                        styles.subscriptionMuted,
+                        { color: isDark ? colors.textMuted : "#6b7280" },
+                      ]}
+                    >
+                      Purchase an additional family member slot for PHP{" "}
+                      {FAMILY_SLOT_PRICE_PHP}
+                    </Text>
+                    <Text style={styles.subscriptionFinePrint}>
+                      {summary.occupancy
+                        ? "Payment via PayMongo QR PH. Permanent slot upgrade."
+                        : "Open Add Family to buy and manage extra slots."}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={openBuySlotFlow}
+                    disabled={!canOpenBuyFlow}
+                    style={[
+                      styles.subscriptionBuyButton,
+                      !canOpenBuyFlow && { opacity: 0.5 },
+                    ]}
+                  >
+                    <Ionicons name="add" size={18} color="white" />
+                    <Text style={styles.subscriptionBuyButtonText}>Buy Slot</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {summary.isFamilyMember && (
+                <View style={styles.subscriptionInfoBox}>
+                  <Ionicons
+                    name="information-circle-outline"
+                    size={18}
+                    color="#2563eb"
+                  />
+                  <Text style={styles.subscriptionInfoText}>
+                    You are linked as a family member. The primary tenant manages
+                    slot purchases.
+                  </Text>
+                </View>
+              )}
+
+              {atMaxSlots && (
+                <View style={styles.subscriptionInfoBox}>
+                  <Ionicons
+                    name="checkmark-circle-outline"
+                    size={18}
+                    color="#047857"
+                  />
+                  <Text style={styles.subscriptionInfoText}>
+                    Maximum {maxSlots} family member slots reached.
+                  </Text>
+                </View>
+              )}
+
+              {purchaseHistory.length > 0 && (
+                <View style={{ marginTop: 22 }}>
+                  <Text
+                    style={[
+                      styles.subscriptionHistoryTitle,
+                      { color: isDark ? colors.textMuted : "#6b7280" },
+                    ]}
+                  >
+                    Purchase History
+                  </Text>
+                  {purchaseHistory.map((item) => (
+                    <View
+                      key={item.id}
+                      style={[
+                        styles.subscriptionHistoryRow,
+                        { backgroundColor: isDark ? colors.card : "white" },
+                      ]}
+                    >
+                      <View style={styles.subscriptionHistoryIcon}>
+                        <Ionicons name="checkmark" size={18} color="#059669" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[
+                            styles.subscriptionHistoryLabel,
+                            { color: isDark ? colors.text : "#111827" },
+                          ]}
+                        >
+                          +{item.slots} Family Slot
+                          {item.slots > 1 ? "s" : ""}
+                        </Text>
+                        <Text style={styles.subscriptionHistoryDate}>
+                          {item.paidAt
+                            ? new Date(item.paidAt).toLocaleDateString(
+                                "en-US",
+                                {
+                                  month: "short",
+                                  day: "numeric",
+                                  year: "numeric",
+                                },
+                              )
+                            : "Paid"}
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: "flex-end" }}>
+                        <Text
+                          style={[
+                            styles.subscriptionHistoryAmount,
+                            { color: isDark ? colors.text : "#111827" },
+                          ]}
+                        >
+                          PHP {Number(item.amount || 0).toFixed(2)}
+                        </Text>
+                        <Text style={styles.subscriptionHistoryStatus}>
+                          Paid
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+  // --- LANDLORD SUBSCRIPTION VIEW ---
+  if (currentView === "landlord_subscription") {
+    if (!loading && !session) {
+      return (
+        <GuestGuard
+          message="Please log in to view your property slot subscription."
+          onBack={() => setCurrentView("menu")}
+          returnTo="/(tabs)/profile"
+        />
+      );
+    }
+
+    const summary = landlordSubscription;
+    const totalSlots = summary?.total || 3;
+    const usedSlots = summary?.used || 0;
+    const availableSlots = summary?.available ?? Math.max(0, totalSlots - usedSlots);
+    const paidExtra = summary?.paidExtra || 0;
+    const purchaseHistory = summary?.history || [];
+    const maxSlots = summary?.max || MAX_PROPERTY_SLOT_COUNT;
+    const atMaxSlots = totalSlots >= maxSlots;
+    const progressPercent = Math.min(100, Math.max(0, (usedSlots / Math.max(1, maxSlots)) * 100));
+
+    return (
+      <SafeAreaView
+        style={[
+          styles.container,
+          { backgroundColor: isDark ? colors.background : "#f9fafb" },
+        ]}
+      >
+        <SubHeader
+          title="Subscription"
+          rightAction={() => (
+            <TouchableOpacity
+              onPress={loadLandlordSub}
+              disabled={loadingLandlordSubscription}
+              style={styles.subscriptionRefreshBtn}
+            >
+              {loadingLandlordSubscription ? (
+                <ActivityIndicator
+                  size="small"
+                  color={isDark ? colors.text : "#111"}
+                />
+              ) : (
+                <Ionicons
+                  name="refresh"
+                  size={20}
+                  color={isDark ? colors.text : "#111"}
+                />
+              )}
+            </TouchableOpacity>
+          )}
+        />
+
+        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+          <Text
+            style={[
+              styles.sectionTitle,
+              { color: isDark ? colors.text : "#111", marginBottom: 8 },
+            ]}
+          >
+            Property Slot Subscription
+          </Text>
+          <Text
+            style={{
+              fontSize: 13,
+              color: isDark ? colors.textMuted : "#6b7280",
+              marginBottom: 20,
+              lineHeight: 19,
+            }}
+          >
+            Manage your property listing slots. Purchased slots are permanent
+            and carry over.
+          </Text>
+
+          {loadingLandlordSubscription && !summary ? (
+            <View
+              style={[
+                styles.subscriptionCard,
+                {
+                  backgroundColor: isDark ? colors.card : "white",
+                  borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                  alignItems: "center",
+                },
+              ]}
+            >
+              <ActivityIndicator color={isDark ? colors.text : "#111"} />
+            </View>
+          ) : (
+            <>
+              <View
+                style={[
+                  styles.subscriptionPlanCard,
+                  {
+                    backgroundColor: isDark ? colors.card : "#ecfdf5",
+                    borderColor: paidExtra > 0 ? "#86efac" : "#e5e7eb",
+                  },
+                ]}
+              >
+                <View style={styles.subscriptionHeaderRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.subscriptionCardTitle,
+                        { color: isDark ? colors.text : "#111827" },
+                      ]}
+                    >
+                      {paidExtra > 0 ? "Paid Plan" : "Free Plan"}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.subscriptionMuted,
+                        { color: isDark ? colors.textMuted : "#6b7280" },
+                      ]}
+                    >
+                      {paidExtra > 0
+                        ? `${paidExtra} extra slot(s) purchased`
+                        : "3 free property slots included"}
+                    </Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.subscriptionBadge,
+                      {
+                        backgroundColor: paidExtra > 0 ? "#d1fae5" : "#f3f4f6",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.subscriptionBadgeText,
+                        { color: paidExtra > 0 ? "#047857" : "#4b5563" },
+                      ]}
+                    >
+                      {paidExtra > 0 ? "Paid" : "Free"}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.subscriptionStatsGrid}>
+                  <View style={styles.subscriptionStatBox}>
+                    <Text style={styles.subscriptionStatValue}>{totalSlots}</Text>
+                    <Text style={styles.subscriptionStatLabel}>Total</Text>
+                  </View>
+                  <View style={styles.subscriptionStatBox}>
+                    <Text
+                      style={[
+                        styles.subscriptionStatValue,
+                        { color: "#2563eb" },
+                      ]}
+                    >
+                      {usedSlots}
+                    </Text>
+                    <Text style={styles.subscriptionStatLabel}>Used</Text>
+                  </View>
+                  <View style={styles.subscriptionStatBox}>
+                    <Text
+                      style={[
+                        styles.subscriptionStatValue,
+                        { color: "#059669" },
+                      ]}
+                    >
+                      {availableSlots}
+                    </Text>
+                    <Text style={styles.subscriptionStatLabel}>Available</Text>
+                  </View>
+                </View>
+
+                {/* Progress Bar */}
+                <View style={{ marginTop: 14 }}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      justifyContent: "space-between",
+                      marginBottom: 4,
+                    }}
+                  >
+                    <Text style={styles.subscriptionProgressText}>
+                      {usedSlots} / {totalSlots} slots used
+                    </Text>
+                    <Text style={styles.subscriptionProgressText}>
+                      Max: {maxSlots}
+                    </Text>
+                  </View>
+                  <View style={styles.subscriptionProgressTrack}>
+                    <View
+                      style={[
+                        styles.subscriptionProgressFill,
+                        {
+                          width: `${progressPercent}%`,
+                          backgroundColor:
+                            usedSlots >= totalSlots ? "#ef4444" : "#10b981",
+                        },
+                      ]}
+                    />
+                  </View>
+                </View>
+              </View>
+
+              {/* Buy Slot */}
+              {!atMaxSlots && (
+                <View
+                  style={[
+                    styles.subscriptionBuyCard,
+                    {
+                      backgroundColor: isDark ? colors.card : "white",
+                      borderColor: isDark ? colors.cardBorder : "#d1d5db",
+                    },
+                  ]}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.subscriptionCardTitle,
+                        { color: isDark ? colors.text : "#111827" },
+                      ]}
+                    >
+                      Need more slots?
+                    </Text>
+                    <Text
+                      style={[
+                        styles.subscriptionMuted,
+                        { color: isDark ? colors.textMuted : "#6b7280" },
+                      ]}
+                    >
+                      Purchase an additional property slot for ₱
+                      {PROPERTY_SLOT_PRICE_PHP}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={handleBuyPropertySlot}
+                    disabled={buyingPropertySlot}
+                    style={[
+                      styles.subscriptionBuyButton,
+                      buyingPropertySlot && { opacity: 0.6 },
+                    ]}
+                  >
+                    {buyingPropertySlot ? (
+                      <ActivityIndicator size="small" color="white" />
+                    ) : (
+                      <>
+                        <Ionicons name="add" size={18} color="white" />
+                        <Text style={styles.subscriptionBuyButtonText}>
+                          Buy Slot
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {atMaxSlots && (
+                <View style={styles.subscriptionInfoBox}>
+                  <Ionicons
+                    name="checkmark-circle-outline"
+                    size={18}
+                    color="#047857"
+                  />
+                  <Text style={styles.subscriptionInfoText}>
+                    Maximum {maxSlots} property slots reached.
+                  </Text>
+                </View>
+              )}
+
+              {purchaseHistory.length > 0 && (
+                <View style={{ marginTop: 22 }}>
+                  <Text
+                    style={[
+                      styles.subscriptionHistoryTitle,
+                      { color: isDark ? colors.textMuted : "#6b7280" },
+                    ]}
+                  >
+                    Purchase History
+                  </Text>
+                  {purchaseHistory.map((item) => (
+                    <View
+                      key={item.id}
+                      style={[
+                        styles.subscriptionHistoryRow,
+                        { backgroundColor: isDark ? colors.card : "white" },
+                      ]}
+                    >
+                      <View style={styles.subscriptionHistoryIcon}>
+                        <Ionicons name="checkmark" size={18} color="#059669" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[
+                            styles.subscriptionHistoryLabel,
+                            { color: isDark ? colors.text : "#111827" },
+                          ]}
+                        >
+                          +1 Property Slot
+                        </Text>
+                        <Text style={styles.subscriptionHistoryDate}>
+                          {item.paidAt
+                            ? new Date(item.paidAt).toLocaleDateString(
+                                "en-US",
+                                {
+                                  month: "short",
+                                  day: "numeric",
+                                  year: "numeric",
+                                },
+                              )
+                            : "Paid"}
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: "flex-end" }}>
+                        <Text
+                          style={[
+                            styles.subscriptionHistoryAmount,
+                            { color: isDark ? colors.text : "#111827" },
+                          ]}
+                        >
+                          PHP {Number(item.amount || 0).toFixed(2)}
+                        </Text>
+                        <Text style={styles.subscriptionHistoryStatus}>
+                          Paid
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </>
+          )}
         </ScrollView>
       </SafeAreaView>
     );
@@ -3810,6 +4619,190 @@ const styles = StyleSheet.create({
   authSecondaryBtnText: {
     fontSize: 15,
     fontWeight: "700",
+  },
+
+  // Family subscription
+  subscriptionRefreshBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  subscriptionCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 20,
+  },
+  subscriptionPlanCard: {
+    borderRadius: 18,
+    borderWidth: 1.5,
+    padding: 20,
+  },
+  subscriptionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    marginBottom: 18,
+  },
+  subscriptionCardTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    marginBottom: 4,
+  },
+  subscriptionMuted: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  subscriptionBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  subscriptionBadgeText: {
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  subscriptionStatsGrid: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  subscriptionStatBox: {
+    flex: 1,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.72)",
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  subscriptionStatValue: {
+    fontSize: 24,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  subscriptionStatLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#6b7280",
+    marginTop: 4,
+  },
+  subscriptionProgressMeta: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 18,
+    marginBottom: 6,
+  },
+  subscriptionProgressText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#6b7280",
+  },
+  subscriptionProgressTrack: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: "#d1d5db",
+    overflow: "hidden",
+  },
+  subscriptionProgressFill: {
+    height: "100%",
+    borderRadius: 999,
+  },
+  subscriptionBuyCard: {
+    marginTop: 18,
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    borderRadius: 18,
+    padding: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  subscriptionBuyButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#000",
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  subscriptionBuyButtonText: {
+    color: "white",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  subscriptionFinePrint: {
+    fontSize: 11,
+    color: "#94a3b8",
+    marginTop: 8,
+    lineHeight: 15,
+  },
+  subscriptionInfoBox: {
+    marginTop: 14,
+    borderRadius: 14,
+    backgroundColor: "#eff6ff",
+    padding: 14,
+    flexDirection: "row",
+    gap: 10,
+    alignItems: "flex-start",
+  },
+  subscriptionInfoText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    color: "#1f2937",
+    fontWeight: "600",
+  },
+  subscriptionEmptyIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#f3f4f6",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+  subscriptionHistoryTitle: {
+    fontSize: 12,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    marginBottom: 10,
+  },
+  subscriptionHistoryRow: {
+    borderRadius: 14,
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 10,
+  },
+  subscriptionHistoryIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: "#d1fae5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  subscriptionHistoryLabel: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  subscriptionHistoryDate: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginTop: 2,
+  },
+  subscriptionHistoryAmount: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  subscriptionHistoryStatus: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#059669",
+    marginTop: 2,
   },
 
   // Form Styles (Reused)

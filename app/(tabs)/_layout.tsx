@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Tabs, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
+    Alert,
     AppState,
     Image,
     Platform,
@@ -15,24 +16,12 @@ import Animated, {
     withTiming,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { getSafeSession } from "../../lib/authSession";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
 
 const AnimatedTouchableOpacity =
   Animated.createAnimatedComponent(TouchableOpacity);
-
-// Helper to avoid simultaneous getSession calls during mount which causes token refresh race conditions
-let sessionPromise: Promise<any> | null = null;
-const getSafeSession = () => {
-  if (!sessionPromise) {
-    sessionPromise = supabase.auth.getSession().finally(() => {
-      setTimeout(() => {
-        sessionPromise = null;
-      }, 2000); // Clear cache after a brief delay
-    });
-  }
-  return sessionPromise;
-};
 
 function NotificationsTabIcon({
   color,
@@ -480,6 +469,7 @@ const CustomTabBar = ({ state, descriptors, navigation }: any) => {
   const insets = useSafeAreaInsets();
   const { isDark, colors } = useTheme();
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const focusedRoute = state.routes[state.index];
   const focusedOptions = descriptors[focusedRoute?.key]?.options || {};
   const focusedTabBarStyle = focusedOptions.tabBarStyle;
@@ -504,6 +494,7 @@ const CustomTabBar = ({ state, descriptors, navigation }: any) => {
           .eq("id", session.user.id)
           .single();
         if (isMounted && data) setUserRole(data.role);
+        if (isMounted && session) setUserId(session.user.id);
       } catch (e) {
         console.warn("CustomTabBar fetchRole error:", e);
       }
@@ -600,7 +591,47 @@ const CustomTabBar = ({ state, descriptors, navigation }: any) => {
             alignItems: "center",
             justifyContent: "center",
           }}
-          onPress={() => router.push("/properties/new")}
+          onPress={async () => {
+            if (!userId) {
+              router.push("/properties/new");
+              return;
+            }
+            try {
+              const { data: subscription } = await supabase
+                .from("landlord_subscriptions")
+                .select("total_slots")
+                .eq("landlord_id", userId)
+                .maybeSingle();
+
+              const totalSlots = subscription?.total_slots || 3;
+
+              const { count: propertyCount } = await supabase
+                .from("properties")
+                .select("id", { count: "exact", head: true })
+                .eq("landlord", userId)
+                .eq("is_deleted", false);
+
+              if ((propertyCount || 0) >= totalSlots) {
+                if (totalSlots >= 10) {
+                  Alert.alert("Limit Reached", "You've reached the maximum of 10 property slots.");
+                } else {
+                  Alert.alert(
+                    "No Slots Available",
+                    `All ${totalSlots} property slots are used. Go to My Properties to purchase additional slots.`,
+                    [
+                      { text: "Cancel", style: "cancel" },
+                      { text: "My Properties", onPress: () => router.push("/(tabs)/landlordproperties" as any) },
+                    ]
+                  );
+                }
+                return;
+              }
+              router.push("/properties/new");
+            } catch (err) {
+              console.error("FAB slot check error:", err);
+              router.push("/properties/new");
+            }
+          }}
         >
           <Ionicons
             name="add"

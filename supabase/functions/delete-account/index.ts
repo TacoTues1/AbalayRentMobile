@@ -1,10 +1,10 @@
-// @ts-ignore
+// @ts-ignore: Deno-specific remote import not resolved by tsc
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-// @ts-ignore
+// @ts-ignore: Deno-specific remote import not resolved by tsc
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// @ts-ignore
-declare const Deno: any;
+// @ts-ignore: Deno global is provided by the Supabase Edge runtime
+declare const Deno: { env: { get(key: string): string | undefined } };
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -69,9 +69,9 @@ serve(async (req: Request) => {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     return new Response(
-      JSON.stringify({ error: error?.message || "Failed to delete account" }),
+      JSON.stringify({ error: error instanceof Error ? error.message : "Failed to delete account" }),
       {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

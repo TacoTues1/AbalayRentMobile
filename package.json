@@ -22,6 +22,7 @@
     "@supabase/supabase-js": "^2.89.0",
     "base64-arraybuffer": "^1.0.2",
     "country-state-city": "^3.2.1",
+    "date-fns": "^4.1.0",
     "expo": "~54.0.33",
     "expo-auth-session": "~7.0.10",
     "expo-av": "~16.0.8",

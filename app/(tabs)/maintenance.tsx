@@ -1181,9 +1181,6 @@ export default function MaintenanceScreen() {
           property_id: requestToComplete.property_id,
           occupancy_id: depositContext.occupancyId,
           rent_amount: 0,
-          water_bill: 0,
-          electrical_bill: 0,
-          wifi_bill: 0,
           other_bills: cost,
           bills_description: `Maintenance cost for "${requestToComplete.title}"`,
           due_date: billDueDate.toISOString(),
@@ -2218,7 +2215,7 @@ export default function MaintenanceScreen() {
           </Text>
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          {isActorLandlord && requests.length > 0 && (
+          {requests.length > 0 && (
             <TouchableOpacity
               onPress={() => {
                 const rows = requests.map((r) => ({

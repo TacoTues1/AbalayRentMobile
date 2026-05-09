@@ -3,8 +3,10 @@ import { useFonts } from "expo-font";
 import * as Notifications from "expo-notifications";
 import { Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
 import { LogBox, Text, TouchableOpacity, View } from "react-native";
+import { getSafeSession } from "../lib/authSession";
 import { usePushNotifications } from "../hooks/usePushNotifications";
 import { useRealtimeNotifications } from "../hooks/useRealtimeNotifications";
 import { supabase } from "../lib/supabase";
@@ -25,7 +27,7 @@ function NotificationManager() {
     const getInitialSession = async () => {
       const {
         data: { session },
-      } = await supabase.auth.getSession();
+      } = await getSafeSession();
       setUserId(session?.user?.id);
     };
     getInitialSession();
@@ -142,6 +144,11 @@ function ThemedStack() {
 
   return (
     <View style={{ flex: 1 }}>
+      <StatusBar
+        style={isDark ? "light" : "dark"}
+        backgroundColor="transparent"
+        translucent
+      />
       <NotificationManager />
       <Stack
         screenOptions={({ route, navigation, options }: any) => {
@@ -173,10 +180,7 @@ function ThemedStack() {
         <Stack.Screen name="favorites" options={{ headerShown: false }} />
         <Stack.Screen name="terms" />
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen
-          name="auth/callback"
-          options={{ headerShown: false }}
-        />
+        <Stack.Screen name="auth/callback" options={{ headerShown: false }} />
         <Stack.Screen
           name="properties/[id]"
           options={{ title: "Property Details" }}

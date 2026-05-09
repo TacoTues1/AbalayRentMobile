@@ -1,18 +1,22 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Dimensions,
-    Image,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  Image,
+  Modal,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
@@ -29,11 +33,43 @@ export default function LandlordProperties() {
   const [session, setSession] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [occupancyEndDates, setOccupancyEndDates] = useState<
+    Record<string, string | null>
+  >({});
   const { isDark, colors } = useTheme();
+
+  // Property Slot System
+  const [slotPlan, setSlotPlan] = useState<any>(null);
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+  const [purchasingSlot, setPurchasingSlot] = useState(false);
+  const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
 
   useEffect(() => {
     checkAuthAndLoad();
   }, []);
+
+  const parseDateOnly = (value?: string | null) => {
+    if (!value) return null;
+    const datePart = String(value).slice(0, 10);
+    const parsed = new Date(`${datePart}T00:00:00`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
+
+  const getAvailabilityLabel = (endDateValue?: string | null) => {
+    const parsed = parseDateOnly(endDateValue);
+    if (!parsed) return null;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    parsed.setHours(0, 0, 0, 0);
+
+    const diffMs = parsed.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays < 0) return null;
+
+    const dayLabel = diffDays === 1 ? "day" : "days";
+    return `Will be available in ${diffDays} ${dayLabel}`;
+  };
 
   const checkAuthAndLoad = async () => {
     const {
@@ -42,6 +78,7 @@ export default function LandlordProperties() {
     if (!session) return router.replace("/");
     setSession(session);
     loadProperties(session.user.id);
+    loadSlotPlan(session.user.id);
   };
 
   const loadProperties = async (userId: string) => {
@@ -55,6 +92,56 @@ export default function LandlordProperties() {
         .order("created_at", { ascending: false });
 
       if (error) throw error;
+
+      const propertyIds = (props || [])
+        .map((prop: any) => prop.id)
+        .filter(Boolean);
+      if (propertyIds.length > 0) {
+        const { data: occupancies, error: occError } = await supabase
+          .from("tenant_occupancies")
+          .select(
+            "property_id, status, end_request_date, end_date, end_request_status",
+          )
+          .in("property_id", propertyIds)
+          .in("status", ["active", "pending_end"]);
+
+        if (occError) {
+          console.warn("Error loading occupancy end dates:", occError.message);
+          setOccupancyEndDates({});
+        } else {
+          const endDateMap: Record<string, string | null> = {};
+          (occupancies || []).forEach((occ: any) => {
+            const endStatus = String(
+              occ?.end_request_status || "",
+            ).toLowerCase();
+            if (endStatus && !["pending", "approved"].includes(endStatus)) {
+              return;
+            }
+
+            const endDateValue = occ?.end_request_date || occ?.end_date || null;
+            if (!endDateValue) return;
+
+            const key = String(occ.property_id || "");
+            if (!key) return;
+
+            const existing = endDateMap[key];
+            if (!existing) {
+              endDateMap[key] = endDateValue;
+              return;
+            }
+
+            const existingDate = parseDateOnly(existing);
+            const nextDate = parseDateOnly(endDateValue);
+            if (existingDate && nextDate && nextDate < existingDate) {
+              endDateMap[key] = endDateValue;
+            }
+          });
+          setOccupancyEndDates(endDateMap);
+        }
+      } else {
+        setOccupancyEndDates({});
+      }
+
       setProperties(props || []);
     } catch (err: any) {
       console.error("Error loading properties:", err.message);
@@ -64,9 +151,129 @@ export default function LandlordProperties() {
     }
   };
 
+  const loadSlotPlan = async (userId: string) => {
+    try {
+      const API_URL = process.env.EXPO_PUBLIC_API_URL || "";
+      if (!API_URL) {
+        // Fallback: query Supabase directly
+        const { data: subscription } = await supabase
+          .from("landlord_subscriptions")
+          .select("*")
+          .eq("landlord_id", userId)
+          .maybeSingle();
+
+        const { count: propertyCount } = await supabase
+          .from("properties")
+          .select("id", { count: "exact", head: true })
+          .eq("landlord", userId)
+          .eq("is_deleted", false);
+
+        const totalSlots = subscription?.total_slots || 3;
+        const usedSlots = propertyCount || 0;
+
+        setSlotPlan({
+          type: subscription?.plan_type || "free",
+          total_slots: totalSlots,
+          paid_slots: subscription?.paid_slots || 0,
+          used_slots: usedSlots,
+          available_slots: totalSlots - usedSlots,
+          slot_price: 50,
+          max_slots: 10,
+        });
+        return;
+      }
+
+      const cleanUrl = API_URL.replace(/\/+$/, "");
+      const res = await fetch(
+        `${cleanUrl}/api/payments/landlord-subscriptions?landlord_id=${userId}`,
+      );
+      const data = await res.json();
+      if (data.plan) setSlotPlan(data.plan);
+    } catch (err) {
+      console.error("Error loading slot plan:", err);
+    }
+  };
+
+  const handlePurchaseSlot = async () => {
+    if (!session?.user?.id) return;
+    setPurchasingSlot(true);
+    try {
+      const landlordName = session.user.user_metadata?.full_name || "Landlord";
+      const paymongoReturnUrl = Linking.createURL("landlordproperties");
+      const successRedirectUrl = Linking.createURL("landlordproperties", {
+        queryParams: { paymongo_status: "success" },
+      });
+      const cancelRedirectUrl = Linking.createURL("landlordproperties", {
+        queryParams: { paymongo_status: "cancel" },
+      });
+
+      // Call the edge function which wraps your Expo deep links properly
+      const { data, error } = await supabase.functions.invoke(
+        "paymongo-landlord-slot-create",
+        {
+          body: {
+            landlord_id: session.user.id,
+            ownerName: landlordName,
+            successUrl: successRedirectUrl,
+            cancelUrl: cancelRedirectUrl,
+          },
+        },
+      );
+
+      if (error || !data?.checkoutUrl) {
+        throw new Error(
+          error?.message || data?.error || "Failed to start checkout.",
+        );
+      }
+
+      setShowPurchaseModal(false);
+
+      // Use openAuthSessionAsync so it automatically closes when PayMongo redirects to the deep link
+      await WebBrowser.openAuthSessionAsync(
+        data.checkoutUrl,
+        paymongoReturnUrl,
+      );
+
+      // Browser automatically closed — now synchronously verify payment
+      setPurchasingSlot(false);
+      setIsVerifyingPayment(true);
+
+      const { data: verifyData, error: verifyError } =
+        await supabase.functions.invoke("paymongo-landlord-slot-verify", {
+          body: {
+            checkoutSessionId: data.checkoutSessionId,
+            landlord_id: session.user.id,
+          },
+        });
+
+      if (verifyError) {
+        throw new Error(verifyError.message || "Verification failed");
+      }
+
+      if (verifyData?.paid) {
+        loadSlotPlan(session.user.id);
+        loadProperties(session.user.id);
+        Alert.alert("Success", "Property slot purchased successfully!");
+      } else {
+        Alert.alert(
+          "Verification Pending",
+          "We haven't received confirmation from PayMongo yet. If you completed the payment, your slots will update shortly. Pull down to refresh.",
+        );
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Something went wrong.");
+    } finally {
+      setPurchasingSlot(false);
+      setIsVerifyingPayment(false);
+    }
+  };
+
   const onRefresh = () => {
     setRefreshing(true);
-    if (session?.user?.id) loadProperties(session.user.id);
+    if (session?.user?.id) {
+      loadProperties(session.user.id);
+      loadSlotPlan(session.user.id);
+    }
   };
 
   const getFilteredProperties = () => {
@@ -119,6 +326,11 @@ export default function LandlordProperties() {
 
   const renderCard = (item: any) => {
     const statusInfo = getStatusStyle(item.status);
+    const availabilityLabel =
+      item.status === "occupied"
+        ? getAvailabilityLabel(occupancyEndDates[String(item.id)])
+        : null;
+    const statusLabel = availabilityLabel || statusInfo.label;
 
     return (
       <TouchableOpacity
@@ -158,7 +370,7 @@ export default function LandlordProperties() {
                 }}
               />
               <Text style={[styles.badgeText, { color: statusInfo.color }]}>
-                {statusInfo.label}
+                {statusLabel}
               </Text>
             </View>
           </View>
@@ -321,271 +533,702 @@ export default function LandlordProperties() {
   };
 
   return (
-    <SafeAreaView
-      style={[
-        styles.container,
-        { backgroundColor: isDark ? colors.background : "#f9fafb" },
-      ]}
-      edges={["top"]}
-    >
-      {loading ? (
-        <ActivityIndicator
-          size="large"
-          color={isDark ? "white" : "#111"}
-          style={{ marginTop: 50 }}
-        />
-      ) : (
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-        >
-          {/* Header */}
-          <View
-            style={[
-              styles.header,
-              {
-                backgroundColor: isDark ? colors.surface : "white",
-                borderBottomColor: isDark ? colors.border : "#f3f4f6",
-              },
-            ]}
+    <>
+      <SafeAreaView
+        style={[
+          styles.container,
+          { backgroundColor: isDark ? colors.background : "#f9fafb" },
+        ]}
+        edges={["top"]}
+      >
+        {loading ? (
+          <ActivityIndicator
+            size="large"
+            color={isDark ? "white" : "#111"}
+            style={{ marginTop: 50 }}
+          />
+        ) : (
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            }
           >
-            <TouchableOpacity
-              onPress={() => router.back()}
-              style={[
-                styles.backBtn,
-                { backgroundColor: isDark ? colors.card : "#f3f4f6" },
-              ]}
-            >
-              <Ionicons
-                name="arrow-back"
-                size={22}
-                color={isDark ? colors.text : "#111"}
-              />
-            </TouchableOpacity>
-            <View style={{ flex: 1 }}>
-              <Text
-                style={[
-                  styles.headerTitle,
-                  { color: isDark ? colors.text : "#111" },
-                ]}
-              >
-                My Properties
-              </Text>
-              <Text
-                style={[
-                  styles.headerSub,
-                  { color: isDark ? colors.textMuted : "#9ca3af" },
-                ]}
-              >
-                {totalCount} total properties
-              </Text>
-            </View>
-          </View>
-
-          {/* Stats Row */}
-          <View
-            style={[
-              styles.statsRow,
-              { backgroundColor: isDark ? colors.surface : "white" },
-            ]}
-          >
+            {/* Header */}
             <View
               style={[
-                styles.statBox,
+                styles.header,
                 {
-                  backgroundColor: isDark ? colors.card : "#fafafa",
-                  borderColor: isDark ? colors.cardBorder : "#ecfdf5",
+                  backgroundColor: isDark ? colors.surface : "white",
+                  borderBottomColor: isDark ? colors.border : "#f3f4f6",
                 },
               ]}
             >
-              <Text style={[styles.statNum, { color: "#059669" }]}>
-                {availableCount}
-              </Text>
-              <Text
+              <TouchableOpacity
+                onPress={() => router.back()}
                 style={[
-                  styles.statLabel,
-                  { color: isDark ? colors.textMuted : "#9ca3af" },
-                ]}
-              >
-                Available
-              </Text>
-            </View>
-            <View
-              style={[
-                styles.statBox,
-                {
-                  backgroundColor: isDark ? colors.card : "#fafafa",
-                  borderColor: isDark ? colors.cardBorder : "#fef2f2",
-                },
-              ]}
-            >
-              <Text style={[styles.statNum, { color: "#ef4444" }]}>
-                {occupiedCount}
-              </Text>
-              <Text
-                style={[
-                  styles.statLabel,
-                  { color: isDark ? colors.textMuted : "#9ca3af" },
-                ]}
-              >
-                Occupied
-              </Text>
-            </View>
-            <View
-              style={[
-                styles.statBox,
-                {
-                  backgroundColor: isDark ? colors.card : "#fafafa",
-                  borderColor: isDark ? colors.cardBorder : "#f3f4f6",
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.statNum,
-                  { color: isDark ? colors.text : "#111" },
-                ]}
-              >
-                {totalCount}
-              </Text>
-              <Text
-                style={[
-                  styles.statLabel,
-                  { color: isDark ? colors.textMuted : "#9ca3af" },
-                ]}
-              >
-                Total
-              </Text>
-            </View>
-          </View>
-
-          {/* Search */}
-          <View style={styles.searchContainer}>
-            <View
-              style={[
-                styles.searchBar,
-                {
-                  backgroundColor: isDark ? colors.card : "white",
-                  borderColor: isDark ? colors.cardBorder : "#e5e7eb",
-                },
-              ]}
-            >
-              <Ionicons
-                name="search"
-                size={18}
-                color={isDark ? colors.textMuted : "#9ca3af"}
-              />
-              <TextInput
-                placeholder="Search your properties..."
-                placeholderTextColor={isDark ? colors.textMuted : "#c4c4c4"}
-                style={[
-                  styles.searchInput,
-                  { color: isDark ? colors.text : "#111" },
-                ]}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-              />
-              {searchQuery.length > 0 && (
-                <TouchableOpacity onPress={() => setSearchQuery("")}>
-                  <Ionicons
-                    name="close-circle"
-                    size={18}
-                    color={isDark ? colors.textMuted : "#ccc"}
-                  />
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-
-          {/* Filters */}
-          <View style={styles.filterRow}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{
-                paddingHorizontal: 20,
-                alignItems: "center",
-                paddingVertical: 10,
-              }}
-            >
-              {STATUS_FILTERS.map((f) => (
-                <TouchableOpacity
-                  key={f}
-                  onPress={() => setStatusFilter(f)}
-                  style={[
-                    styles.filterChip,
-                    {
-                      backgroundColor: isDark ? colors.card : "white",
-                      borderColor: isDark ? colors.cardBorder : "#e5e7eb",
-                    },
-                    statusFilter === f && [
-                      styles.filterChipActive,
-                      {
-                        backgroundColor: isDark ? "white" : "#111",
-                        borderColor: isDark ? "white" : "#111",
-                      },
-                    ],
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.filterChipText,
-                      { color: isDark ? colors.textMuted : "#666" },
-                      statusFilter === f && [
-                        styles.filterChipTextActive,
-                        { color: isDark ? "#111" : "white" },
-                      ],
-                    ]}
-                  >
-                    {f === "all"
-                      ? "All"
-                      : f.charAt(0).toUpperCase() + f.slice(1)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-
-          {/* Property Cards */}
-          {filteredData.length === 0 ? (
-            <View style={styles.emptyState}>
-              <View
-                style={[
-                  styles.emptyIcon,
+                  styles.backBtn,
                   { backgroundColor: isDark ? colors.card : "#f3f4f6" },
                 ]}
               >
                 <Ionicons
-                  name="home-outline"
-                  size={40}
-                  color={isDark ? colors.textMuted : "#d1d5db"}
+                  name="arrow-back"
+                  size={22}
+                  color={isDark ? colors.text : "#111"}
+                />
+              </TouchableOpacity>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.headerTitle,
+                    { color: isDark ? colors.text : "#111" },
+                  ]}
+                >
+                  My Properties
+                </Text>
+                <Text
+                  style={[
+                    styles.headerSub,
+                    { color: isDark ? colors.textMuted : "#9ca3af" },
+                  ]}
+                >
+                  {totalCount} total properties
+                </Text>
+              </View>
+            </View>
+
+            {/* Stats Row */}
+            <View
+              style={[
+                styles.statsRow,
+                { backgroundColor: isDark ? colors.surface : "white" },
+              ]}
+            >
+              <View
+                style={[
+                  styles.statBox,
+                  {
+                    backgroundColor: isDark ? colors.card : "#fafafa",
+                    borderColor: isDark ? colors.cardBorder : "#ecfdf5",
+                  },
+                ]}
+              >
+                <Text style={[styles.statNum, { color: "#059669" }]}>
+                  {availableCount}
+                </Text>
+                <Text
+                  style={[
+                    styles.statLabel,
+                    { color: isDark ? colors.textMuted : "#9ca3af" },
+                  ]}
+                >
+                  Available
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.statBox,
+                  {
+                    backgroundColor: isDark ? colors.card : "#fafafa",
+                    borderColor: isDark ? colors.cardBorder : "#fef2f2",
+                  },
+                ]}
+              >
+                <Text style={[styles.statNum, { color: "#ef4444" }]}>
+                  {occupiedCount}
+                </Text>
+                <Text
+                  style={[
+                    styles.statLabel,
+                    { color: isDark ? colors.textMuted : "#9ca3af" },
+                  ]}
+                >
+                  Occupied
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.statBox,
+                  {
+                    backgroundColor: isDark ? colors.card : "#fafafa",
+                    borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.statNum,
+                    { color: isDark ? colors.text : "#111" },
+                  ]}
+                >
+                  {totalCount}
+                </Text>
+                <Text
+                  style={[
+                    styles.statLabel,
+                    { color: isDark ? colors.textMuted : "#9ca3af" },
+                  ]}
+                >
+                  Total
+                </Text>
+              </View>
+            </View>
+
+            {/* Slot Usage Badge */}
+            {slotPlan && (
+              <View
+                style={[
+                  styles.statsRow,
+                  {
+                    backgroundColor: isDark ? colors.surface : "white",
+                    paddingTop: 0,
+                  },
+                ]}
+              >
+                <View
+                  style={{
+                    flex: 1,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    backgroundColor: isDark ? colors.card : "#eff6ff",
+                    borderRadius: 14,
+                    padding: 14,
+                    borderWidth: 1.5,
+                    borderColor: isDark ? colors.cardBorder : "#dbeafe",
+                  }}
+                >
+                  <View>
+                    <Text
+                      style={{
+                        fontSize: 13,
+                        fontWeight: "800",
+                        color: isDark ? colors.text : "#1e40af",
+                      }}
+                    >
+                      {slotPlan.used_slots}/{slotPlan.total_slots} Property
+                      Slots Used
+                    </Text>
+                    {slotPlan.paid_slots > 0 && (
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          fontWeight: "600",
+                          color: isDark ? colors.textMuted : "#60a5fa",
+                          marginTop: 2,
+                        }}
+                      >
+                        {slotPlan.paid_slots} purchased · Max{" "}
+                        {slotPlan.max_slots}
+                      </Text>
+                    )}
+                  </View>
+                  {slotPlan.used_slots >= slotPlan.total_slots &&
+                    slotPlan.total_slots < slotPlan.max_slots && (
+                      <TouchableOpacity
+                        style={{
+                          backgroundColor: "#2563eb",
+                          paddingHorizontal: 14,
+                          paddingVertical: 8,
+                          borderRadius: 10,
+                        }}
+                        onPress={() => setShowPurchaseModal(true)}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 11,
+                            fontWeight: "800",
+                            color: "white",
+                          }}
+                        >
+                          Buy Slot ₱{slotPlan.slot_price}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  {slotPlan.total_slots >= slotPlan.max_slots &&
+                    slotPlan.used_slots >= slotPlan.max_slots && (
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          fontWeight: "700",
+                          color: isDark ? colors.textMuted : "#9ca3af",
+                        }}
+                      >
+                        Max reached
+                      </Text>
+                    )}
+                </View>
+              </View>
+            )}
+
+            {/* Search */}
+            <View style={styles.searchContainer}>
+              <View
+                style={[
+                  styles.searchBar,
+                  {
+                    backgroundColor: isDark ? colors.card : "white",
+                    borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="search"
+                  size={18}
+                  color={isDark ? colors.textMuted : "#9ca3af"}
+                />
+                <TextInput
+                  placeholder="Search your properties..."
+                  placeholderTextColor={isDark ? colors.textMuted : "#c4c4c4"}
+                  style={[
+                    styles.searchInput,
+                    { color: isDark ? colors.text : "#111" },
+                  ]}
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                />
+                {searchQuery.length > 0 && (
+                  <TouchableOpacity onPress={() => setSearchQuery("")}>
+                    <Ionicons
+                      name="close-circle"
+                      size={18}
+                      color={isDark ? colors.textMuted : "#ccc"}
+                    />
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+
+            {/* Filters */}
+            <View style={styles.filterRow}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{
+                  paddingHorizontal: 20,
+                  alignItems: "center",
+                  paddingVertical: 10,
+                }}
+              >
+                {STATUS_FILTERS.map((f) => (
+                  <TouchableOpacity
+                    key={f}
+                    onPress={() => setStatusFilter(f)}
+                    style={[
+                      styles.filterChip,
+                      {
+                        backgroundColor: isDark ? colors.card : "white",
+                        borderColor: isDark ? colors.cardBorder : "#e5e7eb",
+                      },
+                      statusFilter === f && [
+                        styles.filterChipActive,
+                        {
+                          backgroundColor: isDark ? "white" : "#111",
+                          borderColor: isDark ? "white" : "#111",
+                        },
+                      ],
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        { color: isDark ? colors.textMuted : "#666" },
+                        statusFilter === f && [
+                          styles.filterChipTextActive,
+                          { color: isDark ? "#111" : "white" },
+                        ],
+                      ]}
+                    >
+                      {f === "all"
+                        ? "All"
+                        : f.charAt(0).toUpperCase() + f.slice(1)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            {/* Property Cards */}
+            {filteredData.length === 0 ? (
+              <View style={styles.emptyState}>
+                <View
+                  style={[
+                    styles.emptyIcon,
+                    { backgroundColor: isDark ? colors.card : "#f3f4f6" },
+                  ]}
+                >
+                  <Ionicons
+                    name="home-outline"
+                    size={40}
+                    color={isDark ? colors.textMuted : "#d1d5db"}
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.emptyTitle,
+                    { color: isDark ? colors.text : "#111" },
+                  ]}
+                >
+                  No properties yet
+                </Text>
+                <Text
+                  style={[
+                    styles.emptySubtitle,
+                    { color: isDark ? colors.textMuted : "#9ca3af" },
+                  ]}
+                >
+                  Add your first property from the dashboard.
+                </Text>
+              </View>
+            ) : (
+              filteredData.map(renderCard)
+            )}
+          </ScrollView>
+        )}
+      </SafeAreaView>
+      {/* Verification Modal */}
+      <Modal visible={isVerifyingPayment} transparent animationType="fade">
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.7)",
+            justifyContent: "center",
+            alignItems: "center",
+            padding: 20,
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: isDark ? colors.card : "white",
+              padding: 30,
+              borderRadius: 20,
+              alignItems: "center",
+              width: "100%",
+            }}
+          >
+            <ActivityIndicator size="large" color={colors.accent || "#000"} />
+            <Text
+              style={{
+                marginTop: 20,
+                fontSize: 16,
+                fontWeight: "bold",
+                color: isDark ? colors.text : "black",
+                textAlign: "center",
+              }}
+            >
+              Please wait. We are verifying your payment, please do not close
+              this app.
+            </Text>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Purchase Modal */}
+      <Modal
+        visible={showPurchaseModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowPurchaseModal(false)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.6)",
+            justifyContent: "center",
+            alignItems: "center",
+            padding: 20,
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: isDark ? colors.surface : "white",
+              borderRadius: 20,
+              width: "100%",
+              maxWidth: 380,
+              overflow: "hidden",
+            }}
+          >
+            {/* Header */}
+            <View
+              style={{
+                padding: 20,
+                borderBottomWidth: 1,
+                borderBottomColor: isDark ? colors.border : "#f3f4f6",
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 12,
+              }}
+            >
+              <View
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 12,
+                  backgroundColor: isDark ? colors.card : "#eff6ff",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Ionicons
+                  name="business-outline"
+                  size={20}
+                  color={isDark ? colors.text : "#2563eb"}
                 />
               </View>
-              <Text
-                style={[
-                  styles.emptyTitle,
-                  { color: isDark ? colors.text : "#111" },
-                ]}
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    fontSize: 18,
+                    fontWeight: "900",
+                    color: isDark ? colors.text : "#111",
+                  }}
+                >
+                  Buy Property Slot
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: isDark ? colors.textMuted : "#9ca3af",
+                    fontWeight: "500",
+                  }}
+                >
+                  Add another property listing slot
+                </Text>
+              </View>
+            </View>
+
+            {/* Body */}
+            <View style={{ padding: 20 }}>
+              <View
+                style={{
+                  backgroundColor: isDark ? colors.card : "#eff6ff",
+                  borderRadius: 14,
+                  padding: 16,
+                  marginBottom: 16,
+                  borderWidth: 1,
+                  borderColor: isDark ? colors.cardBorder : "#dbeafe",
+                }}
               >
-                No properties yet
-              </Text>
-              <Text
-                style={[
-                  styles.emptySubtitle,
-                  { color: isDark ? colors.textMuted : "#9ca3af" },
-                ]}
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    marginBottom: 12,
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      fontWeight: "700",
+                      color: isDark ? colors.text : "#1e3a5f",
+                    }}
+                  >
+                    Current Plan
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: 10,
+                      fontWeight: "800",
+                      color: isDark ? colors.text : "#2563eb",
+                      textTransform: "uppercase",
+                      backgroundColor: isDark ? colors.surface : "#dbeafe",
+                      paddingHorizontal: 8,
+                      paddingVertical: 2,
+                      borderRadius: 6,
+                      overflow: "hidden",
+                    }}
+                  >
+                    {slotPlan?.type || "free"}
+                  </Text>
+                </View>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-around",
+                  }}
+                >
+                  <View style={{ alignItems: "center" }}>
+                    <Text
+                      style={{
+                        fontSize: 22,
+                        fontWeight: "900",
+                        color: isDark ? colors.text : "#1e3a5f",
+                      }}
+                    >
+                      {slotPlan?.used_slots || 0}
+                    </Text>
+                    <Text
+                      style={{
+                        fontSize: 9,
+                        fontWeight: "700",
+                        color: isDark ? colors.textMuted : "#60a5fa",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Used
+                    </Text>
+                  </View>
+                  <View style={{ alignItems: "center" }}>
+                    <Text
+                      style={{
+                        fontSize: 22,
+                        fontWeight: "900",
+                        color: isDark ? colors.text : "#1e3a5f",
+                      }}
+                    >
+                      {slotPlan?.total_slots || 3}
+                    </Text>
+                    <Text
+                      style={{
+                        fontSize: 9,
+                        fontWeight: "700",
+                        color: isDark ? colors.textMuted : "#60a5fa",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Total
+                    </Text>
+                  </View>
+                  <View style={{ alignItems: "center" }}>
+                    <Text
+                      style={{
+                        fontSize: 22,
+                        fontWeight: "900",
+                        color: isDark ? colors.text : "#1e3a5f",
+                      }}
+                    >
+                      {slotPlan?.max_slots || 10}
+                    </Text>
+                    <Text
+                      style={{
+                        fontSize: 9,
+                        fontWeight: "700",
+                        color: isDark ? colors.textMuted : "#60a5fa",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Max
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <View
+                style={{
+                  backgroundColor: isDark ? colors.card : "#f9fafb",
+                  borderRadius: 14,
+                  padding: 16,
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  borderWidth: 1,
+                  borderColor: isDark ? colors.cardBorder : "#f3f4f6",
+                }}
               >
-                Add your first property from the dashboard.
+                <View>
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      fontWeight: "700",
+                      color: isDark ? colors.text : "#111",
+                    }}
+                  >
+                    +1 Property Slot
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      color: isDark ? colors.textMuted : "#9ca3af",
+                      marginTop: 2,
+                    }}
+                  >
+                    Permanent addition
+                  </Text>
+                </View>
+                <Text
+                  style={{
+                    fontSize: 24,
+                    fontWeight: "900",
+                    color: isDark ? colors.text : "#111",
+                  }}
+                >
+                  ₱50
+                </Text>
+              </View>
+
+              <Text
+                style={{
+                  fontSize: 10,
+                  color: isDark ? colors.textMuted : "#9ca3af",
+                  textAlign: "center",
+                  marginTop: 12,
+                }}
+              >
+                After purchase, your total slots will be{" "}
+                {(slotPlan?.total_slots || 3) + 1}. Payment via GCash, Maya, or
+                Card.
               </Text>
             </View>
-          ) : (
-            filteredData.map(renderCard)
-          )}
-        </ScrollView>
-      )}
-    </SafeAreaView>
+
+            {/* Footer */}
+            <View
+              style={{
+                flexDirection: "row",
+                gap: 10,
+                padding: 20,
+                borderTopWidth: 1,
+                borderTopColor: isDark ? colors.border : "#f3f4f6",
+                backgroundColor: isDark ? colors.card : "#f9fafb",
+              }}
+            >
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  paddingVertical: 14,
+                  borderRadius: 12,
+                  borderWidth: 1.5,
+                  borderColor: isDark ? colors.border : "#e5e7eb",
+                  alignItems: "center",
+                }}
+                onPress={() => setShowPurchaseModal(false)}
+                disabled={purchasingSlot}
+              >
+                <Text
+                  style={{
+                    fontWeight: "700",
+                    color: isDark ? colors.text : "#374151",
+                  }}
+                >
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{
+                  flex: 1.5,
+                  paddingVertical: 14,
+                  borderRadius: 12,
+                  backgroundColor: "#2563eb",
+                  alignItems: "center",
+                  opacity: purchasingSlot ? 0.6 : 1,
+                }}
+                onPress={handlePurchaseSlot}
+                disabled={purchasingSlot}
+              >
+                {purchasingSlot ? (
+                  <ActivityIndicator color="white" size="small" />
+                ) : (
+                  <Text
+                    style={{ fontWeight: "800", color: "white", fontSize: 14 }}
+                  >
+                    Proceed to Payment
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 

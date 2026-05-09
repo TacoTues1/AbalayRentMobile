@@ -1,32 +1,18 @@
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { waitForRestoredSession } from "../lib/authSession";
 import { getUserRouteById } from "../lib/authRedirect";
-import { supabase } from "../lib/supabase";
 
 export default function EntryScreen() {
   const router = useRouter();
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    const wait = (ms: number) =>
-      new Promise((resolve) => setTimeout(resolve, ms));
-
-    const getRestoredSession = async () => {
-      for (let attempt = 0; attempt < 1; attempt += 1) {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        if (session) return session;
-      }
-
-      return null;
-    };
-
     const checkSession = async () => {
       try {
         // Allow storage hydration to complete before deciding user is logged out.
-        const session = await getRestoredSession();
+        const session = await waitForRestoredSession();
 
         if (session) {
           const destination = await getUserRouteById(session.user.id);

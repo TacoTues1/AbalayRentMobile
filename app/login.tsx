@@ -19,6 +19,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { getUserRouteById } from "../lib/authRedirect";
+import { waitForRestoredSession } from "../lib/authSession";
 import { supabase } from "../lib/supabase";
 
 import LoginForm from "@/components/auth/LoginForm";
@@ -26,12 +27,13 @@ import OtpForm from "@/components/auth/OtpForm";
 import RegisterForm from "@/components/auth/RegisterForm";
 import RegisterLandlordForm from "@/components/auth/RegisterLandlordForm";
 
+const API_URL = process.env.EXPO_PUBLIC_API_URL || "https://abalay-rent.me";
 const BREVO_API_KEY = process.env.EXPO_PUBLIC_BREVO_API_KEY || "";
-const BUG_REPORT_RECIPIENT = "alfonzperez92@gmail.com";
+// Centralized bug reporting now handles broadcasting to all admins.
 type AuthView = "login" | "register" | "register-landlord" | "otp";
 type RegistrationView = "register" | "register-landlord";
 
-async function sendBugReportViaBrevo({
+async function sendBugReportFallback({
   reporterName,
   reporterEmail,
   description,
@@ -44,50 +46,25 @@ async function sendBugReportViaBrevo({
   source: "login" | "profile";
   attachments?: { name: string; content: string }[];
 }) {
-  if (!BREVO_API_KEY) {
-    throw new Error("Missing EXPO_PUBLIC_BREVO_API_KEY.");
-  }
-
-  const safe = (value: string) =>
-    value
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/\"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-
-  const htmlContent = `
-    <h2>New Bug Report</h2>
-    <p><strong>Source:</strong> ${safe(source)}</p>
-    <p><strong>Reported by:</strong> ${safe(reporterName)}</p>
-    <p><strong>User Email:</strong> ${safe(reporterEmail || "N/A")}</p>
-    <p><strong>Issue Description:</strong></p>
-    <pre style="white-space: pre-wrap; font-family: Arial, sans-serif;">${safe(description)}</pre>
-  `;
-
-  const body: Record<string, any> = {
-    sender: { name: "Abalay", email: "alfnzperez@gmail.com" },
-    to: [{ email: BUG_REPORT_RECIPIENT }],
-    subject: `Abalay Bug Report - ${reporterName}`,
-    htmlContent,
-  };
-
-  if (attachments && attachments.length > 0) {
-    body.attachment = attachments;
-  }
-
-  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+  const baseUrl = API_URL.replace(/\/+$/, "");
+  const response = await fetch(`${baseUrl}/api/report-bug`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "api-key": BREVO_API_KEY,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      name: reporterName,
+      email: reporterEmail,
+      description,
+      source: `Mobile App (${source})`,
+      attachmentName: attachments?.[0]?.name,
+      attachmentContent: attachments?.[0]?.content,
+    }),
   });
 
-  if (!response.ok && response.status !== 201) {
+  if (!response.ok) {
     const errText = await response.text();
-    throw new Error(errText || "Brevo send failed.");
+    throw new Error(errText || "Backup reporting failed.");
   }
 }
 
@@ -107,8 +84,9 @@ export default function AuthScreen() {
   const [loading, setLoading] = useState(false);
   const [pendingEmail, setPendingEmail] = useState("");
   const [pendingMetaData, setPendingMetaData] = useState({});
-  const [otpReturnView, setOtpReturnView] =
-    useState<RegistrationView | null>(null);
+  const [otpReturnView, setOtpReturnView] = useState<RegistrationView | null>(
+    null,
+  );
   const [showLoginNotice, setShowLoginNotice] = useState(false);
   const [bugReportModalVisible, setBugReportModalVisible] = useState(false);
   const [bugReportName, setBugReportName] = useState("");
@@ -123,9 +101,7 @@ export default function AuthScreen() {
 
     // Safety Clear on load
     const clearIfLoggedOut = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const session = await waitForRestoredSession();
       if (session && isMounted) {
         // Validate it's a real, active session (not stale cache)
         const {
@@ -151,7 +127,7 @@ export default function AuthScreen() {
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_IN" && session && isMounted) {
         if (returnTo) {
-          // Use a small delay to ensure the auth state has fully propagated 
+          // Use a small delay to ensure the auth state has fully propagated
           // across all providers and local storage before redirecting
           setTimeout(() => {
             if (isMounted) router.replace(returnTo as any);
@@ -300,7 +276,7 @@ export default function AuthScreen() {
       });
 
       if (error) {
-        await sendBugReportViaBrevo({
+        await sendBugReportFallback({
           reporterName,
           reporterEmail: null,
           description: bugReportDescription.trim(),
@@ -413,26 +389,6 @@ export default function AuthScreen() {
             />
           )}
         </ScrollView>
-
-        {/* {view === "login" && showLoginNotice && (
-          <View style={styles.floatingLoginNoticeBox}>
-            <Text style={styles.loginNoticeText}>
-              This is an open testing build. If you find any bugs or errors, 
-              please report them through Settings {'>'} Report a Bug after signing in. 
-              If you do not have an account, use the Report a Bug button at the bottom of the login page.
-            </Text>
-          </View>
-        )} */}
-
-        {/* {view === "login" && (
-          <TouchableOpacity
-            style={styles.bottomReportBugButton}
-            activeOpacity={0.85}
-            onPress={handleOpenBugReportModal}
-          >
-            <Text style={styles.bottomReportBugButtonText}>Report a Bug</Text>
-          </TouchableOpacity>
-        )} */}
       </KeyboardAvoidingView>
 
       <Modal

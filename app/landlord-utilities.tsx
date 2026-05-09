@@ -83,7 +83,7 @@ export default function LandlordUtilitiesPage() {
       const { data: billsData } = await supabase
         .from("payment_requests")
         .select(
-          "id, occupancy_id, rent_amount, water_bill, electrical_bill, wifi_bill, due_date, status",
+          "id, occupancy_id, rent_amount, due_date, status",
         )
         .eq("landlord", userId);
 
@@ -140,12 +140,7 @@ export default function LandlordUtilitiesPage() {
 
           if (util.key === "rent")
             return isSameMonth && Number(b.rent_amount) > 0;
-          if (util.key === "internet")
-            return isSameMonth && Number(b.wifi_bill) > 0;
-          if (util.key === "water")
-            return isSameMonth && Number(b.water_bill) > 0;
-          if (util.key === "electricity")
-            return isSameMonth && Number(b.electrical_bill) > 0;
+          return false;
           return false;
         });
 
@@ -256,7 +251,17 @@ export default function LandlordUtilitiesPage() {
     setSendingBillId(sendKey);
     try {
       const API_URL = (process.env.EXPO_PUBLIC_API_URL || "").replace(/\/+$/, "");
-      const res = await fetch(`${API_URL}/api/test-rent-reminder?tenantId=${item.tenantId}&billType=${item.billType}`);
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      const params = new URLSearchParams({
+        tenantId: item.tenantId,
+        billType: item.billType,
+      });
+      const headers = currentSession?.access_token
+        ? { Authorization: `Bearer ${currentSession.access_token}` }
+        : undefined;
+      const res = await fetch(`${API_URL}/api/test-rent-reminder?${params.toString()}`, {
+        headers,
+      });
       const data = await res.json();
       
       if (res.ok) {

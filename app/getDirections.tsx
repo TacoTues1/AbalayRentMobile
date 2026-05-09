@@ -53,6 +53,36 @@ const CARTO_RASTER_STYLE = JSON.stringify({
 
 const { width, height } = Dimensions.get("window");
 
+type RouteMode = "driving" | "bike" | "foot";
+
+type MapCoordinate = {
+  latitude: number;
+  longitude: number;
+  heading?: number;
+};
+
+type RouteData = {
+  geometry: {
+    coordinates: number[][];
+    type?: string;
+  };
+  distance: number;
+  duration: number;
+  [key: string]: any;
+};
+
+const ROUTE_PROFILE_CANDIDATES: Record<RouteMode, string[]> = {
+  driving: ["driving", "car"],
+  bike: ["bike", "cycling"],
+  foot: ["foot", "walking"],
+};
+
+const MODE_AVERAGE_SPEED_KPH: Record<RouteMode, number> = {
+  driving: 28,
+  bike: 14,
+  foot: 4.8,
+};
+
 export default function GetDirections() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -75,15 +105,8 @@ export default function GetDirections() {
   // State
   const [fromAddress, setFromAddress] = useState("");
   const [toAddress, setToAddress] = useState("");
-  const [userLocation, setUserLocation] = useState<{
-    latitude: number;
-    longitude: number;
-    heading?: number;
-  } | null>(null);
-  const [destLocation, setDestLocation] = useState<{
-    latitude: number;
-    longitude: number;
-  } | null>(null);
+  const [userLocation, setUserLocation] = useState<MapCoordinate | null>(null);
+  const [destLocation, setDestLocation] = useState<MapCoordinate | null>(null);
   const [isNavigating, setIsNavigating] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
   const [panelVisible, setPanelVisible] = useState(true);
@@ -93,14 +116,12 @@ export default function GetDirections() {
   const [showSuggestions, setShowSuggestions] = useState(false);
 
   // Routes
-  const [routesData, setRoutesData] = useState({
+  const [routesData, setRoutesData] = useState<Record<RouteMode, RouteData[]>>({
     driving: [],
     bike: [],
     foot: [],
   });
-  const [selectedMode, setSelectedMode] = useState<"driving" | "bike" | "foot">(
-    "driving",
-  );
+  const [selectedMode, setSelectedMode] = useState<RouteMode>("driving");
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
 
   // 1. Initial Setup & Animation
@@ -113,27 +134,39 @@ export default function GetDirections() {
         return;
       }
 
+      let initialDestination: MapCoordinate | null = null;
+      let initialStart: MapCoordinate | null = null;
+
       // Handle Auto-Start Params
       if (params.to) {
-        setToAddress(params.to as string);
+        const destinationText = params.to as string;
+        setToAddress(destinationText);
         if (params.lat && params.lng) {
           const dLat = parseFloat(params.lat as string);
           const dLng = parseFloat(params.lng as string);
-          setDestLocation({ latitude: dLat, longitude: dLng });
+          if (Number.isFinite(dLat) && Number.isFinite(dLng)) {
+            initialDestination = { latitude: dLat, longitude: dLng };
+            setDestLocation(initialDestination);
+          } else {
+            initialDestination = await geocodeAddress(destinationText, "dest");
+          }
         } else {
-          geocodeAddress(params.to as string, "dest");
+          initialDestination = await geocodeAddress(destinationText, "dest");
         }
       }
 
       if (params.from) {
-        setFromAddress(params.from as string);
-        if (params.from !== "My Location") {
-          geocodeAddress(params.from as string, "from");
+        const startText = params.from as string;
+        setFromAddress(startText);
+        if (startText !== "My Location") {
+          initialStart = await geocodeAddress(startText, "from");
         }
       }
 
       if (params.auto === "true") {
-        handleShowMyLocation();
+        handleShowMyLocation(initialDestination);
+      } else if (initialStart && initialDestination) {
+        calculateAllRoutes(initialStart, initialDestination);
       }
     })();
   }, []);
@@ -156,7 +189,10 @@ export default function GetDirections() {
   };
 
   // 2. Geocoding (Nominatim)
-  const geocodeAddress = async (address: string, type: "from" | "dest") => {
+  const geocodeAddress = async (
+    address: string,
+    type: "from" | "dest",
+  ): Promise<MapCoordinate | null> => {
     setStatusMsg("Locating...");
     try {
       const res = await fetch(
@@ -184,12 +220,14 @@ export default function GetDirections() {
           });
         }
         setStatusMsg("");
+        return loc;
       } else {
         setStatusMsg("Location not found");
       }
     } catch (err) {
       setStatusMsg("Error finding location");
     }
+    return null;
   };
 
   // 3. Autocomplete
@@ -236,7 +274,9 @@ export default function GetDirections() {
   };
 
   // 4. Locate User
-  const handleShowMyLocation = async () => {
+  const handleShowMyLocation = async (
+    routeDestination: MapCoordinate | null = destLocation,
+  ) => {
     setStatusMsg("Locating...");
     try {
       const location = await Location.getCurrentPositionAsync({});
@@ -251,16 +291,73 @@ export default function GetDirections() {
         animationDuration: 500,
       });
 
-      if (destLocation) {
-        calculateAllRoutes({ latitude, longitude }, destLocation);
+      if (routeDestination) {
+        calculateAllRoutes({ latitude, longitude }, routeDestination);
       }
     } catch (e) {
       setStatusMsg("Could not get location");
     }
   };
 
+  const estimateDurationSeconds = (
+    distanceMeters: number,
+    mode: RouteMode,
+  ) => {
+    const speedMetersPerSecond = (MODE_AVERAGE_SPEED_KPH[mode] * 1000) / 3600;
+    return Math.max(60, Math.round(distanceMeters / speedMetersPerSecond));
+  };
+
+  const needsModeEstimate = (
+    route: RouteData,
+    mode: RouteMode,
+    matchingDrivingRoute?: RouteData,
+  ) => {
+    const distance = Number(route.distance || 0);
+    const duration = Number(route.duration || 0);
+    if (!Number.isFinite(duration) || duration <= 0) return true;
+    if (!Number.isFinite(distance) || distance <= 0) return false;
+
+    const speedKph = distance / 1000 / (duration / 3600);
+    if (mode === "foot" && speedKph > 8) return true;
+    if (mode === "bike" && speedKph > 35) return true;
+
+    const drivingDuration = Number(matchingDrivingRoute?.duration || 0);
+    return (
+      mode !== "driving" &&
+      drivingDuration > 0 &&
+      Math.abs(duration - drivingDuration) < 60
+    );
+  };
+
+  const withModeDurations = (
+    routes: RouteData[],
+    mode: RouteMode,
+    drivingRoutes: RouteData[] = [],
+  ) =>
+    routes.map((route, index) => {
+      const distance = Number(route.distance || 0);
+      const shouldEstimate = needsModeEstimate(route, mode, drivingRoutes[index]);
+      return {
+        ...route,
+        duration:
+          shouldEstimate && distance > 0
+            ? estimateDurationSeconds(distance, mode)
+            : route.duration,
+      };
+    });
+
+  const cloneRoutesForMode = (routes: RouteData[], mode: RouteMode) =>
+    routes.map((route) => ({
+      ...route,
+      duration: estimateDurationSeconds(Number(route.distance || 0), mode),
+    }));
+
   // 5. Routing (OSRM)
-  const fetchRouteData = async (profile: string, start: any, end: any) => {
+  const fetchRouteData = async (
+    profile: string,
+    start: MapCoordinate,
+    end: MapCoordinate,
+  ): Promise<RouteData[]> => {
     try {
       const response = await fetch(
         `https://router.project-osrm.org/route/v1/${profile}/${start.longitude},${start.latitude};${end.longitude},${end.latitude}?alternatives=true&overview=full&geometries=geojson`,
@@ -273,35 +370,87 @@ export default function GetDirections() {
     }
   };
 
-  const calculateAllRoutes = async (start: any, end: any) => {
+  const fetchRoutesForMode = async (
+    mode: RouteMode,
+    start: MapCoordinate,
+    end: MapCoordinate,
+  ) => {
+    for (const profile of ROUTE_PROFILE_CANDIDATES[mode]) {
+      const routes = await fetchRouteData(profile, start, end);
+      if (routes.length > 0) return routes;
+    }
+    return [];
+  };
+
+  const calculateAllRoutes = async (
+    start: MapCoordinate,
+    end: MapCoordinate,
+  ) => {
     if (!start || !end) return;
     setStatusMsg("Calculating routes...");
 
     const [driving, bike, foot] = await Promise.all([
-      fetchRouteData("driving", start, end),
-      fetchRouteData("bike", start, end),
-      fetchRouteData("foot", start, end),
+      fetchRoutesForMode("driving", start, end),
+      fetchRoutesForMode("bike", start, end),
+      fetchRoutesForMode("foot", start, end),
     ]);
 
-    setRoutesData({ driving, bike, foot });
+    const baseRoutes =
+      driving.length > 0 ? driving : bike.length > 0 ? bike : foot;
+    if (baseRoutes.length === 0) {
+      setRoutesData({ driving: [], bike: [], foot: [] });
+      setStatusMsg("No route found");
+      return;
+    }
+
+    const normalizedDriving = withModeDurations(
+      driving.length > 0 ? driving : cloneRoutesForMode(baseRoutes, "driving"),
+      "driving",
+    );
+    const normalizedBike = withModeDurations(
+      bike.length > 0 ? bike : cloneRoutesForMode(baseRoutes, "bike"),
+      "bike",
+      normalizedDriving,
+    );
+    const normalizedFoot = withModeDurations(
+      foot.length > 0 ? foot : cloneRoutesForMode(baseRoutes, "foot"),
+      "foot",
+      normalizedDriving,
+    );
+
+    setRoutesData({
+      driving: normalizedDriving,
+      bike: normalizedBike,
+      foot: normalizedFoot,
+    });
     setStatusMsg("");
 
     const initialMode =
-      driving.length > 0 ? "driving" : bike.length > 0 ? "bike" : "foot";
-    setSelectedMode(initialMode as any);
+      normalizedDriving.length > 0
+        ? "driving"
+        : normalizedBike.length > 0
+          ? "bike"
+          : "foot";
+    setSelectedMode(initialMode);
     setSelectedRouteIndex(0);
 
-    fitToRoute(initialMode as any, 0, driving, bike, foot);
+    fitToRoute(
+      initialMode,
+      0,
+      normalizedDriving,
+      normalizedBike,
+      normalizedFoot,
+    );
   };
 
   const fitToRoute = (
-    mode: string,
+    mode: RouteMode,
     index: number,
-    d: any[],
-    b: any[],
-    f: any[],
+    d: RouteData[],
+    b: RouteData[],
+    f: RouteData[],
   ) => {
-    let routes: any[] = [];
+    let routes: RouteData[] = [];
     if (mode === "driving") routes = d;
     else if (mode === "bike") routes = b;
     else routes = f;
@@ -314,7 +463,7 @@ export default function GetDirections() {
         maxLng = -Infinity,
         minLat = Infinity,
         maxLat = -Infinity;
-      coords.forEach((c: any) => {
+      coords.forEach((c: number[]) => {
         if (c[0] < minLng) minLng = c[0];
         if (c[0] > maxLng) maxLng = c[0];
         if (c[1] < minLat) minLat = c[1];
@@ -329,9 +478,10 @@ export default function GetDirections() {
     }
   };
 
-  const handleModeClick = (mode: "driving" | "bike" | "foot") => {
+  const handleModeClick = (mode: RouteMode) => {
     setSelectedMode(mode);
     setSelectedRouteIndex(0); // Reset to primary route
+    fitToRoute(mode, 0, routesData.driving, routesData.bike, routesData.foot);
   };
 
   // 6. Live Navigation
@@ -410,21 +560,22 @@ export default function GetDirections() {
 
   const formatDuration = (seconds: number) => {
     if (!seconds) return "--";
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
+    const totalMinutes = Math.max(1, Math.round(seconds / 60));
+    const hrs = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
     if (hrs > 0) return `${hrs}h ${mins}m`;
-    return `${mins} min`;
+    return `${totalMinutes} min`;
   };
 
-  const getDuration = (mode: string) => {
-    const routes = routesData[mode as keyof typeof routesData];
+  const getDuration = (mode: RouteMode) => {
+    const routes = routesData[mode];
     if (routes && routes.length > 0)
-      return formatDuration((routes[0] as any).duration);
+      return formatDuration(routes[0].duration);
     return "--";
   };
 
-  const getCount = (mode: string) => {
-    const routes = routesData[mode as keyof typeof routesData];
+  const getCount = (mode: RouteMode) => {
+    const routes = routesData[mode];
     return routes ? routes.length : 0;
   };
 
@@ -501,6 +652,8 @@ export default function GetDirections() {
     : userLocation
       ? [userLocation.longitude, userLocation.latitude]
       : [123.8854, 10.3157];
+  const statusIsLoading =
+    statusMsg === "Locating..." || statusMsg === "Calculating routes...";
 
   return (
     <View style={styles.container}>
@@ -571,7 +724,7 @@ export default function GetDirections() {
                   onChangeText={handleAddressChange}
                 />
                 <TouchableOpacity
-                  onPress={handleShowMyLocation}
+                  onPress={() => handleShowMyLocation()}
                   style={styles.locateBtn}
                 >
                   <Ionicons name="locate" size={20} color="#2563eb" />
@@ -708,7 +861,9 @@ export default function GetDirections() {
                       gap: 10,
                     }}
                   >
-                    <ActivityIndicator size="small" color="#2563eb" />
+                    {statusIsLoading && (
+                      <ActivityIndicator size="small" color="#2563eb" />
+                    )}
                     <Text style={styles.emptyText}>{statusMsg}</Text>
                   </View>
                 ) : (

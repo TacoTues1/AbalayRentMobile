@@ -1,11 +1,9 @@
 // supabase/functions/send-email/index.ts
-// @ts-ignore
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-// @ts-ignore
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import { serve } from "std/http/server"
+import { createClient } from "@supabase/supabase-js"
 
-// @ts-ignore
-declare const Deno: any;
+// @ts-ignore: Deno global is provided by the Supabase Edge runtime
+declare const Deno: { env: { get(key: string): string | undefined } };
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -83,32 +81,100 @@ serve(async (req: Request) => {
 
       const attachments = Array.isArray(body?.attachments)
         ? body.attachments
-            .filter((item: any) => item?.name && item?.content)
-            .map((item: any) => ({
+            .filter((item: Record<string, unknown>) => item?.name && item?.content)
+            .map((item: Record<string, unknown>) => ({
               name: String(item.name),
               content: String(item.content),
             }))
         : undefined
 
-      const bugReportRecipient = Deno.env.get('BUG_REPORT_RECIPIENT') || 'alfonzperez92@gmail.com'
+      const supabaseAdmin = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      )
 
-      await sendBrevoEmail({
-        to: bugReportRecipient,
-        subject: `Abalay Bug Report - ${reporterName}`,
-        htmlContent: `
-          <h2>New Bug Report</h2>
-          <p><strong>Source:</strong> ${escapeHtml(source)}</p>
-          <p><strong>Reported by:</strong> ${escapeHtml(reporterName)}</p>
-          <p><strong>User Email:</strong> ${escapeHtml(reporterEmail)}</p>
-          <p><strong>Issue Description:</strong></p>
-          <pre style="white-space: pre-wrap; font-family: Arial, sans-serif;">${escapeHtml(description)}</pre>
-          <p><strong>Attachment:</strong> ${escapeHtml(attachmentNote)}</p>
-        `,
-        attachments,
-      })
+      // Fetch all admin emails
+      const { data: admins, error: adminError } = await supabaseAdmin
+        .from('profiles')
+        .select('email, id')
+        .eq('role', 'admin')
+        .eq('is_deleted', false)
+
+      if (adminError) {
+        console.error('Error fetching admins:', adminError)
+      }
+
+      const adminEmails = (admins || [])
+        .map((a: Record<string, unknown>) => a.email)
+        .filter((email: unknown): email is string => typeof email === 'string' && email.includes('@'))
+      
+      const fallbackEmail = Deno.env.get('BUG_REPORT_RECIPIENT') || 'alfonzperez92@gmail.com'
+      const recipients = adminEmails.length > 0 ? Array.from(new Set(adminEmails)) : [fallbackEmail]
+
+      // Try to save to bug_reports table
+      try {
+        await supabaseAdmin.from('bug_reports').insert({
+          reporter_name: reporterName,
+          reporter_email: reporterEmail === 'N/A' ? null : reporterEmail,
+          description: description,
+          source: source,
+          attachment_note: attachmentNote,
+          status: 'pending',
+          created_at: new Date().toISOString()
+        })
+      } catch (dbError) {
+        console.warn('Could not save bug report to database:', dbError)
+      }
+
+      // Send to all admins
+      await Promise.all(recipients.map((email: string) => 
+        sendBrevoEmail({
+          to: email,
+          subject: `Abalay Bug Report - ${reporterName}`,
+          htmlContent: `
+            <div style="font-family: sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 12px; overflow: hidden;">
+              <div style="background-color: #f97316; padding: 20px; text-align: center;">
+                <h1 style="color: white; margin: 0; font-size: 24px;">New Bug Report</h1>
+              </div>
+              <div style="padding: 24px; background-color: white;">
+                <p style="margin-top: 0;">Hi Admin,</p>
+                <p>A new bug has been reported from the <strong>${escapeHtml(source)}</strong>.</p>
+                
+                <div style="background-color: #fff7ed; border-left: 4px solid #f97316; padding: 16px; margin: 20px 0; border-radius: 4px;">
+                  <p style="margin: 0; font-weight: bold; color: #9a3412;">Description:</p>
+                  <p style="margin: 8px 0 0; white-space: pre-wrap; line-height: 1.6;">${escapeHtml(description)}</p>
+                </div>
+
+                <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+                  <tr>
+                    <td style="padding: 8px 0; border-bottom: 1px solid #f3f4f6; color: #6b7280; font-size: 14px;">Reporter</td>
+                    <td style="padding: 8px 0; border-bottom: 1px solid #f3f4f6; font-weight: 600; text-align: right;">${escapeHtml(reporterName)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 8px 0; border-bottom: 1px solid #f3f4f6; color: #6b7280; font-size: 14px;">Email</td>
+                    <td style="padding: 8px 0; border-bottom: 1px solid #f3f4f6; font-weight: 600; text-align: right;">${escapeHtml(reporterEmail)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 8px 0; border-bottom: 1px solid #f3f4f6; color: #6b7280; font-size: 14px;">Attachment</td>
+                    <td style="padding: 8px 0; border-bottom: 1px solid #f3f4f6; font-style: italic; text-align: right;">${escapeHtml(attachmentNote)}</td>
+                  </tr>
+                </table>
+
+                <div style="margin-top: 30px; text-align: center;">
+                  <a href="https://abalay-rent.me/admin" style="background-color: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 14px;">View in Admin Dashboard</a>
+                </div>
+              </div>
+              <div style="background-color: #f9fafb; padding: 15px; text-align: center; border-top: 1px solid #eee;">
+                <p style="margin: 0; font-size: 12px; color: #9ca3af;">This is an automated system notification from Abalay Rent.</p>
+              </div>
+            </div>
+          `,
+          attachments,
+        })
+      ))
 
       return new Response(
-        JSON.stringify({ success: true, message: 'Bug report sent' }),
+        JSON.stringify({ success: true, message: `Bug report sent to ${recipients.length} admins` }),
         {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           status: 200,
@@ -255,7 +321,7 @@ serve(async (req: Request) => {
     if (bookingError || !booking) throw new Error('Booking not found')
 
     // Get Tenant Email
-    const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(booking.tenant)
+    const { data: userData, error: _userError } = await supabaseAdmin.auth.admin.getUserById(booking.tenant)
     const tenantEmail = userData?.user?.email
 
     if (!tenantEmail) throw new Error('Could not find tenant email')
@@ -286,9 +352,9 @@ serve(async (req: Request) => {
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     )
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     return new Response(
-      JSON.stringify({ error: error?.message }),
+      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
     )
   }

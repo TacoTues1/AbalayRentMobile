@@ -153,13 +153,81 @@ export default function TermsStandalone() {
           </View>
         </View>
 
-        {/* Section 5 */}
+        {/* Section 5 - Subscription & Slot Policy */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <View style={[styles.iconBox, { backgroundColor: "#2563eb" }]}>
+              <Ionicons name="card-outline" size={20} color="white" />
+            </View>
+            <Text style={styles.sectionTitle}>5. Subscription & Slot Policy</Text>
+          </View>
+
+          <Text style={styles.paragraph}>Abalay provides certain features on a freemium basis. Users receive a limited number of free slots and may purchase additional slots to expand their capacity.</Text>
+
+          {/* Landlord Slots */}
+          <View style={[styles.card, { marginBottom: 12 }]}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <Ionicons name="business-outline" size={18} color="black" />
+              <Text style={[styles.cardTitle, { marginBottom: 0, fontSize: 15 }]}>Landlord — Property Slots</Text>
+            </View>
+            <View style={styles.bulletList}>
+              <View style={styles.bulletItem}>
+                <Text style={{ color: "#22c55e", fontSize: 14, marginRight: 8 }}>✓</Text>
+                <Text style={styles.bulletText}><Text style={styles.bold}>3 free property slots</Text> are included with every landlord account upon registration.</Text>
+              </View>
+              <View style={styles.bulletItem}>
+                <Text style={{ color: "#3b82f6", fontSize: 14, marginRight: 8 }}>+</Text>
+                <Text style={styles.bulletText}>Additional property slots may be purchased at <Text style={styles.bold}>₱50.00 per slot</Text>.</Text>
+              </View>
+              <View style={styles.bulletItem}>
+                <Text style={{ color: "#9ca3af", fontSize: 14, marginRight: 8 }}>⬡</Text>
+                <Text style={styles.bulletText}>Each landlord account may hold a <Text style={styles.bold}>maximum of 10 property slots</Text>.</Text>
+              </View>
+              <View style={styles.bulletItem}>
+                <Text style={{ color: "#9ca3af", fontSize: 14, marginRight: 8 }}>∞</Text>
+                <Text style={styles.bulletText}>Purchased slots are <Text style={styles.bold}>permanent</Text> and non-refundable.</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Tenant Slots */}
+          <View style={[styles.card, { marginBottom: 16 }]}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <Ionicons name="people-outline" size={18} color="black" />
+              <Text style={[styles.cardTitle, { marginBottom: 0, fontSize: 15 }]}>Tenant — Family Member Slots</Text>
+            </View>
+            <View style={styles.bulletList}>
+              <View style={styles.bulletItem}>
+                <Text style={{ color: "#22c55e", fontSize: 14, marginRight: 8 }}>✓</Text>
+                <Text style={styles.bulletText}><Text style={styles.bold}>1 free family member slot</Text> is included with every tenant account upon registration.</Text>
+              </View>
+              <View style={styles.bulletItem}>
+                <Text style={{ color: "#3b82f6", fontSize: 14, marginRight: 8 }}>+</Text>
+                <Text style={styles.bulletText}>Additional family member slots may be purchased at <Text style={styles.bold}>₱50.00 per slot</Text>.</Text>
+              </View>
+              <View style={styles.bulletItem}>
+                <Text style={{ color: "#9ca3af", fontSize: 14, marginRight: 8 }}>∞</Text>
+                <Text style={styles.bulletText}>Purchased slots are <Text style={styles.bold}>permanent</Text> and non-refundable.</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Payment Note */}
+          <View style={{ backgroundColor: "#eff6ff", borderWidth: 1, borderColor: "#dbeafe", borderRadius: 12, padding: 16 }}>
+            <Text style={{ fontSize: 13, color: "#1e3a5f", lineHeight: 20 }}>
+              <Text style={styles.bold}>Payment: </Text>
+              All slot purchases are processed securely through PayMongo. Accepted payment methods include GCash, Maya, and credit/debit cards. Once a slot is purchased, it is immediately available and permanently added to your account.
+            </Text>
+          </View>
+        </View>
+
+        {/* Section 6 */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={styles.iconBox}>
               <Ionicons name="shield-checkmark" size={20} color="white" />
             </View>
-            <Text style={styles.sectionTitle}>5. Privacy & Data</Text>
+            <Text style={styles.sectionTitle}>6. Privacy & Data</Text>
           </View>
 
           <Text style={styles.paragraph}>
@@ -167,13 +235,13 @@ export default function TermsStandalone() {
           </Text>
         </View>
 
-        {/* Section 6 */}
+        {/* Section 7 */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={styles.iconBox}>
               <Ionicons name="alert-circle-outline" size={20} color="white" />
             </View>
-            <Text style={styles.sectionTitle}>6. Disclaimers & Limitations</Text>
+            <Text style={styles.sectionTitle}>7. Disclaimers & Limitations</Text>
           </View>
 
           <View style={styles.bulletList}>

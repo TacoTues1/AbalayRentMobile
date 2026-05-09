@@ -45,6 +45,10 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // `SIGNED_OUT` event if the user's session is terminated. This should
 // only be registered once.
 if (typeof AppState?.addEventListener === 'function') {
+  if (AppState.currentState === 'active') {
+    supabase.auth.startAutoRefresh();
+  }
+
   AppState.addEventListener('change', (state) => {
     if (state === 'active') {
       supabase.auth.startAutoRefresh();
