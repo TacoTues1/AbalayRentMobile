@@ -151,7 +151,10 @@ export default function Payments() {
 
   // Constants
   const getApiUrl = () => {
-    let url = process.env.EXPO_PUBLIC_API_URL || "";
+    const raw = (process.env.EXPO_PUBLIC_API_URL || "").trim();
+    if (!raw) return "";
+
+    const url = raw.replace(/\/+$/, "");
     // If on Android Emulator, force 10.0.2.2 if url is localhost OR if url is the LAN IP but unreachable
     // But usually lan IP (192...) works on Emulator. Localhost doesn't.
     // If user set 172... on Emulator, it might fail.
@@ -933,11 +936,7 @@ export default function Payments() {
     }
 
     if (selectedBill) {
-      const exactAmount =
-        (parseFloat(selectedBill.rent_amount || 0) || 0) +
-        (parseFloat(selectedBill.other_bills || 0) || 0) +
-        (parseFloat(selectedBill.security_deposit_amount || 0) || 0) +
-        (parseFloat(selectedBill.advance_amount || 0) || 0);
+      const exactAmount = getBillTotalAmount(selectedBill);
 
       if (Math.abs(amountVal - exactAmount) >= 0.01) {
         return `Exact amount required: ₱${exactAmount.toFixed(2)}.`;
@@ -946,6 +945,17 @@ export default function Payments() {
 
     return null;
   };
+
+  const getBillTotalAmount = (bill: any) =>
+    (parseFloat(bill?.rent_amount || 0) || 0) +
+    (parseFloat(bill?.other_bills || 0) || 0) +
+    (parseFloat(bill?.security_deposit_amount || 0) || 0) +
+    (parseFloat(bill?.advance_amount || 0) || 0);
+
+  const wait = (ms: number) =>
+    new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
 
   const getPaymentMethodLabel = (method: string) => {
     if (method === "qr_code") return "QR Code";
@@ -1009,6 +1019,166 @@ export default function Payments() {
     return null;
   };
 
+  const readResponseJson = async (response: Response) => {
+    const text = await response.text();
+    if (!text) return {};
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      return {};
+    }
+  };
+
+  const getPayMongoVerificationState = (payload: any) => {
+    const candidates = [
+      payload?.status,
+      payload?.paymentStatus,
+      payload?.payment_status,
+      payload?.data?.status,
+      payload?.data?.paymentStatus,
+      payload?.data?.payment_status,
+      payload?.payment?.status,
+      payload?.payment?.attributes?.status,
+      payload?.checkout?.status,
+      payload?.checkout?.attributes?.payment_intent?.attributes?.status,
+    ]
+      .map((value) => String(value || "").toLowerCase())
+      .filter(Boolean);
+
+    const hasPaidStatus = candidates.some((status) =>
+      ["paid", "succeeded", "success"].includes(status),
+    );
+    const hasPendingStatus = candidates.some((status) =>
+      ["pending", "awaiting_payment_method", "processing"].includes(status),
+    );
+
+    if (
+      payload?.pending === true ||
+      payload?.paid === false ||
+      payload?.verified === false ||
+      hasPendingStatus
+    ) {
+      return "pending";
+    }
+
+    if (
+      payload?.success === true ||
+      payload?.paid === true ||
+      payload?.verified === true ||
+      hasPaidStatus
+    ) {
+      return "paid";
+    }
+
+    return null;
+  };
+
+  const syncPayMongoPaymentRecords = async (
+    bill: any,
+    amountPaid: number,
+    checkoutSessionId?: string,
+  ) => {
+    const now = new Date().toISOString();
+    const landlordId = await getLandlordIdFromBill(bill);
+    const billTotal = getBillTotalAmount(bill) || amountPaid;
+
+    const updatePayload: Record<string, any> = {
+      status: "paid",
+      paid_at: now,
+      payment_method: "paymongo",
+      amount_paid: amountPaid,
+    };
+
+    const { data: updatedBills, error: updateError } = await supabase
+      .from("payment_requests")
+      .update(updatePayload)
+      .eq("id", bill.id)
+      .select(
+        "id, property_id, application_id, tenant, landlord, due_date, rent_amount, other_bills, bills_description, payment_id",
+      );
+
+    if (updateError) {
+      console.warn("PayMongo local bill sync failed:", updateError.message);
+    }
+
+    const syncedBill = updatedBills?.[0] || bill;
+    let paymentId = syncedBill?.payment_id || null;
+
+    if (!paymentId) {
+      const { data: existingPayments, error: existingPaymentError } =
+        await supabase
+          .from("payments")
+          .select("id")
+          .eq("tenant", syncedBill.tenant || bill.tenant || session.user.id)
+          .eq("property_id", syncedBill.property_id || bill.property_id)
+          .eq("due_date", syncedBill.due_date || bill.due_date)
+          .limit(1);
+
+      if (!existingPaymentError && existingPayments?.[0]?.id) {
+        paymentId = existingPayments[0].id;
+      }
+    }
+
+    if (!paymentId) {
+      const { data: payment, error: paymentError } = await supabase
+        .from("payments")
+        .insert({
+          property_id: syncedBill.property_id || bill.property_id,
+          application_id: syncedBill.application_id || bill.application_id,
+          tenant: syncedBill.tenant || bill.tenant || session.user.id,
+          landlord: landlordId || syncedBill.landlord || bill.landlord,
+          amount: billTotal,
+          other_bills: syncedBill.other_bills || bill.other_bills || 0,
+          bills_description: syncedBill.bills_description || bill.bills_description,
+          method: "paymongo",
+          status: "recorded",
+          due_date: syncedBill.due_date || bill.due_date,
+          paid_at: now,
+          currency: "PHP",
+        })
+        .select("id")
+        .single();
+
+      if (paymentError) {
+        console.warn("PayMongo payment history sync failed:", paymentError.message);
+      } else {
+        paymentId = payment?.id || null;
+      }
+    }
+
+    if (paymentId && !syncedBill?.payment_id) {
+      const { error: paymentIdError } = await supabase
+        .from("payment_requests")
+        .update({ payment_id: paymentId })
+        .eq("id", bill.id);
+
+      if (paymentIdError) {
+        console.warn(
+          "PayMongo payment request link sync failed:",
+          paymentIdError.message,
+        );
+      }
+    }
+
+    setPaymentRequests((prev) =>
+      prev.map((item) =>
+        item.id === bill.id
+          ? {
+              ...item,
+              status: "paid",
+              paid_at: now,
+              payment_method: "paymongo",
+              amount_paid: amountPaid,
+              payment_id: paymentId || item.payment_id,
+              paymongo_checkout_session_id:
+                checkoutSessionId || item.paymongo_checkout_session_id,
+            }
+          : item,
+      ),
+    );
+  };
+
   const notifyLandlordPaymentChannels = async (
     bill: any,
     amountPaid: number,
@@ -1035,32 +1205,47 @@ export default function Payments() {
       ? `${payerLabel} ${payerName} paid ₱${safeAmount.toLocaleString()} for ${propertyTitle} via ${methodLabel}${monthsText}. Please confirm payment receipt.`
       : `${payerLabel} ${payerName} paid ₱${safeAmount.toLocaleString()} for ${propertyTitle} via ${methodLabel}${monthsText}.`;
 
+    const notifyLandlordViaBackend = async () => {
+      if (!API_URL || !bill?.id) return false;
+
+      try {
+        const response = await fetch(`${API_URL}/api/notify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: notificationType,
+            recordId: bill.id,
+            actorId: session.user.id,
+            payerRole: isFamilyMember ? "family_member" : "tenant",
+            isFamilyMember,
+            amount: safeAmount,
+            paymentMethod: method,
+          }),
+        });
+
+        if (!response.ok) {
+          console.warn(
+            "Backend landlord payment notification failed:",
+            response.status,
+          );
+          return false;
+        }
+
+        return true;
+      } catch (fallbackErr) {
+        console.warn(
+          "Backend landlord payment notification failed:",
+          fallbackErr,
+        );
+        return false;
+      }
+    };
+
     if (!landlordId) {
       console.warn(
         "notifyLandlordPaymentChannels: landlord id not found, trying backend notify fallback",
       );
-      if (API_URL && bill?.id) {
-        try {
-          await fetch(`${API_URL}/api/notify`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              type: notificationType,
-              recordId: bill.id,
-              actorId: session.user.id,
-              payerRole: isFamilyMember ? "family_member" : "tenant",
-              isFamilyMember,
-              amount: safeAmount,
-              paymentMethod: method,
-            }),
-          });
-        } catch (fallbackErr) {
-          console.error(
-            "Fallback backend notify failed for landlord payment:",
-            fallbackErr,
-          );
-        }
-      }
+      await notifyLandlordViaBackend();
       return;
     }
 
@@ -1080,28 +1265,11 @@ export default function Payments() {
     );
 
     if (!landlordNotification) {
-      console.error("Failed to create landlord in-app payment notification");
-      if (API_URL && bill?.id) {
-        try {
-          await fetch(`${API_URL}/api/notify`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              type: notificationType,
-              recordId: bill.id,
-              actorId: session.user.id,
-              payerRole: isFamilyMember ? "family_member" : "tenant",
-              isFamilyMember,
-              amount: safeAmount,
-              paymentMethod: method,
-            }),
-          });
-        } catch (fallbackErr) {
-          console.error(
-            "Fallback backend notify failed for landlord payment:",
-            fallbackErr,
-          );
-        }
+      const backendNotified = await notifyLandlordViaBackend();
+      if (!backendNotified) {
+        console.warn(
+          "Landlord payment notification could not be created locally or through the backend.",
+        );
       }
     }
 
@@ -1212,53 +1380,43 @@ export default function Payments() {
         "dob",
         "qrph",
       ];
-      console.log(
-        `Sending request to: ${API_URL}/api/payments/create-paymongo-checkout`,
-      );
+      const checkoutEndpoint = `${API_URL}/api/payments/create-paymongo-checkout`;
+      const verifyEndpoint = `${API_URL}/api/payments/process-paymongo-success`;
+      console.log(`Sending request to: ${checkoutEndpoint}`);
 
       let res: Response | null = null;
       let data: any = null;
+      const controller = new AbortController();
+      const checkoutTimeoutMs = 120000;
+      const timeoutId = setTimeout(
+        () => controller.abort(),
+        checkoutTimeoutMs,
+      );
 
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        const controller = new AbortController();
-        const timeoutMs = attempt === 1 ? 30000 : 45000;
-        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        res = await fetch(checkoutEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            amount: amountVal,
+            description: `Payment for ${selectedBill.property?.title || "Property"}`,
+            remarks: `Payment Request ID: ${selectedBill.id}`,
+            paymentRequestId: selectedBill.id,
+            payment_request_id: selectedBill.id,
+            bill_id: selectedBill.id,
+            allowedMethods: allMethods,
+          }),
+          signal: controller.signal,
+        });
 
+        const responseText = await res.text();
         try {
-          res = await fetch(
-            `${API_URL}/api/payments/create-paymongo-checkout`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                amount: amountVal,
-                description: `Payment for ${selectedBill.property?.title || "Property"}`,
-                remarks: `Payment Request ID: ${selectedBill.id}`,
-                paymentRequestId: selectedBill.id,
-                allowedMethods: allMethods,
-              }),
-              signal: controller.signal,
-            },
-          );
-
-          const responseText = await res.text();
-          try {
-            data = responseText ? JSON.parse(responseText) : {};
-          } catch {
-            data = {};
-          }
-          break;
-        } catch (requestErr: any) {
-          if (requestErr?.name === "AbortError" && attempt < 2) {
-            console.warn(
-              `PayMongo checkout request timed out (attempt ${attempt}). Retrying...`,
-            );
-            continue;
-          }
-          throw requestErr;
-        } finally {
-          clearTimeout(timeoutId);
+          data = responseText ? JSON.parse(responseText) : {};
+        } catch {
+          data = {};
         }
+      } finally {
+        clearTimeout(timeoutId);
       }
 
       if (!res) {
@@ -1270,12 +1428,20 @@ export default function Payments() {
       if (!res.ok)
         throw new Error(data?.error || "Failed to connect to gateway");
 
-      if (data.checkoutUrl) {
-        const billId = selectedBill.id;
-        const sessionId = data.checkoutSessionId;
+      const checkoutUrl = data.checkoutUrl || data.checkout_url || data.url;
 
-        console.log("Opening browser to:", data.checkoutUrl);
-        await WebBrowser.openBrowserAsync(data.checkoutUrl);
+      if (checkoutUrl) {
+        const bill = selectedBill;
+        const billId = bill.id;
+        const sessionId =
+          data.checkoutSessionId ||
+          data.checkout_session_id ||
+          data.sessionId ||
+          data.session_id ||
+          data.id;
+
+        console.log("Opening browser to:", checkoutUrl);
+        await WebBrowser.openBrowserAsync(checkoutUrl);
 
         // Switch from redirecting to verifying state after browser closes
         setUploading(false);
@@ -1286,13 +1452,16 @@ export default function Payments() {
         console.log("Browser closed, starting payment verification polling...");
         Alert.alert("Verifying", "Checking payment status...");
 
-        let attempts = 0;
         const maxAttempts = 60;
+        const pollDelayMs = 5000;
+        let completed = false;
 
-        const resolveSuccessFromBillStatus = async () => {
+        const resolveSuccessFromBillStatus = async (): Promise<
+          "paid" | "pending_confirmation" | false
+        > => {
           const { data: latestBill, error: latestBillError } = await supabase
             .from("payment_requests")
-            .select("id, status, payment_method, paid_at")
+            .select("id, status, payment_method, paid_at, payment_id")
             .eq("id", billId)
             .maybeSingle();
 
@@ -1301,103 +1470,135 @@ export default function Payments() {
           const status = String(latestBill?.status || "").toLowerCase();
           // If backend/webhook already processed the payment, stop polling and treat as success.
           if (status === "paid" || status === "pending_confirmation") {
-            clearInterval(pollInterval);
             console.log(
               "PayMongo payment already reflected in bill status:",
               status,
             );
-
-            if (status === "paid") {
-              await notifyLandlordPaymentChannels(
-                selectedBill,
-                amountVal,
-                "paymongo",
-                1,
-              );
-            }
-
-            await notifyTenantPaymentSuccess(selectedBill, {
-              status: status === "paid" ? "confirmed" : "submitted",
-              amount: amountVal,
-              method: "paymongo",
-            });
-
-            Alert.alert("Success", "Payment verified and processed!");
-            setIsPayMongoVerifying(false);
-            setShowPayModal(false);
-            loadData(session.user.id, profile.role);
-            setUploading(false);
-            return true;
+            return status;
           }
 
           return false;
         };
 
-        const pollInterval = setInterval(async () => {
-          attempts++;
+        const completeVerification = async (
+          status: "paid" | "pending_confirmation",
+        ) => {
+          if (completed) return;
+          completed = true;
+
+          if (status === "paid") {
+            try {
+              await syncPayMongoPaymentRecords(bill, amountVal, sessionId);
+            } catch (syncErr) {
+              console.warn("PayMongo local sync warning:", syncErr);
+            }
+
+            try {
+              await notifyLandlordPaymentChannels(bill, amountVal, "paymongo", 1);
+            } catch (notifyErr) {
+              console.warn("PayMongo landlord notification warning:", notifyErr);
+            }
+          }
+
+          try {
+            await notifyTenantPaymentSuccess(bill, {
+              status: status === "paid" ? "confirmed" : "submitted",
+              amount: amountVal,
+              method: "paymongo",
+            });
+          } catch (notifyErr) {
+            console.warn("PayMongo tenant notification warning:", notifyErr);
+          }
+
+          Alert.alert(
+            status === "paid" ? "Success" : "Payment Submitted",
+            status === "paid"
+              ? "Payment verified and processed!"
+              : "Payment submitted and is waiting for confirmation.",
+          );
+          setIsPayMongoVerifying(false);
+          setShowPayModal(false);
+          setUploading(false);
+
+          try {
+            await loadData(session.user.id, profile.role);
+          } catch (loadErr) {
+            console.warn("PayMongo refresh warning:", loadErr);
+          }
+        };
+
+        for (let attempts = 1; attempts <= maxAttempts; attempts++) {
           console.log(`PayMongo poll attempt ${attempts}/${maxAttempts}`);
 
           try {
-            const verifyRes = await fetch(
-              `${API_URL}/api/payments/process-paymongo-success`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ paymentRequestId: billId, sessionId }),
-              },
-            );
+            const verifyRes = await fetch(verifyEndpoint, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                paymentRequestId: billId,
+                payment_request_id: billId,
+                bill_id: billId,
+                sessionId,
+                checkoutSessionId: sessionId,
+                checkout_session_id: sessionId,
+              }),
+            });
+            const verifyData = await readResponseJson(verifyRes);
+            const verificationState = getPayMongoVerificationState(verifyData);
 
-            if (verifyRes.ok) {
-              // SUCCESS: Payment verified
-              clearInterval(pollInterval);
+            if (verifyRes.ok && verificationState === "paid") {
               console.log("PayMongo payment verified successfully!");
-              await notifyLandlordPaymentChannels(
-                selectedBill,
-                amountVal,
-                "paymongo",
-                1,
-              );
-              await notifyTenantPaymentSuccess(selectedBill, {
-                status: "confirmed",
-                amount: amountVal,
-                method: "paymongo",
-              });
-              Alert.alert("Success", "Payment verified and processed!");
-              setIsPayMongoVerifying(false);
-              setShowPayModal(false);
-              loadData(session.user.id, profile.role);
-              setUploading(false);
-              return;
+              await completeVerification("paid");
+              break;
+            }
+
+            if (verifyRes.ok && verificationState === "pending") {
+              console.log("PayMongo verification still pending:", verifyData);
+            } else if (!verifyRes.ok) {
+              console.log("PayMongo verification not ready:", verifyData);
             }
 
             const alreadyProcessed = await resolveSuccessFromBillStatus();
-            if (alreadyProcessed) return;
+            if (alreadyProcessed) {
+              await completeVerification(alreadyProcessed);
+              break;
+            }
           } catch (e) {
             console.log("Poll error (will retry):", e);
 
             // If API verification call failed but bill status is already updated, stop showing timeout.
             try {
               const alreadyProcessed = await resolveSuccessFromBillStatus();
-              if (alreadyProcessed) return;
+              if (alreadyProcessed) {
+                await completeVerification(alreadyProcessed);
+                break;
+              }
             } catch {
               // Ignore and continue polling.
             }
           }
 
-          if (attempts >= maxAttempts) {
+          if (completed) break;
+
+          if (attempts === maxAttempts) {
             // Before timeout, do one final status check to avoid false timeout messages.
             const alreadyProcessed = await resolveSuccessFromBillStatus();
-            if (!alreadyProcessed) {
-              clearInterval(pollInterval);
-              setIsPayMongoVerifying(false);
-              setUploading(false);
-              Alert.alert(
-                "Verification Pending",
-                "Automatic verification timed out. The payment may still be processing. Please check your payment history later.",
-              );
+            if (alreadyProcessed) {
+              await completeVerification(alreadyProcessed);
+              break;
             }
+
+            setIsPayMongoVerifying(false);
+            setUploading(false);
+            Alert.alert(
+              "Verification Pending",
+              "Automatic verification timed out. The payment may still be processing. Pull down to refresh your payments in a few minutes.",
+            );
+            break;
           }
-        }, 5000); // Poll every 5 seconds
+
+          await wait(pollDelayMs);
+        }
       } else {
         Alert.alert("Error", "No checkout URL returned.");
         setUploading(false);
@@ -1411,12 +1612,12 @@ export default function Payments() {
       if (errorName === "AbortError") {
         Alert.alert(
           "Timeout",
-          "Connection timed out while creating checkout. Please try again.",
+          "The payment server took too long to create the checkout. Please check your connection and try again.",
         );
       } else if (errorMessage.includes("Network request failed")) {
         Alert.alert(
           "Connection Error",
-          `Could not reach ${API_URL}. Ensure you are on the same Wi-Fi as the server.`,
+          "Could not reach the payment server. Please check your connection and try again.",
         );
       } else {
         Alert.alert(
@@ -1442,7 +1643,7 @@ export default function Payments() {
        * to create a Checkout Session that returns a URL
        */
       const response = await fetch(
-        `${process.env.EXPO_PUBLIC_API_URL}/api/stripe/create-checkout-session`,
+        `${API_URL}/api/stripe/create-checkout-session`,
         {
           method: "POST",
           headers: {
@@ -1452,8 +1653,8 @@ export default function Payments() {
             amount: amountVal,
             description: `Payment for ${selectedBill.property?.title} (${selectedBill.is_move_in_payment ? "Move-in" : "Bill"})`,
             bill_id: selectedBill.id,
-            success_url: `${process.env.EXPO_PUBLIC_API_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${process.env.EXPO_PUBLIC_API_URL}/payment-cancel`,
+            success_url: `${API_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${API_URL}/payment-cancel`,
             customer_email: session.user.email,
           }),
         },
@@ -1499,7 +1700,7 @@ export default function Payments() {
 
         // Step 1: Retrieve the paymentIntentId from the checkout session
         const sessionRes = await fetch(
-          `${process.env.EXPO_PUBLIC_API_URL}/api/stripe/retrieve-session`,
+          `${API_URL}/api/stripe/retrieve-session`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1535,7 +1736,7 @@ export default function Payments() {
 
         // Step 2: Call process-stripe-success with the correct paymentIntentId
         const res = await fetch(
-          `${process.env.EXPO_PUBLIC_API_URL}/api/payments/process-stripe-success`,
+          `${API_URL}/api/payments/process-stripe-success`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1710,17 +1911,61 @@ export default function Payments() {
   };
 
   // --- RENDER ---
-  const getTotal = (bill: any) =>
-    (parseFloat(bill.rent_amount) || 0) +
-    (parseFloat(bill.other_bills) || 0) +
-    (parseFloat(bill.security_deposit_amount) || 0) +
-    (parseFloat(bill.advance_amount) || 0);
+  const getTotal = (bill: any) => {
+    const itemizedTotal =
+      (parseFloat(bill.rent_amount) || 0) +
+      (parseFloat(bill.other_bills) || 0) +
+      (parseFloat(bill.security_deposit_amount) || 0) +
+      (parseFloat(bill.advance_amount) || 0);
+
+    return (
+      itemizedTotal ||
+      parseFloat(
+        bill.amount_paid ||
+          bill.amount ||
+          bill.total_amount ||
+          bill.paid_amount ||
+          0,
+      ) ||
+      0
+    );
+  };
 
   // Bill type detection (matching web version)
+  const isHouseRentLikeBill = (item: any) => {
+    const rent = parseFloat(item?.rent_amount) || 0;
+    if (rent > 0) return true;
+
+    if (
+      item?.is_move_in_payment ||
+      item?.is_advance_payment ||
+      item?.is_renewal_payment
+    ) {
+      return true;
+    }
+
+    const text = [
+      item?.bill_type,
+      item?.bills_description,
+      item?.description,
+      item?.notes,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    const hasRentWord = /\brent(?:al)?\b/.test(text);
+
+    return (
+      text.includes("house rent") ||
+      hasRentWord ||
+      text.includes("move-in") ||
+      text.includes("move in") ||
+      text.includes("movein")
+    );
+  };
+
   const getBillType = (item: any) => {
-    const rent = parseFloat(item.rent_amount) || 0;
-    if (rent > 0) return "House Rent";
-    return "Other Bill";
+    return isHouseRentLikeBill(item) ? "House Rent" : "Other Bill";
   };
 
   // Total Income calculated from payment_requests (matching website logic)
@@ -1740,31 +1985,70 @@ export default function Payments() {
         Number(
           p?.amount_paid ?? p?.amount ?? p?.total_amount ?? p?.paid_amount ?? 0,
         ) || 0;
+      const billDescription =
+        p?.bills_description || p?.notes || p?.description || "Payment history";
+      const rentAmount = Number(p?.rent_amount || 0) || 0;
+      const otherBills = Number(p?.other_bills || 0) || 0;
+      const hasItemizedAmounts =
+        rentAmount > 0 ||
+        otherBills > 0 ||
+        Number(p?.security_deposit_amount || 0) > 0 ||
+        Number(p?.advance_amount || 0) > 0;
+      const isRentHistory = isHouseRentLikeBill({
+        ...p,
+        bills_description: billDescription,
+      });
 
       return {
         id: `history-${p?.id || Math.random().toString(36).slice(2)}`,
         status: "paid",
         amount_paid: paidAmount,
-        other_bills: paidAmount,
+        rent_amount:
+          rentAmount || (isRentHistory && !hasItemizedAmounts ? paidAmount : 0),
+        other_bills:
+          otherBills || (!isRentHistory && !hasItemizedAmounts ? paidAmount : 0),
+        security_deposit_amount: p?.security_deposit_amount || 0,
+        advance_amount: p?.advance_amount || 0,
         due_date: p?.paid_at || p?.created_at || null,
         paid_at: p?.paid_at || p?.created_at || null,
+        created_at: p?.created_at || null,
+        updated_at: p?.updated_at || p?.paid_at || p?.created_at || null,
         payment_method: p?.method || p?.payment_method || null,
-        bills_description: p?.notes || p?.description || "Payment history",
+        bills_description: billDescription,
         properties: p?.properties || null,
         tenant_profile: p?.profiles || p?.tenant_profile || null,
         landlord_profile: p?.landlord_profile || null,
+        is_move_in_payment:
+          Boolean(p?.is_move_in_payment) ||
+          billDescription.toLowerCase().includes("move-in") ||
+          billDescription.toLowerCase().includes("move in"),
+        is_advance_payment: Boolean(p?.is_advance_payment),
+        is_renewal_payment: Boolean(p?.is_renewal_payment),
         is_history_only: true,
       };
     });
 
+  const getBillActivityTime = (item: any) => {
+    const candidates = [
+      item?.updated_at,
+      item?.paid_at,
+      item?.created_at,
+      item?.due_date,
+    ];
+
+    for (const value of candidates) {
+      if (!value) continue;
+      const time = new Date(value).getTime();
+      if (!Number.isNaN(time)) return time;
+    }
+
+    return 0;
+  };
+
   const billsForDisplay = [...paymentRequests, ...paymentHistoryBills].sort(
     (a: any, b: any) => {
-      const aTime = new Date(
-        a?.created_at || a?.paid_at || a?.due_date || 0,
-      ).getTime();
-      const bTime = new Date(
-        b?.created_at || b?.paid_at || b?.due_date || 0,
-      ).getTime();
+      const aTime = getBillActivityTime(a);
+      const bTime = getBillActivityTime(b);
       return bTime - aTime;
     },
   );
@@ -2037,7 +2321,7 @@ export default function Payments() {
             }}
             numberOfLines={2}
           >
-            "{item.bills_description}"
+            {`"${item.bills_description}"`}
           </Text>
         )}
 

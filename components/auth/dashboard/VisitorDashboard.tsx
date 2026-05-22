@@ -4,32 +4,32 @@ import * as Location from "expo-location";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Dimensions,
-    Easing,
-    Image,
-    Keyboard,
-    KeyboardAvoidingView,
-    Linking,
-    Modal,
-    Platform,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
-    View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  Easing,
+  Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  Linking,
+  Modal,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
 import CalendarPicker from "../../../components/ui/CalendarPicker";
 import { useRealtime } from "../../../hooks/useRealtime";
 import { createNotification } from "../../../lib/notifications";
 import {
-    addDismissedReviewId,
-    getDismissedReviewIds,
+  addDismissedReviewId,
+  getDismissedReviewIds,
 } from "../../../lib/reviewDismissals";
 import { supabase } from "../../../lib/supabase";
 import { useTheme } from "../../../lib/theme";
@@ -1008,6 +1008,7 @@ export default function VisitorDashboard({ session, profile }: any) {
   const [pendingPayments, setPendingPayments] = useState<any[]>([]);
   const [paymentHistory, setPaymentHistory] = useState<any[]>([]);
   const [nextPaymentDate, setNextPaymentDate] = useState<string>("Loading...");
+  const [isCalculating, setIsCalculating] = useState(false);
   const [lastRentPeriod, setLastRentPeriod] = useState<string>("N/A");
   const [lastPayment, setLastPayment] = useState<any>(null);
   const [securityDepositPaid, setSecurityDepositPaid] = useState(false);
@@ -1068,6 +1069,37 @@ export default function VisitorDashboard({ session, profile }: any) {
 
   // Track if user already skipped the review modal this session
   const reviewSkippedThisSession = useRef(false);
+  const handledReviewIdsRef = useRef<Set<string>>(new Set());
+
+  const normalizeReviewIdentity = (id: unknown) => {
+    if (id === null || id === undefined) return "";
+    return String(id).trim();
+  };
+
+  const getReviewTargetIds = (target: any) =>
+    [
+      target?.id,
+      target?.occupancy_id,
+      target?.property_id,
+      target?.property?.id,
+    ]
+      .map(normalizeReviewIdentity)
+      .filter(Boolean);
+
+  const rememberReviewHandled = async (target: any, persist = false) => {
+    const ids = Array.from(new Set(getReviewTargetIds(target)));
+    ids.forEach((id) => handledReviewIdsRef.current.add(id));
+
+    if (!persist) return;
+
+    for (const id of ids) {
+      try {
+        await addDismissedReviewId(id);
+      } catch (e) {
+        console.error("Failed to save dismissed review preference", e);
+      }
+    }
+  };
 
   const toggleDontShowAgain = () => {
     const next = !dontShowAgainRef.current;
@@ -1155,15 +1187,11 @@ export default function VisitorDashboard({ session, profile }: any) {
     }
   }, [occupancy]);
 
-  // Financial Calc Effect
-  useEffect(() => {
-    if (occupancy) {
-      calculateNextPayment(occupancy.id, occupancy);
-    }
-  }, [pendingPayments, paymentHistory, occupancy]);
+  // Financial Calc Effect - REMOVED: Now called directly in loadFinancials to ensure sync
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
+    setNextPaymentDate("Loading...");
     loadInitialData();
   }, []);
 
@@ -1198,21 +1226,29 @@ export default function VisitorDashboard({ session, profile }: any) {
 
       // Fetch upcoming availability dates securely via Edge Function (bypasses RLS)
       const occupiedPropertyIds = (allProps || [])
-        .filter((p: any) => String(p?.status || "").toLowerCase() === "occupied")
+        .filter(
+          (p: any) => String(p?.status || "").toLowerCase() === "occupied",
+        )
         .map((p: any) => p.id)
         .filter(Boolean);
 
       let availabilityMap: Record<string, string> = {};
       if (occupiedPropertyIds.length > 0) {
         try {
-          const { data, error } = await supabase.functions.invoke("property-availability", {
-            body: { propertyIds: occupiedPropertyIds },
-          });
+          const { data, error } = await supabase.functions.invoke(
+            "property-availability",
+            {
+              body: { propertyIds: occupiedPropertyIds },
+            },
+          );
           if (!error && data?.availability) {
             availabilityMap = data.availability;
           }
         } catch (err) {
-          console.error("Error fetching upcoming availability from Edge Function:", err);
+          console.error(
+            "Error fetching upcoming availability from Edge Function:",
+            err,
+          );
         }
       }
 
@@ -2211,6 +2247,8 @@ export default function VisitorDashboard({ session, profile }: any) {
       );
       setSecurityDepositPaid(!!paidDep);
     }
+
+    await calculateNextPayment(occupancyId, occData, pending, occupancyHistory);
   };
 
   // --- LOGIC: NEXT BILL & DEPOSIT ---
@@ -2219,36 +2257,57 @@ export default function VisitorDashboard({ session, profile }: any) {
     return;
   };
 
+  const parseDueDate = (value: any): Date | null => {
+    if (!value) return null;
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+
+  const toUtcDayStamp = (value: any): number | null => {
+    const d = parseDueDate(value);
+    if (!d) return null;
+    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  };
+
+  const formatDate = (d: Date) =>
+    d.toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+
   const calculateNextPayment = async (
     occupancyId: string,
     currentOccupancy: any,
     overridePending?: any[],
     overridePaid?: any[],
   ) => {
-    const parseDueDate = (value: any): Date | null => {
-      if (!value) return null;
-      const d = new Date(value);
-      return Number.isNaN(d.getTime()) ? null : d;
-    };
-
-    const toUtcDayStamp = (value: any): number | null => {
-      const d = parseDueDate(value);
-      if (!d) return null;
-      return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-    };
-
-    const formatDate = (d: Date) =>
-      d.toLocaleDateString("en-US", {
-        month: "long",
-        day: "numeric",
-        year: "numeric",
-        timeZone: "UTC",
-      });
+    setIsCalculating(true);
 
     const currentPropertyId = currentOccupancy?.property_id || null;
     const occupancyStartDate = parseDueDate(currentOccupancy?.start_date);
+    const getRentCycleAmount = (bill: any) => {
+      const billRentAmount = Number(bill?.rent_amount || 0);
+      if (billRentAmount > 0) return billRentAmount;
+
+      return (
+        Number(currentOccupancy?.rent_amount || 0) ||
+        Number(currentOccupancy?.property?.price || 0) ||
+        0
+      );
+    };
     const isRentLikeBill = (bill: any) => {
       if (!bill) return false;
+
+      // Only exclude if it's purely a security deposit bill (no rent or advance)
+      if (
+        Number(bill.security_deposit_amount || 0) > 0 &&
+        Number(bill.rent_amount || 0) === 0 &&
+        Number(bill.advance_amount || 0) === 0
+      ) {
+        return false;
+      }
 
       const rentAmount = Number(bill.rent_amount || 0);
       if (rentAmount > 0) return true;
@@ -2262,7 +2321,13 @@ export default function VisitorDashboard({ session, profile }: any) {
       }
 
       const text = String(bill.bills_description || "").toLowerCase();
-      return text.includes("rent") || text.includes("house");
+      const hasRentWord = /\brent(?:al)?\b/.test(text);
+      return (
+        hasRentWord ||
+        text.includes("house") ||
+        text.includes("move-in") ||
+        text.includes("move in")
+      );
     };
 
     // Some historical rows can carry a different occupancy_id even though they
@@ -2371,37 +2436,56 @@ export default function VisitorDashboard({ session, profile }: any) {
       ? toUtcDayStamp(latestPaidRentBill.due_date)
       : null;
 
+    const earliestPending = relatedPendingBills[0];
     let chosenDueDate: Date | null = null;
 
-    if (latestPaidRentBill && latestPaidDue && latestPaidDayStamp !== null) {
-      // Ignore stale pending bills earlier than or equal to latest paid due date.
-      const pendingAfterPaid = relatedPendingBills.find((bill: any) => {
-        const dueDayStamp = toUtcDayStamp(bill.due_date);
-        return dueDayStamp !== null && dueDayStamp > latestPaidDayStamp;
-      });
-
-      if (pendingAfterPaid) {
-        chosenDueDate = parseDueDate(pendingAfterPaid.due_date);
+    if (earliestPending) {
+      chosenDueDate = parseDueDate(earliestPending.due_date);
+      if (latestPaidDue) {
+        setLastRentPeriod(
+          latestPaidDue.toLocaleDateString("en-US", {
+            month: "long",
+            year: "numeric",
+            timeZone: "UTC",
+          }),
+        );
       } else {
-        const rentAmount = parseFloat(latestPaidRentBill.rent_amount || 0);
-        const advanceAmount = parseFloat(
-          latestPaidRentBill.advance_amount || 0,
-        );
-        let monthsCovered = 1;
-        if (rentAmount > 0 && advanceAmount > 0) {
-          monthsCovered = 1 + Math.floor(advanceAmount / rentAmount);
-        }
-
-        const utcNext = new Date(
-          Date.UTC(
-            latestPaidDue.getUTCFullYear(),
-            latestPaidDue.getUTCMonth(),
-            latestPaidDue.getUTCDate(),
-          ),
-        );
-        utcNext.setUTCMonth(utcNext.getUTCMonth() + monthsCovered);
-        chosenDueDate = utcNext;
+        setLastRentPeriod("N/A");
       }
+    } else if (
+      latestPaidRentBill &&
+      latestPaidDue &&
+      latestPaidDayStamp !== null
+    ) {
+      const rentAmount =
+        getRentCycleAmount(latestPaidRentBill) ||
+        Number(currentOccupancy?.rent_amount || 0) ||
+        Number(currentOccupancy?.property?.price || 0);
+
+      // Sum advance_amount across all rent-like bills sharing the same due date
+      // to correctly account for split move-in bills (e.g. separate Advance and House Rent bills)
+      const totalAdvanceAmountForLatestDue = filteredPaidRentBills
+        .filter((b: any) => toUtcDayStamp(b.due_date) === latestPaidDayStamp)
+        .reduce(
+          (sum: number, b: any) => sum + parseFloat(b.advance_amount || 0),
+          0,
+        );
+
+      let monthsCovered = 1;
+      if (rentAmount > 0 && totalAdvanceAmountForLatestDue > 0) {
+        monthsCovered =
+          1 + Math.floor(totalAdvanceAmountForLatestDue / rentAmount);
+      }
+
+      const utcNext = new Date(
+        Date.UTC(
+          latestPaidDue.getUTCFullYear(),
+          latestPaidDue.getUTCMonth(),
+          latestPaidDue.getUTCDate(),
+        ),
+      );
+      utcNext.setUTCMonth(utcNext.getUTCMonth() + monthsCovered);
+      chosenDueDate = utcNext;
 
       setLastRentPeriod(
         latestPaidDue.toLocaleDateString("en-US", {
@@ -2411,26 +2495,23 @@ export default function VisitorDashboard({ session, profile }: any) {
         }),
       );
     } else {
-      const now = new Date();
-      const todayUtcDayStamp = Date.UTC(
-        now.getUTCFullYear(),
-        now.getUTCMonth(),
-        now.getUTCDate(),
-      );
+      if (occupancyStartDate) {
+        const today = new Date();
+        const baseDateOnly = new Date(occupancyStartDate);
+        baseDateOnly.setHours(0, 0, 0, 0);
+        const todayDateOnly = new Date(today);
+        todayDateOnly.setHours(0, 0, 0, 0);
 
-      const upcomingPending =
-        relatedPendingBills.find((bill: any) => {
-          const dueDayStamp = toUtcDayStamp(bill.due_date);
-          return dueDayStamp !== null && dueDayStamp >= todayUtcDayStamp;
-        }) || relatedPendingBills[0];
-
-      if (upcomingPending) {
-        chosenDueDate = parseDueDate(upcomingPending.due_date);
-      } else if (currentOccupancy?.start_date) {
-        chosenDueDate = parseDueDate(currentOccupancy.start_date);
+        if (baseDateOnly <= todayDateOnly) {
+          const shifted = new Date(occupancyStartDate);
+          shifted.setMonth(shifted.getMonth() + 1);
+          chosenDueDate = shifted;
+        } else {
+          chosenDueDate = occupancyStartDate;
+        }
+      } else {
+        setLastRentPeriod("N/A");
       }
-
-      setLastRentPeriod("N/A");
     }
 
     if (chosenDueDate) {
@@ -2438,6 +2519,7 @@ export default function VisitorDashboard({ session, profile }: any) {
     } else {
       setNextPaymentDate("N/A");
     }
+    setIsCalculating(false);
   };
 
   // --- FAMILY MEMBERS FUNCTIONS ---
@@ -3282,17 +3364,44 @@ export default function VisitorDashboard({ session, profile }: any) {
       return;
     }
     try {
-      const { data: ended } = await supabase
+      const { data: ended, error: endedError } = await supabase
         .from("tenant_occupancies")
         .select(
           "id, property_id, landlord_id, property:properties(title, id, address, city)",
         )
         .eq("tenant_id", session.user.id)
         .eq("status", "ended");
-      const { data: reviews } = await supabase
+
+      if (endedError) {
+        console.warn("ended occupancies lookup warning:", endedError.message);
+        return;
+      }
+
+      let reviews: any[] = [];
+      const { data: reviewRows, error: reviewsError } = await supabase
         .from("reviews")
-        .select("occupancy_id")
-        .eq("user_id", session.user.id);
+        .select("occupancy_id, property_id")
+        .or(`user_id.eq.${session.user.id},tenant_id.eq.${session.user.id}`);
+
+      if (reviewsError) {
+        console.warn("reviews lookup warning:", reviewsError.message);
+        const { data: fallbackReviewRows, error: fallbackReviewsError } =
+          await supabase
+            .from("reviews")
+            .select("occupancy_id, property_id")
+            .eq("user_id", session.user.id);
+
+        if (fallbackReviewsError) {
+          console.warn(
+            "fallback reviews lookup warning:",
+            fallbackReviewsError.message,
+          );
+        }
+        reviews = fallbackReviewRows || [];
+      } else {
+        reviews = reviewRows || [];
+      }
+
       const { data: landlordRatings, error: landlordRatingsError } =
         await supabase
           .from("landlord_ratings")
@@ -3306,25 +3415,48 @@ export default function VisitorDashboard({ session, profile }: any) {
         );
       }
 
-      const reviewedIds =
-        reviews?.map((r: any) => String(r.occupancy_id)) || [];
-      const landlordRatedIds =
-        landlordRatings?.map((r: any) => String(r.occupancy_id)) || [];
-      const dismissedStrings = await getDismissedReviewIds();
+      const reviewedIds = new Set(
+        reviews
+          .map((r: any) => normalizeReviewIdentity(r.occupancy_id))
+          .filter(Boolean),
+      );
+      const reviewedPropertyIds = new Set(
+        reviews
+          .map((r: any) => normalizeReviewIdentity(r.property_id))
+          .filter(Boolean),
+      );
+      const landlordRatedIds = new Set(
+        (landlordRatings || [])
+          .map((r: any) => normalizeReviewIdentity(r.occupancy_id))
+          .filter(Boolean),
+      );
+      const dismissedStrings = new Set([
+        ...(await getDismissedReviewIds()),
+        ...Array.from(handledReviewIdsRef.current),
+      ]);
+      (ended || []).forEach((o: any) => {
+        const occupancyId = normalizeReviewIdentity(o.id);
+        const propertyId = normalizeReviewIdentity(o.property_id);
+        if (propertyId && dismissedStrings.has(occupancyId)) {
+          dismissedStrings.add(propertyId);
+        }
+      });
 
       if (reviewSkippedThisSession.current || reviewModalVisibleRef.current) {
         return;
       }
 
       const unreviewed = ended?.find((o: any) => {
-        const occupancyId = String(o.id);
-        const needsPropertyReview = !reviewedIds.includes(occupancyId);
-        const needsLandlordReview = !landlordRatedIds.includes(occupancyId);
+        const occupancyId = normalizeReviewIdentity(o.id);
+        const propertyId = normalizeReviewIdentity(o.property_id);
+        const needsPropertyReview =
+          !reviewedIds.has(occupancyId) &&
+          !(propertyId && reviewedPropertyIds.has(propertyId));
         const isDismissed =
-          dismissedStrings.includes(occupancyId) ||
-          dismissedStrings.includes(String(o.property_id));
+          dismissedStrings.has(occupancyId) ||
+          (propertyId ? dismissedStrings.has(propertyId) : false);
 
-        return (needsPropertyReview || needsLandlordReview) && !isDismissed;
+        return needsPropertyReview && !isDismissed;
       });
 
       if (unreviewed) {
@@ -3332,9 +3464,13 @@ export default function VisitorDashboard({ session, profile }: any) {
           return;
         }
 
-        const occupancyId = String(unreviewed.id);
-        const needsPropertyReview = !reviewedIds.includes(occupancyId);
-        const needsLandlordReview = !landlordRatedIds.includes(occupancyId);
+        const occupancyId = normalizeReviewIdentity(unreviewed.id);
+        const propertyId = normalizeReviewIdentity(unreviewed.property_id);
+        const needsPropertyReview =
+          !reviewedIds.has(occupancyId) &&
+          !(propertyId && reviewedPropertyIds.has(propertyId));
+        const needsLandlordReview =
+          needsPropertyReview && !landlordRatedIds.has(occupancyId);
 
         setReviewTarget({
           ...unreviewed,
@@ -3399,7 +3535,13 @@ export default function VisitorDashboard({ session, profile }: any) {
             created_at: new Date().toISOString(),
           });
 
-        if (propertyReviewError) throw propertyReviewError;
+        if (propertyReviewError) {
+          if (propertyReviewError.code === "23505") {
+            console.warn("Property review already exists for this stay.");
+          } else {
+            throw propertyReviewError;
+          }
+        }
       }
 
       if (
@@ -3417,18 +3559,33 @@ export default function VisitorDashboard({ session, profile }: any) {
             created_at: new Date().toISOString(),
           });
 
-        if (landlordReviewError) throw landlordReviewError;
+        if (landlordReviewError) {
+          if (landlordReviewError.code === "23505") {
+            console.warn("Landlord rating already exists for this stay.");
+          } else {
+            throw landlordReviewError;
+          }
+        }
 
         const tenantName =
           `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim();
-        await createNotification(
-          reviewTarget.landlord_id,
-          "landlord_rating_received",
-          `${tenantName || "A tenant"} rated you ${reviewRating}/5 stars.`,
-          { actor: session.user.id },
-        );
+        try {
+          await createNotification(
+            reviewTarget.landlord_id,
+            "landlord_rating_received",
+            `${tenantName || "A tenant"} rated you ${reviewRating}/5 stars.`,
+            { actor: session.user.id },
+          );
+        } catch (notificationError) {
+          console.warn(
+            "landlord rating notification warning:",
+            notificationError,
+          );
+        }
       }
 
+      reviewSkippedThisSession.current = true;
+      await rememberReviewHandled(reviewTarget, true);
       Alert.alert("Success", "Review submitted");
       updateReviewModalVisible(false);
       checkPendingReviews();
@@ -3444,7 +3601,9 @@ export default function VisitorDashboard({ session, profile }: any) {
     // Always mark as skipped for this session so it won't reappear on realtime updates
     reviewSkippedThisSession.current = true;
     const shouldDismissReview = dontShowAgainRef.current || dontShowAgain;
-    const targetId = reviewTarget?.id || reviewTarget?.property_id;
+    const currentReviewTarget = reviewTarget;
+
+    await rememberReviewHandled(currentReviewTarget, shouldDismissReview);
 
     updateReviewModalVisible(false);
     setReviewTarget(null);
@@ -3452,14 +3611,6 @@ export default function VisitorDashboard({ session, profile }: any) {
     setReviewRating(0);
     dontShowAgainRef.current = false;
     setDontShowAgain(false);
-
-    if (shouldDismissReview && targetId) {
-      try {
-        await addDismissedReviewId(targetId);
-      } catch (e) {
-        console.error("Failed to save dismissed review preference", e);
-      }
-    }
   };
 
   // --- RENDERS ---
@@ -3535,13 +3686,19 @@ export default function VisitorDashboard({ session, profile }: any) {
                 {(() => {
                   const status = String(item.status).toLowerCase();
                   if (status === "available") return "Available";
-                  
+
                   if (item.upcoming_available_date) {
                     const endDate = new Date(item.upcoming_available_date);
                     endDate.setHours(0, 0, 0, 0);
                     const today = new Date();
                     today.setHours(0, 0, 0, 0);
-                    const diffDays = Math.max(0, Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+                    const diffDays = Math.max(
+                      0,
+                      Math.ceil(
+                        (endDate.getTime() - today.getTime()) /
+                          (1000 * 60 * 60 * 24),
+                      ),
+                    );
 
                     if (diffDays > 0) {
                       const dayLabel = diffDays === 1 ? "day" : "days";
@@ -5460,7 +5617,7 @@ export default function VisitorDashboard({ session, profile }: any) {
                             },
                           ]}
                         >
-                          {nextPaymentDate}
+                          {isCalculating ? "Calculating..." : nextPaymentDate}
                         </Text>
                       </View>
                       <View
@@ -5616,16 +5773,45 @@ export default function VisitorDashboard({ session, profile }: any) {
                         // This accounts for advance payments covering extra months
                         const paidMonths = new Set<number>();
                         const currentYear = new Date().getFullYear();
+
+                        // Group by due date to sum advance amounts correctly for split bills
+                        // Use a stable UTC timestamp for grouping (toUtcDayStamp)
+                        const billsByDayStamp = new Map<number, any[]>();
                         paymentHistory.forEach((p) => {
-                          const d = new Date(p.due_date);
-                          if (d.getFullYear() !== currentYear) return;
-                          const billMonth = d.getMonth();
+                          const dayStamp = toUtcDayStamp(p.due_date);
+                          if (dayStamp === null) return;
+
+                          const d = new Date(dayStamp);
+                          if (d.getUTCFullYear() !== currentYear) return;
+
+                          if (!billsByDayStamp.has(dayStamp)) {
+                            billsByDayStamp.set(dayStamp, []);
+                          }
+                          billsByDayStamp.get(dayStamp)!.push(p);
+                        });
+
+                        billsByDayStamp.forEach((bills, dayStamp) => {
+                          const d = new Date(dayStamp);
+                          const billMonth = d.getUTCMonth();
                           paidMonths.add(billMonth);
-                          // If bill has advance_amount, mark additional month(s) as covered
-                          const rent = parseFloat(p.rent_amount || 0);
-                          const advance = parseFloat(p.advance_amount || 0);
-                          if (rent > 0 && advance > 0) {
-                            const extraMonths = Math.floor(advance / rent);
+
+                          const totalAdvance = bills.reduce(
+                            (sum, b) => sum + parseFloat(b.advance_amount || 0),
+                            0,
+                          );
+                          const rentAmount =
+                            bills.reduce(
+                              (max, b) =>
+                                Math.max(max, parseFloat(b.rent_amount || 0)),
+                              0,
+                            ) ||
+                            Number(occupancy?.rent_amount || 0) ||
+                            Number(occupancy?.property?.price || 0);
+
+                          if (rentAmount > 0 && totalAdvance > 0) {
+                            const extraMonths = Math.floor(
+                              totalAdvance / rentAmount,
+                            );
                             for (let m = 1; m <= extraMonths; m++) {
                               const coveredMonth = billMonth + m;
                               if (coveredMonth < 12)

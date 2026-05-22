@@ -87,8 +87,20 @@ export default function PaymentHistory() {
             .eq(field, session.user.id);
         };
 
+        const runRequestHistoryQuery = async (field: "landlord" | "tenant") => {
+          return await supabase
+            .from("payment_requests")
+            .select(
+              "*, properties(title), tenant_profile:profiles!payment_requests_tenant_fkey(first_name, last_name)",
+            )
+            .eq(field, session.user.id)
+            .in("status", ["paid", "recorded", "pending_confirmation"])
+            .order("paid_at", { ascending: false });
+        };
+
         let data: any[] | null = null;
         let error: any = null;
+        let requestRows: any[] = [];
 
         if (normalizedRole === "landlord") {
           const primary = await runHistoryQuery("landlord");
@@ -100,6 +112,9 @@ export default function PaymentHistory() {
             data = fallback.data;
             error = fallback.error;
           }
+
+          const requests = await runRequestHistoryQuery("landlord");
+          if (!requests.error) requestRows = requests.data || [];
         } else {
           const primary = await runHistoryQuery("tenant");
           data = primary.data;
@@ -110,13 +125,46 @@ export default function PaymentHistory() {
             data = fallback.data;
             error = fallback.error;
           }
+
+          const requests = await runRequestHistoryQuery("tenant");
+          if (!requests.error) requestRows = requests.data || [];
         }
 
         if (error) {
           console.log("Payment history load error:", error);
         }
 
-        setPayments(data || []);
+        const existingPaymentIds = new Set(
+          (data || []).map((payment) => String(payment.id)),
+        );
+        const requestFallbackPayments = requestRows
+          .filter(
+            (request) =>
+              !request.payment_id ||
+              !existingPaymentIds.has(String(request.payment_id)),
+          )
+          .map((request) => ({
+            ...request,
+            id: `request-${request.id}`,
+            source_request_id: request.id,
+            amount:
+              Number(request.amount_paid) ||
+              Number(request.total_amount) ||
+              (Number(request.rent_amount) || 0) +
+                (Number(request.security_deposit_amount) || 0) +
+                (Number(request.advance_amount) || 0) +
+                (Number(request.other_bills) || 0),
+            method: request.payment_method || request.method || "paymongo",
+            tenant: request.tenant_profile,
+          }));
+
+        const mergedPayments = [...(data || []), ...requestFallbackPayments].sort(
+          (a, b) =>
+            new Date(getPaymentDate(b) || 0).getTime() -
+            new Date(getPaymentDate(a) || 0).getTime(),
+        );
+
+        setPayments(mergedPayments);
       } finally {
         setLoading(false);
         setRefreshing(false);

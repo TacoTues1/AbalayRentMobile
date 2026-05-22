@@ -24,7 +24,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../../lib/theme";
 import GuestGuard from "../../components/auth/GuestGuard";
@@ -132,6 +132,7 @@ const AvatarImage = React.memo(({ uri, size, fallbackInitial }: { uri: string; s
 });
 
 export default function Messages() {
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const { isDark, colors } = useTheme();
   const skeletonColor = isDark ? "rgba(148, 163, 184, 0.22)" : "#e5e7eb";
@@ -3383,14 +3384,13 @@ export default function Messages() {
             presentationStyle="fullScreen"
             onRequestClose={closeConversationSettings}
           >
-            <SafeAreaView
+            <View
               style={[
                 styles.groupDetailsContainer,
                 {
                   backgroundColor: isDark ? colors.background : "#f3f4f6",
                 },
               ]}
-              edges={["top"]}
             >
               <View
                 style={[
@@ -3398,6 +3398,7 @@ export default function Messages() {
                   {
                     backgroundColor: isDark ? colors.surface : "white",
                     borderBottomColor: isDark ? colors.border : "#111",
+                    paddingTop: Math.max(insets.top, 14),
                   },
                 ]}
               >
@@ -3688,7 +3689,7 @@ export default function Messages() {
                   </View>
                 }
               />
-            </SafeAreaView>
+            </View>
           </Modal>
         ) : selectedConv.kind === "direct" ? (
           <Modal
@@ -3697,14 +3698,13 @@ export default function Messages() {
             presentationStyle="fullScreen"
             onRequestClose={closeConversationSettings}
           >
-            <SafeAreaView
+            <View
               style={[
                 styles.directDetailsContainer,
                 {
                   backgroundColor: isDark ? colors.background : "#f3f4f6",
                 },
               ]}
-              edges={["top"]}
             >
               <View
                 style={[
@@ -3712,6 +3712,7 @@ export default function Messages() {
                   {
                     backgroundColor: isDark ? colors.surface : "white",
                     borderBottomColor: isDark ? colors.border : "#111",
+                    paddingTop: Math.max(insets.top, 14),
                   },
                 ]}
               >
@@ -3797,7 +3798,7 @@ export default function Messages() {
                   No files shared yet.
                 </Text>
               </View>
-            </SafeAreaView>
+            </View>
           </Modal>
         ) : (
           <Modal

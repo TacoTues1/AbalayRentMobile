@@ -5,6 +5,7 @@ import DateTimePicker, {
 import { decode } from "base64-arraybuffer";
 import { ResizeMode, Video } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
+import * as ImageManipulator from "expo-image-manipulator";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -1377,16 +1378,56 @@ export default function MaintenanceScreen() {
     });
 
     if (!result.canceled) {
+      const processedAssets = await Promise.all(
+        result.assets.map(async (asset) => {
+          if (asset.type === "image") {
+            const uriLower = asset.uri.toLowerCase();
+            const fileNameLower = (asset.fileName || "").toLowerCase();
+            const isHeic =
+              uriLower.endsWith(".heic") ||
+              uriLower.endsWith(".heif") ||
+              fileNameLower.endsWith(".heic") ||
+              fileNameLower.endsWith(".heif");
+
+            if (isHeic) {
+              try {
+                const manipResult = await ImageManipulator.manipulateAsync(
+                  asset.uri,
+                  [],
+                  {
+                    compress: 0.8,
+                    format: ImageManipulator.SaveFormat.JPEG,
+                    base64: true,
+                  }
+                );
+                return {
+                  ...asset,
+                  uri: manipResult.uri,
+                  base64: manipResult.base64,
+                  mimeType: "image/jpeg",
+                  fileName: asset.fileName
+                    ? asset.fileName.replace(/\.(heic|heif)$/i, ".jpg")
+                    : "image.jpg",
+                } as ImagePicker.ImagePickerAsset;
+              } catch (err) {
+                console.log("HEIC conversion error:", err);
+              }
+            }
+          }
+          return asset;
+        })
+      );
+
       const totalAfterAdd =
         editExistingProofUrls.length +
         editNewProofFiles.length +
-        result.assets.length;
+        processedAssets.length;
       if (totalAfterAdd > 10) {
         Alert.alert("Limit Reached", "Max 10 files allowed");
         return;
       }
 
-      setEditNewProofFiles((prev) => [...prev, ...result.assets]);
+      setEditNewProofFiles((prev) => [...prev, ...processedAssets]);
     }
   };
 
@@ -1411,7 +1452,7 @@ export default function MaintenanceScreen() {
         asset.type === "video" || fileExt === "mp4" || fileExt === "mov";
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
       const filePath = `${session.user.id}/${fileName}`;
-      const contentType = isVideo ? `video/${fileExt}` : `image/${fileExt}`;
+      const contentType = isVideo ? `video/${fileExt}` : `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`;
 
       let fileBody: any;
       if (asset.base64) {
@@ -1527,11 +1568,51 @@ export default function MaintenanceScreen() {
     });
 
     if (!result.canceled) {
-      if (proofFiles.length + result.assets.length > 10) {
+      const processedAssets = await Promise.all(
+        result.assets.map(async (asset) => {
+          if (asset.type === "image") {
+            const uriLower = asset.uri.toLowerCase();
+            const fileNameLower = (asset.fileName || "").toLowerCase();
+            const isHeic =
+              uriLower.endsWith(".heic") ||
+              uriLower.endsWith(".heif") ||
+              fileNameLower.endsWith(".heic") ||
+              fileNameLower.endsWith(".heif");
+
+            if (isHeic) {
+              try {
+                const manipResult = await ImageManipulator.manipulateAsync(
+                  asset.uri,
+                  [],
+                  {
+                    compress: 0.8,
+                    format: ImageManipulator.SaveFormat.JPEG,
+                    base64: true,
+                  }
+                );
+                return {
+                  ...asset,
+                  uri: manipResult.uri,
+                  base64: manipResult.base64,
+                  mimeType: "image/jpeg",
+                  fileName: asset.fileName
+                    ? asset.fileName.replace(/\.(heic|heif)$/i, ".jpg")
+                    : "image.jpg",
+                } as ImagePicker.ImagePickerAsset;
+              } catch (err) {
+                console.log("HEIC conversion error:", err);
+              }
+            }
+          }
+          return asset;
+        })
+      );
+
+      if (proofFiles.length + processedAssets.length > 10) {
         Alert.alert("Limit Reached", "Max 10 files allowed");
         return;
       }
-      setProofFiles([...proofFiles, ...result.assets]);
+      setProofFiles([...proofFiles, ...processedAssets]);
     }
   };
 
@@ -1546,7 +1627,7 @@ export default function MaintenanceScreen() {
         asset.type === "video" || fileExt === "mp4" || fileExt === "mov";
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
       const filePath = `${session.user.id}/${fileName}`;
-      const contentType = isVideo ? `video/${fileExt}` : `image/${fileExt}`;
+      const contentType = isVideo ? `video/${fileExt}` : `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`;
 
       let fileBody: any;
       if (asset.base64) {
